@@ -252,8 +252,15 @@ F. 最终形态                 完整 Aine 编译器 100% Aine 实现，编译�
   1.2 fmt_tool（幂等 + 可重解析，fib/records/mapnest/strings/mapsum 全过；
       修复 stringify 丢 f-string 前缀）；
   1.4 pkg_tool（aine.toml 极简解析 + myapp 脚手架 + build 产物校验）。
-- [ ] B5-M33(后续):fstr AST 段错误根因(C 后端分析)、match 尾构造转译器层
-  修复、typeck/formatter 组件迁移(M6 分期)
+- [x] B5-M33(后续):fstr AST 段错误根因(C 后端分析)、match 尾构造转译器层
+  修复、typeck/formatter 组件迁移(M6 分期)——fstr AST/match 尾构造已完成;
+  迁移见下"全 Aine 迁移"。
+- [ ] **全 Aine 迁移(向全 Aine 转移)**:
+  - [x] Phase 1:fmt 命令改用 Aine 实现(examples/fmt_tool.aine,10 文件 diff=0)
+  - [ ] Phase 2:typeck 诊断分期迁移 Aine(前置:Index 节点携带 span)
+  - [ ] Phase 3:valueal(所有权/值流)迁移 Aine
+  - [ ] Phase 4:解释器自举(Aine 解释器解释 Aine)
+  - [ ] Phase 5:工具(LSP/Profiler/Debugger)接入 Aine 流水线
 - [ ] B5-M30：闭包捕获原生发射（env 结构体）
 - [x] **M6-STD-2：stdlib 扩容完成（MVP 8/11 模块）**——
   io（write/append/exists，C 内建 + 解释器双侧对称）、json（B2 升级入库）、
