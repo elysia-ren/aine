@@ -1,0 +1,15 @@
+# flowc 是独立 git 仓库
+flowc/
+
+# 生成物
+*.exe
+*.pdb
+*.c
+*.o
+
+# 临时输出
+*.txt
+*.log
+
+# 会话临时目录
+临时-dsh-session-*/
