@@ -142,21 +142,21 @@ MIR → Optimization → Codegen（LLVM IR 生成）→ Native Object → Link�
 | 模块 | 职责 | 行数 |
 |---|---|---|
 | transpiler.aine（根） | AST 类型定义 + 27 用例验证序列 | ~380 |
-| fllex | 词法分析 | ~150 |
-| flparse | 递归下降解析 + 模块打平（flatten_stmts）+ 闭包脱糖（desugar_closures）+ 值语义（value_semantics）+ 值流子集（valueflow_lite） | ~1500 |
-| flstr | 字符串工具与源码回显（stringify 系） | ~310 |
-| flcollect | 顶层信息收集器（类型/变体/函数/变量表） | ~260 |
-| fltype | 类型查询（c_type/base_type/var_info 等 45 函数） | ~1150 |
-| flee | Aine→C 发射（c_expr/c_stmt/c_program） | ~1750 |
+| allex | 词法分析 | ~150 |
+| alparse | 递归下降解析 + 模块打平（flatten_stmts）+ 闭包脱糖（desugar_closures）+ 值语义（value_semantics）+ 值流子集（valueal_lite） | ~1500 |
+| alstr | 字符串工具与源码回显（stringify 系） | ~310 |
+| alcollect | 顶层信息收集器（类型/变体/函数/变量表） | ~260 |
+| altype | 类型查询（c_type/base_type/var_info 等 45 函数） | ~1150 |
+| alee | Aine→C 发射（c_expr/c_stmt/c_program） | ~1750 |
 
 ### 6.2 编译管线（c_program 薄壳）
 
 ```text
-read 源 → tokenize(fllex) → parse_program(flparse)
+read 源 → tokenize(allex) → parse_program(alparse)
   → flatten_stmts      （mod name; → 读入 name.aine，防环；搜索路径 同目录→stdlib/）
   → desugar_closures   （独立闭包→顶层函数提升 + 捕获分析 + 隐藏参数 + 调用点改写）
   → value_semantics    （var-from-var：源未再用→MOVE+置零；否则→CLONE 深拷贝）
-  → valueflow_lite     （字符串累加器判定 → fl_strcat_own 原地追加，消除 malloc+拷贝）
+  → valueal_lite     （字符串累加器判定 → al_strcat_own 原地追加，消除 malloc+拷贝）
   → c_program_flat     （11 张类型表重算 → 逐语句发射 C）
 ```
 
@@ -164,10 +164,10 @@ read 源 → tokenize(fllex) → parse_program(flparse)
 
 | 内建 | 解释器 | C 发射 |
 |---|---|---|
-| fl_vec_clone | Arc 共享（持久化） | 真深拷贝 malloc+memcpy |
-| fl_zero_vec / fl_zero_map | 空 Vec/Map | 置空结构 |
-| fl_map_clone | entries 克隆 | 键值双深拷贝 |
-| fl_strdup_lit / fl_strcat_own | 语义等价拼接 | strdup / realloc 原地追加 |
+| al_vec_clone | Arc 共享（持久化） | 真深拷贝 malloc+memcpy |
+| al_zero_vec / al_zero_map | 空 Vec/Map | 置空结构 |
+| al_map_clone | entries 克隆 | 键值双深拷贝 |
+| al_strdup_lit / al_strcat_own | 语义等价拼接 | strdup / realloc 原地追加 |
 
 ### 6.4 已知限制（均登记，均有等价 workaround）
 

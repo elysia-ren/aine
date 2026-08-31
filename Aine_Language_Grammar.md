@@ -109,7 +109,7 @@ Attribute ::= '@' Path [ '(' AttributeArg { ',' AttributeArg } ')' ]    (* G2.0-
 > 目标：**保留 Rust 的熟悉感，消除 Rust 的语言指纹堆叠**；常见代码表面相似度
 > 预期 85% → **70～75%**（含 trait/impl 改名则约 68～75%）。独立性由语义层
 > 证明，不靠"长得不像 Rust"。以下 5 项为定稿变更，按阶段迁移（每项均需
-> Rust 侧与 flparse 自宿主双侧同步 + stdlib/examples/tests 全库迁移）：
+> Rust 侧与 alparse 自宿主双侧同步 + stdlib/examples/tests 全库迁移）：
 >
 > | # | 变更 | 旧 | 新 | 推荐度 |
 > |---|------|----|----|--------|
@@ -213,7 +213,7 @@ LetStmt   ::= ( 'let' | 'var' ) Pattern [ ':' Type ] [ '=' Expr ]   (* let=不�
 ReturnStmt ::= 'return' [ Expr ]          (* 当前实现：仅同行取 Expr，换行视为空 return；
    改进待办（用户导向）：return 后下一行若以表达式起始 token 且非语句关键字
    （let/if/match/for/while/return），应续读为返回值；空行/块结束才视为空 return。
-   需 Rust parser 与 flparse 双侧同步实现，防止既有早退 return 语义漂移 *)
+   需 Rust parser 与 alparse 双侧同步实现，防止既有早退 return 语义漂移 *)
 IfStmt    ::= 'if' Expr Block [ 'else' ( IfStmt | Block ) ]
 WhileStmt ::= 'while' Expr Block
 ForStmt   ::= 'for' Pattern 'in' Expr Block

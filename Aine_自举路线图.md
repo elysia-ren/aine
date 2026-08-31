@@ -112,39 +112,39 @@ F. 最终形态                 完整 Aine 编译器 100% Aine 实现，编译�
   字符串迭代/字符比较/let 推断/strcat 标记；用例 6 自转译 first_ident
 - [x] **B5-M6：完整闭环验证**：
   Aine→C→zig cc 编译→运行输出 55（与解释器一致）；修复 match 块值语义
-- [x] **B5-M7：字符串拼接（fl_strcat）+ 函数返回类型表**：
+- [x] **B5-M7：字符串拼接（al_strcat）+ 函数返回类型表**：
   hello Aine 闭环验证；print 格式 fn 感知（%d/%s）
-- [x] **B5-M8：Vec → C（fl_vec）+ 方法调用**：
-  fl_vec 类型/EVec 初始化/len()→.len；闭环输出 3
+- [x] **B5-M8：Vec → C（al_vec）+ 方法调用**：
+  al_vec 类型/EVec 初始化/len()→.len；闭环输出 3
 - [x] **B5-M9：数组迭代（for x in Vec）**：
   变量类型表贯穿；sum 闭环输出 6；用例 10
 - [x] **B5-M10：Vec.push + 函数返回类型推断**：
-  fl_push/空数组/闭环输出 2；用例 11
+  al_push/空数组/闭环输出 2；用例 11
 - [x] **B5-M11：if 表达式 + 字符串切片**：
-  C 三元 + fl_substr；闭环输出 1/AB；用例 12
+  C 三元 + al_substr；闭环输出 1/AB；用例 12
 - [x] **B5-M12：转译器重建 + mini lexer 转译**：
-  read 缓存事故后重建（ASCII）；struct/Vec<Token>/fl_push 结构完整
+  read 缓存事故后重建（ASCII）；struct/Vec<Token>/al_push 结构完整
 - [x] **B5-M13：String 深度语义**：
   strlen/strcmp/tail-return/bool→%d；闭环输出 5/1；用例 6-7
 - [x] **B5-M14：转译 lexer 核心函数**：
   read_op 闭环输出 ==；if 表达式/切片/strcmp 全支持；用例 8
 - [x] **B5-M15：转译完整 tokenize**：
-  fl_push sizeof/未知类型 strcmp；用例 9；read_op 闭环输出 ==
+  al_push sizeof/未知类型 strcmp；用例 9；read_op 闭环输出 ==
 - [x] **B5-M16：enum+match 完整闭环**：
   变体构造/match-return/tag 逗号修复；12.56 输出；用例 10
-- [x] **B5-M17：内置 Option/Result 类型映射（fl_opt）**：
-  fl_opt 类型化载荷联合体 + 分型构造宏 + match 绑定类型化提取；
+- [x] **B5-M17：内置 Option/Result 类型映射（al_opt）**：
+  al_opt 类型化载荷联合体 + 分型构造宏 + match 绑定类型化提取；
   SBlock/c_print_stmt 补全；describe/got:hi + Option<i32>/five 闭环；
   用例 11-12；验证：transpiler 12 用例全过 + aine 159+3 全绿
 - [x] **B5-M18：transpiler 自转译闭环（fixpoint）**：
   self_host.exe（Aine 生成 C 编译）13 用例全过 + 自生成输出与 aine 逐行全同
   （5606 行 diff=0）。修复链：char 比较代码生成反逻辑、push 字面量取址
   堆损坏、循环变量/EInt-EFloat/EInt-EIdent 同名冲突（扁平表 first-match）、
-  SStruct 缺 return、fl_fnum %g 丢小数、var_info 的 EField 迭代器与
+  SStruct 缺 return、al_fnum %g 丢小数、var_info 的 EField 迭代器与
   EIndex-EField 类型推断、expr_is_string 单索引、char vs String 变量比较
   （String 侧取 [0]）。
 - [x] **B5-M19：通用编译验证（端到端自举闭环）**：
-  f-string 函数调用插值（按 fn_return 返回类型转 fl_num/fl_fnum）；
+  f-string 函数调用插值（按 fn_return 返回类型转 al_num/al_fnum）；
   case14/15 编译真实 Aine 程序（fib.aine / hello.aine：递归、for 区间、
   中文串、if-else、尾返回、f-string 变量+调用插值）→ zig cc → 原生运行
   输出与 aine run 逐行一致（diff 0）；fixpoint 保持 diff 0。
@@ -161,21 +161,21 @@ F. 最终形态                 完整 Aine 编译器 100% Aine 实现，编译�
 - [x] **B5-M22：方法链 iter/map/sum（闭包内联）**：
   c_expr 用 GNU 语句表达式实现 .map(closure)（构建 Vec）与折叠
   X.iter().map(f).sum()（单循环求和）；闭包参数临时入变量表推断体类型；
-  SLet 标识符初始化补用户类型（struct T）；print 的 f64 用 %s+fl_fnum
+  SLet 标识符初始化补用户类型（struct T）；print 的 f64 用 %s+al_fnum
   （4.0 而非 4）；case18 mapsum + case19 todo.aine（方法链+Result+? 传播）
   端到端 diff 0；fixpoint diff 0。剩余缺口：已全部闭环（闭包独立值、
   import/module 均已实现，G2.0-③ 后为 module 形态）。
 - [x] **B5-M23：Map 类型 C 后端 + json.aine 端到端编译**：
-  fl_map（keys/vals）+ c_type 映射 + set/get/contains/keys/values/len/new
+  al_map（keys/vals）+ c_type 映射 + set/get/contains/keys/values/len/new
   语句表达式代码生成；修复遮蔽参数自引用（临时变量+函数体嵌套块）、
   无载荷变体作值（构造器调用）、EMatch 三元逆序嵌套 + Some 绑定、bool
-  插值 fl_bool；case20 json.aine（Map<String,Json> + 枚举 Map 载荷）端到端
+  插值 al_bool；case20 json.aine（Map<String,Json> + 枚举 Map 载荷）端到端
   编译 diff 0（解析/序列化/往返 OK）；fixpoint diff 0。
   剩余缺口：char→String 实参转换已落地（B5-M24）；闭包独立值与
   import/module 已闭环；捕获闭包调用点补传已闭环（A2）。
 - [x] **B5-M24：char→String 实参自动转换（函数形参类型表）**：
   collect_fn_ptypes/fn_param_ty + fptypes 穿表（80+ 调用点）；c_expr ECall
-  对 String 形参的 char 实参生成 fl_char_to_str（is_digit(src[i]) 直接可用）；
+  对 String 形参的 char 实参生成 al_char_to_str（is_digit(src[i]) 直接可用）；
   json.aine 的 is_digit 恢复 String 仍端到端 diff 0；case21 char-arg；
   fixpoint diff 0。剩余缺口：闭包独立值、import/module、Map 嵌套类型。
 - [x] **B5-M25：嵌套泛型类型（Map<String, Vec<T>>）+ case13 稳定性定论**：
@@ -191,12 +191,12 @@ F. 最终形态                 完整 Aine 编译器 100% Aine 实现，编译�
   Aine 转译器 SMod/SImport 解析 + flatten_stmts 打平 + c_program 薄壳重算
   类型表）；`import`/`use` 为声明标记（引用已有名字或占位）；case26
   modtest（modtest_main + modtest_util）解释器/原生 diff=0；狗粮拆分
-  fltype.aine（first/second_type_arg、method_ret、payload_member 四工具），
+  altype.aine（first/second_type_arg、method_ret、payload_member 四工具），
   Rust 加载与 Aine 自转译双路径验证。工程期决策：MVP 后按 §71.2 再演进
   命名空间。剩余缺口：f-string 方法链插值、闭包独立值。
 - [x] **B5-M26.1：transpiler.aine 上帝文件拆分完成（六模块）**：
-  根文件 4649→382 行（类型 + 26 用例 main）；fllex/flparse/flstr/flcollect/
-  fltype/flee 各司其职；修复跨模块前向引用（resolve hoist/bodies 分离）、
+  根文件 4649→382 行（类型 + 26 用例 main）；allex/alparse/alstr/alcollect/
+  altype/alee 各司其职；修复跨模块前向引用（resolve hoist/bodies 分离）、
   跨文件 span 碰撞（加载器重构为文本级内联合并源）、read_file 标记误判、
   String.len() 表推断缺口；26 用例 + fixpoint 9270 行全同 + 全量回归通过。
   上帝文件问题终结——后续新增功能一律进模块文件。
@@ -220,12 +220,12 @@ F. 最终形态                 完整 Aine 编译器 100% Aine 实现，编译�
 - [x] **B5-M28.1：发射层修复 + 值流子集激活**：
   pat_bind_lines 迭代边界改按绑定路径层数（根因修复）；var_info
   idxs[nl2-1] → 路径末段；vf 模式扁平化 + 构造 push 临时变量化 +
-  fl_strcat_own/fl_strdup_lit 双实现（Aine 语义 + C 内建）；27 用例 +
+  al_strcat_own/al_strdup_lit 双实现（Aine 语义 + C 内建）；27 用例 +
   fixpoint 10156 行全同（值流子集激活：14 处原地追加）。永久资产：
   解释器 fn 栈跟踪 + 越界 idx/len/内容诊断。
   遗留（有精确线索）：fstr AST 自编译表对齐、EIdent 推断臂 names/types
   失配、闭包捕获原生发射。
-- [x] **B5-M28.2：架构级发现**——C 后端 fl_vec 浅拷贝+realloc 值语义
+- [x] **B5-M28.2：架构级发现**——C 后端 al_vec 浅拷贝+realloc 值语义
   不健全（自宿主执行 fstr AST/值流子集段错误；解释器因 push 重绑定免疫）。
   立项 B5-M29：深拷贝安全基线 + move/末用消除（真正的值流工程），完成后
   解锁两个 WIP（fstr AST、值流子集 v0.1，代码均已存档）。
@@ -259,7 +259,7 @@ F. 最终形态                 完整 Aine 编译器 100% Aine 实现，编译�
   io（write/append/exists，C 内建 + 解释器双侧对称）、json（B2 升级入库）、
   collections（sort_ints/sum_ints/contains_int）、time（now_secs/elapsed/fmt_duration）、
   path（join/dir/base/ext）。全部端到端验证（iotest/coltest2/timetest diff=0）。
-  连带修复：var_info EBin 比较运算→bool、f-string bool 插值（fl_bool）、
+  连带修复：var_info EBin 比较运算→bool、f-string bool 插值（al_bool）、
   内建函数重名跳过清单机制。SQLite/HTTP 按原计划评估（MVP 可后置）。
 - [ ] M6-STD-3：SQLite/HTTP（MVP 后置候选；需 C 内建扩展）
 - [ ] M6-FMT-1：fmt_tool.aine——Aine 原生格式化工具（幂等 + 可重解析）

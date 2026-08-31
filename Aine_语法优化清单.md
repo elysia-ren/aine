@@ -54,7 +54,7 @@
 | 45 | stringify 丢 f-string 前缀 | 实现 | EStr 臂保留 f"..." 原文（幂等修复） |
 | 46 | 无 flowpkg | 实现 | pkg_tool：toml 解析 + build（M6 最小版） |
 | 47 | var_info 比较表达式类型丢失 | 实现 | EBin ==/!=/</>/<=/>= → bool |
-| 48 | f-string bool 插值输出 1/0 | 实现 | fl_bool 包装（bool 返回类型函数） |
+| 48 | f-string bool 插值输出 1/0 | 实现 | al_bool 包装（bool 返回类型函数） |
 
 ## 二、评估后**不需要改**的（保持简洁）
 
