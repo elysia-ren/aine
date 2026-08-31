@@ -398,3 +398,104 @@ $ aine test examples/testdemo.aine
 ---
 
 > 全书完。练习:把第 14 章的计数器扩展为记账本(参见 examples/account_book.aine)。
+
+---
+
+# 第二部分(第 16-22 章)
+
+## 第 16 章 高级主题:视图、移动与零拷贝
+
+Aine 的视图(零拷贝借用)由编译器自动决策:
+
+```aine
+struct User {
+    name: String
+}
+
+fn get_label(user: User) -> String {
+    user.name        // 投影视图
+}
+
+fn main() {
+    let u = User { name: "aina" }
+    let label = get_label(u)   // 视图 → 需要物化时自动拷贝
+    print(label)
+}
+```
+
+`aine vf` 展示每个决策:视图成功(Borrow)、物化(Materialized)与原因。
+
+**move 语义**:`let w = v`(v 不再使用)→ 零拷贝转移。
+
+## 第 17 章 发布与打包
+
+```text
+$ bash tools/package.sh single      # dist/aine-0.1.0-single/aine.exe
+$ bash tools/package.sh portable    # exe + examples + stdlib + 文档
+```
+
+包配置 `aine.toml`:
+
+```toml
+[package]
+name = "myapp"
+version = "0.1.0"
+entry = "src/main.aine"
+```
+
+## 第 18 章 数据库(db 模块)
+
+标准库 `db` 模块(文件 JSONL 存储,解释器内建):
+
+```aine
+struct Record {
+    id: i32
+    desc: String
+    amount: f64
+    time: i32
+}
+
+fn main() -> Result<(), String> {
+    db.init("account.db")?
+    db.insert("records", Record { id: 1 desc: "a" amount: 1.5 time: 100 })?
+    let rows = db.query("SELECT * FROM records ORDER BY time DESC")?
+    for r in rows {
+        print(f"id={r.get(\"id\")} desc={r.get(\"desc\")}")
+    }
+    db.delete("records", 1)?
+    return Ok(())
+}
+```
+
+- `db.init(path)`:打开/创建数据库文件
+- `db.insert(table, record)`:追加一行(结构体序列化 JSON)
+- `db.query(sql)`:SQL 子集(`SELECT * FROM t [ORDER BY col [DESC]]`)→ 行 Map
+- `db.delete(table, id)`:按 id 删除
+
+## 第 19 章 HTTP 与网络(预告)
+
+HTTP 模块经 C 内建扩展(Winsock)提供 `http.get(url)`,与 SQLite 同属
+标准库后置项;应用形态:UI 事件 → `go{}` → HTTP → `ui{}` → 状态更新。
+
+## 第 20 章 编译器内部
+
+- 流水线:lexer → parser → resolve → typeck → valueal →(解释执行 | C 转译)
+- 自举:编译器六模块用 Aine 自身编写(`allex/alparse/alstr/alcollect/altype/alee`),
+  自宿主 fixpoint 验证(host 输出 = self 输出逐行一致)
+- C 后端:值语义(move/clone)、值流子集(字符串累加器原地追加)
+
+## 第 21 章 规范速览
+
+- 语法:见《Aine_Language_Grammar.md》
+- 类型:见《Aine_Type_System.md》
+- 并发:见《Aine_Concurrency_Guide.md》
+- UI:见《Aine_UI_Guide.md》
+
+## 第 22 章 下一步与生态
+
+- SQLite/HTTP 模块(C 内建扩展)
+- 真实并发调度与窗口 UI 后端(独立 UI 运行时)
+- Linux/macOS 桌面平台与移动端桥
+- Registry 包生态
+
+> 全书完。
