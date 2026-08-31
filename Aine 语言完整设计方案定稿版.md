@@ -1,9 +1,9 @@
-# Flow 语言完整设计方案 V5.8
+# Aine 语言完整设计方案 V5.8
 ## 实现前核心定稿版
 
 > **版本性质：产品方向、用户体验原则、核心语言模型、所有权/借用策略、并发与 UI 边界、编译器总体架构正式定稿。**
 >
-> V5.8 不再继续增加核心语言功能，而是对 V5.7 进行最后一轮语义收口。重点解决决定 Flow 能否真正实现的关键问题：
+> V5.8 不再继续增加核心语言功能，而是对 V5.7 进行最后一轮语义收口。重点解决决定 Aine 能否真正实现的关键问题：
 >
 > - 跨函数、跨模块的所有权与值流分析；
 > - Semantic Summary 的可组合性与精度控制；
@@ -13,7 +13,7 @@
 > - `go{}` 与 UI State 的安全边界；
 > - `ui {}` 的 Message/Domain Operation 语义；
 > - `Send` / `Sync` 在任务边界中的编译器约束；
-> - Value Flow Graph / VIR；
+> - Value Aine Graph / VIR；
 > - 确定性诊断与优化解释；
 > - AI 完全退出语言核心、编译器和默认工具链。
 >
@@ -25,7 +25,7 @@
 
 # 一、语言定位
 
-> **Flow 是面向个人开发者和小团队的原生全栈应用语言：一套代码完成 UI、业务逻辑和数据访问，并编译为各平台原生应用。**
+> **Aine 是面向个人开发者和小团队的原生全栈应用语言：一套代码完成 UI、业务逻辑和数据访问，并编译为各平台原生应用。**
 
 核心目标：
 
@@ -57,9 +57,9 @@
 
 ---
 
-# 二、Flow 的核心设计命题
+# 二、Aine 的核心设计命题
 
-Flow 不试图证明：
+Aine 不试图证明：
 
 > “Rust 的复杂语法可以简单化。”
 
@@ -102,7 +102,7 @@ Flow 不试图证明：
 
 ## 3.2 安全默认
 
-Flow 默认提供：
+Aine 默认提供：
 
 - 无裸空值；
 - 边界检查；
@@ -121,7 +121,7 @@ Flow 默认提供：
 
 > **复杂性优先由编译器承担，而不是运行时承担，也不应转嫁给普通开发者。**
 
-因此 Flow 不以：
+因此 Aine 不以：
 
 - tracing GC；
 - 隐式 ARC；
@@ -135,7 +135,7 @@ Flow 默认提供：
 
 ## 3.4 确定性优先
 
-Flow 的核心工具链必须是确定性的。
+Aine 的核心工具链必须是确定性的。
 
 相同：
 
@@ -321,7 +321,7 @@ Compiler View
 
 # 八、Owned 语义与优化必须完全分离
 
-Flow 编译器分成两个逻辑层：
+Aine 编译器分成两个逻辑层：
 
 ```text
 Source
@@ -498,11 +498,11 @@ borrow checker
 
 ---
 
-# 十二、Value Flow Graph
+# 十二、Value Aine Graph
 
 V5.8 正式加入：
 
-> **Value Flow Graph（VFG）**
+> **Value Aine Graph（VFG）**
 
 VFG 是所有权、借用、逃逸、闭包、任务和 UI 传输分析的统一中间抽象。
 
@@ -545,11 +545,11 @@ State.records
 
 ---
 
-# 十三、VIR：Value Flow IR
+# 十三、VIR：Value Aine IR
 
 VFG 的编译器实现载体定义为：
 
-> **VIR（Value Flow Intermediate Representation）**
+> **VIR（Value Aine Intermediate Representation）**
 
 架构：
 
@@ -605,7 +605,7 @@ StateWrite
 
 # 十五、跨函数/跨模块语义摘要
 
-Flow 正式采用：
+Aine 正式采用：
 
 > **Function Semantic Summary（函数语义摘要）**
 
@@ -817,7 +817,7 @@ Complex summary
 每个已编译模块产生：
 
 ```text
-.flowi
+.ainei
 semantic summary
 debug/source mapping
 ```
@@ -840,7 +840,7 @@ debug/source mapping
 
 # 二十一、公开 API 与内部摘要分离
 
-`.flowi` 面向：
+`.ainei` 面向：
 
 - 公共符号；
 - 类型；
@@ -952,7 +952,7 @@ fn choose(a: User, b: User) -> String {
 
 编译器：
 
-- 进行 Value Flow 分析；
+- 进行 Value Aine 分析；
 - 能借用则优化；
 - 不能安全证明则 Materialize；
 - 成本过高则建议高级 API。
@@ -1505,7 +1505,7 @@ UI Operation
 State Update
 ```
 
-这是 Flow 的一级核心场景。
+这是 Aine 的一级核心场景。
 
 ---
 
@@ -1643,7 +1643,7 @@ unsafe
 - package size；
 - license。
 
-Python 不属于 Flow 默认运行时。
+Python 不属于 Aine 默认运行时。
 
 ---
 
@@ -1721,7 +1721,7 @@ Skia
 Canonical Source 是唯一真相：
 
 ```text
-.flow
+.aine
 ```
 
 Language Veil 是：
@@ -2102,9 +2102,9 @@ GUI 与 CLI 必须共享同一发布语义。
 
 V5.8 正式规定：
 
-> **Flow 编译器、语言服务器、构建系统、运行时、类型系统、Ownership Checker、Codegen 均不得依赖 AI。**
+> **Aine 编译器、语言服务器、构建系统、运行时、类型系统、Ownership Checker、Codegen 均不得依赖 AI。**
 
-Flow 默认不内置：
+Aine 默认不内置：
 
 - 模型权重；
 - LLM runtime；
@@ -2307,7 +2307,7 @@ State Read
 
 ---
 
-## Phase 1A：Value Flow Core
+## Phase 1A：Value Aine Core
 
 实现：
 
@@ -2327,9 +2327,9 @@ State Read
 
 实现：
 
-- Value Flow IR；
+- Value Aine IR；
 - Value Provenance；
-- Function-local Flow Graph；
+- Function-local Aine Graph；
 - Basic Dataflow；
 - Task/UI boundary nodes。
 
@@ -2483,9 +2483,9 @@ A → B → C → Field
 不同模块：
 
 ```text
-A.flow
-B.flow
-C.flow
+A.aine
+B.aine
+C.aine
 ```
 
 不得因模块边界自动导致所有大型值 Materialize。
@@ -2689,7 +2689,7 @@ Incremental Rebuild Time
 
 > **第二：Owned 是稳定的用户语义，Borrow/View 是编译器可以选择的实现优化。**
 
-> **第三：跨函数、跨模块、任务和 UI 的数据流统一由 Value Flow Graph / VIR 分析。**
+> **第三：跨函数、跨模块、任务和 UI 的数据流统一由 Value Aine Graph / VIR 分析。**
 
 > **第四：后台任务不得持有 UI State 普通借用；`ui {}` 是携带 Owned/Send 数据的 UI Domain Operation。**
 
@@ -2699,7 +2699,7 @@ Incremental Rebuild Time
 
 # 七十八、V5.8 状态声明
 
-Flow V5.8 定义为：
+Aine V5.8 定义为：
 
 > **实现前核心定稿版。**
 
@@ -2716,7 +2716,7 @@ Flow V5.8 定义为：
 - 生命周期不进入普通语法；
 - Function Semantic Summary；
 - Summary Composition；
-- Value Flow Graph；
+- Value Aine Graph；
 - VIR；
 - 跨函数/跨模块分析预算；
 - `Future/Task/go/go!`；
@@ -2737,7 +2737,7 @@ Flow V5.8 定义为：
 
 后续工作的判断标准从：
 
-> “Flow 还能不能更强？”
+> “Aine 还能不能更强？”
 
 改为：
 
@@ -2745,28 +2745,28 @@ Flow V5.8 定义为：
 
 ---
 
-# 七十九、Flow 的最终技术假设
+# 七十九、Aine 的最终技术假设
 
-Flow 最终要验证的不是：
+Aine 最终要验证的不是：
 
 > “能不能设计出一门看起来比 Rust 简单的语言。”
 
 而是：
 
-> ### **安全的拥有值语义能否成为普通开发者稳定的心智模型，而编译器通过 Value Flow、Semantic Summary、Borrow/View、Escape Analysis 和确定性优化，在不依赖 GC/ARC/AI 的情况下，将其中大量操作实现为零拷贝、零额外分配或低成本原生代码。**
+> ### **安全的拥有值语义能否成为普通开发者稳定的心智模型，而编译器通过 Value Aine、Semantic Summary、Borrow/View、Escape Analysis 和确定性优化，在不依赖 GC/ARC/AI 的情况下，将其中大量操作实现为零拷贝、零额外分配或低成本原生代码。**
 
 如果这一假设成立：
 
-> **Flow 就不是“简单版 Rust”，而是一种不同的语言设计路线。**
+> **Aine 就不是“简单版 Rust”，而是一种不同的语言设计路线。**
 
 如果这一假设经过原型验证不成立：
 
-> Flow 也应明确记录失败原因，而不是通过越来越复杂的隐式机制掩盖问题。
+> Aine 也应明确记录失败原因，而不是通过越来越复杂的隐式机制掩盖问题。
 
 因此 V5.8 的下一步不是继续添加语法，而是：
 
 ```text
-Value Flow Core
+Value Aine Core
         ↓
 VIR
         ↓
@@ -2781,4 +2781,4 @@ Task / UI Domain
 真实应用 Benchmark
 ```
 
-**至此，Flow 的设计阶段基本收口，正式进入“编译器能否证明这套设计成立”的工程验证阶段。**
+**至此，Aine 的设计阶段基本收口，正式进入“编译器能否证明这套设计成立”的工程验证阶段。**

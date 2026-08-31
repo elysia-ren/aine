@@ -1,8 +1,8 @@
-# Flow Compiler Internals
+# Aine Compiler Internals
 
 > **版本**：V0.1（初版）
 >
-> **状态**：本版收录《Flow 设计决策登记簿》定稿版中属于编译器内部的决策（D1/D2/D6/D7/D10），作为实现 flowc 的第一份内部规范。
+> **状态**：本版收录《Aine 设计决策登记簿》定稿版中属于编译器内部的决策（D1/D2/D6/D7/D10），作为实现 aine 的第一份内部规范。
 >
 > 面向：编译器贡献者、高级开发者、编译器研究人员（交付物 20）。
 >
@@ -80,7 +80,7 @@
 | Material | 64 KB - 1 MB | 非阻塞性能提示（默认开，可配置关闭） | 提示引用 §58 模板（F2104 风格），含原因与可选方案 |
 | Large | > 1 MB | 强制提示 + IDE 仪表盘计数 | 不得悄悄产生高成本复制（V5.8 §10） |
 
-> 阈值按"单次物化对象大小"计，全局可配置（flowc 配置）。
+> 阈值按"单次物化对象大小"计，全局可配置（aine 配置）。
 
 ### 3.3 物化诊断数据
 
@@ -112,7 +112,7 @@
 
 ### 5.2 配套策略
 
-1. **LLVM 版本锁定**：跟随 LLVM 长期支持节奏（18 个月升级窗口），flowc 发布时锁定并分发匹配工具链（签名、离线安装）；
+1. **LLVM 版本锁定**：跟随 LLVM 长期支持节奏（18 个月升级窗口），aine 发布时锁定并分发匹配工具链（签名、离线安装）；
 2. **ABI 承诺**：1.0 前不承诺 ABI 稳定（同一版本内二进制兼容；跨版本需重编译）；
 3. 移动端经 LLVM 对应 target 输出（UI 后端另见 D11 / UI Guide §6）。
 
@@ -132,28 +132,28 @@ MIR → Optimization → Codegen（LLVM IR 生成）→ Native Object → Link�
 | §4 | D4（引用） | 🟢 已确认 |
 | §5 | D10 | 🟢 已确认 |
 
-## §6 自举编译器架构（flowc 自举线，B5 系列 · 实况记录）
+## §6 自举编译器架构（aine 自举线，B5 系列 · 实况记录）
 
-> Rust flowc 为参考实现与开发宿主；以下为 **Flow 语言自举编译器** 的实际结构
-> （全部由 Flow 编写，经 fixpoint 闭环验证：自宿主编译自身，输出与宿主逐行全同）。
+> Rust aine 为参考实现与开发宿主；以下为 **Aine 语言自举编译器** 的实际结构
+> （全部由 Aine 编写，经 fixpoint 闭环验证：自宿主编译自身，输出与宿主逐行全同）。
 
 ### 6.1 模块布局（六模块 + 根文件）
 
 | 模块 | 职责 | 行数 |
 |---|---|---|
-| transpiler.flow（根） | AST 类型定义 + 27 用例验证序列 | ~380 |
+| transpiler.aine（根） | AST 类型定义 + 27 用例验证序列 | ~380 |
 | fllex | 词法分析 | ~150 |
 | flparse | 递归下降解析 + 模块打平（flatten_stmts）+ 闭包脱糖（desugar_closures）+ 值语义（value_semantics）+ 值流子集（valueflow_lite） | ~1500 |
 | flstr | 字符串工具与源码回显（stringify 系） | ~310 |
 | flcollect | 顶层信息收集器（类型/变体/函数/变量表） | ~260 |
 | fltype | 类型查询（c_type/base_type/var_info 等 45 函数） | ~1150 |
-| flee | Flow→C 发射（c_expr/c_stmt/c_program） | ~1750 |
+| flee | Aine→C 发射（c_expr/c_stmt/c_program） | ~1750 |
 
 ### 6.2 编译管线（c_program 薄壳）
 
 ```text
 read 源 → tokenize(fllex) → parse_program(flparse)
-  → flatten_stmts      （mod name; → 读入 name.flow，防环；搜索路径 同目录→stdlib/）
+  → flatten_stmts      （mod name; → 读入 name.aine，防环；搜索路径 同目录→stdlib/）
   → desugar_closures   （独立闭包→顶层函数提升 + 捕获分析 + 隐藏参数 + 调用点改写）
   → value_semantics    （var-from-var：源未再用→MOVE+置零；否则→CLONE 深拷贝）
   → valueflow_lite     （字符串累加器判定 → fl_strcat_own 原地追加，消除 malloc+拷贝）
@@ -172,7 +172,7 @@ read 源 → tokenize(fllex) → parse_program(flparse)
 ### 6.4 已知限制（均登记，均有等价 workaround）
 
 1. **f-string 内方法链直插**（如 `f"{v.iter().map(...).sum()}"`）在原生路径
-   段错误（fstr_piece AST 分支，见 wip_fstr_ast_path.flow.txt）；
+   段错误（fstr_piece AST 分支，见 wip_fstr_ast_path.aine.txt）；
    等价写法：先 `let s = ...; f"{s}"`（链本身走完整 c_expr 路径）。
 2. **match 尾表达式为构造调用**：转译器丢返回值（B5-M32 定位）；
    源层规避：语句式改写（res 累积 + 显式 return）。转译器层修复列后续

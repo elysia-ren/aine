@@ -1,8 +1,8 @@
-# Flow UI Guide
+# Aine UI Guide
 
 > **版本**：V0.1（初版）
 >
-> **状态**：本版收录《Flow 设计决策登记簿》定稿版中属于 UI 的决策（D3/D8/D11），作为 UI 指南的第一版正式内容。
+> **状态**：本版收录《Aine 设计决策登记簿》定稿版中属于 UI 的决策（D3/D8/D11），作为 UI 指南的第一版正式内容。
 >
 > 面向：普通开发者（交付物 14）。
 >
@@ -18,7 +18,7 @@
 
 ## §1 概览（占位）
 
-Flow UI 是第一方声明式 UI（V5.8 §50）。核心运行模型（交付物 4）：
+Aine UI 是第一方声明式 UI（V5.8 §50）。核心运行模型（交付物 4）：
 
 ```text
 UI Event → go{} → HTTP / SQLite / File / IO → Task Result → ui { ... } → State Update

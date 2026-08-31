@@ -1,8 +1,8 @@
-# Flow Language Reference
+# Aine Language Reference
 
 > **版本**：V0.1（初版）
 >
-> **状态**：本版为《Flow 语言完整设计方案定稿版》（V5.8）之后的第一版正式语言参考，**收录 D1-D13 定稿决策的迁移内容**（见《Flow 设计决策登记簿》定稿版）。
+> **状态**：本版为《Aine 语言完整设计方案定稿版》（V5.8）之后的第一版正式语言参考，**收录 D1-D13 定稿决策的迁移内容**（见《Aine 设计决策登记簿》定稿版）。
 >
 > 本版不完整：词法、完整 Grammar、类型系统细则、求值顺序等章节将在 Phase 0-2 实现过程中填充（对应交付物 12 的完成定义）。
 >
@@ -44,7 +44,7 @@
 | Material | 64 KB - 1 MB | 非阻塞性能提示（默认开，可配置关闭） |
 | Large | > 1 MB | 强制提示 + IDE 物化仪表盘计数 |
 
-> 阈值按"单次物化对象大小"计，可全局配置（flowc 配置）。
+> 阈值按"单次物化对象大小"计，可全局配置（aine 配置）。
 
 ---
 
@@ -160,7 +160,7 @@ try {
 ### 10.1 文件模块
 
 ```flow
-module strutil;     // 读入同目录 strutil.flow（G2.0-③）
+module strutil;     // 读入同目录 strutil.aine（G2.0-③）
 ```
 
 - 项以**原名**进入全局命名空间（扁平注册）；
@@ -231,7 +231,7 @@ f"语言={m["name"]}"     // 直接可用，无需中转
 
 ## §12 测试（M23 定稿）
 
-### 12.1 `@test` 属性与 `flowc test`
+### 12.1 `@test` 属性与 `aine test`
 
 ```flow
 @test
@@ -241,7 +241,7 @@ fn add_basics() -> Result<i32, String> {
 ```
 
 ```text
-flowc test examples/testdemo.flow
+aine test examples/testdemo.aine
 ```
 
 - `@test` 标注**无参函数**即测试函数；按源码顺序发现（含 `mod` 平铺注册的模块内测试）；
@@ -255,7 +255,7 @@ flowc test examples/testdemo.flow
 ### 12.2 输出与退出码
 
 ```text
-运行 5 个测试 (examples/testdemo.flow):
+运行 5 个测试 (examples/testdemo.aine):
   ✓ add_basics
   ✗ wrong_sum_fails
       原因: 返回 Err(1+1 竟然不等于 3)
@@ -271,7 +271,7 @@ flowc test examples/testdemo.flow
 
 ### 12.4 调试开关
 
-运行时错误默认只报告 Flow 层信息（idx/len/内容/函数栈）。设置环境变量
+运行时错误默认只报告 Aine 层信息（idx/len/内容/函数栈）。设置环境变量
 `FLOWC_RT_BACKTRACE=1` 可在索引越界消息后附加宿主机栈帧（仅调试解释器
 自身时需要，普通用户不可见）。
 
@@ -300,7 +300,7 @@ m["key"] = 1              // Map 写入（键为 String）
 
 - 资格模型与整体赋值一致：目标变量必须 `var`（否则 T3010）；
 - **值语义保证**：`let b = a; a[0] = 9` 之后 `b` 不变——副本写入互不影响，
-  无别名可能（Flow 无引用）；
+  无别名可能（Aine 无引用）；
 - String 不开放局部写入（保持整体值语义）：`s[i] = x` 编译期拒绝，
   提示用切片拼接构造新串。
 

@@ -1,16 +1,16 @@
-# Flow M3 大对象验证报告
+# Aine M3 大对象验证报告
 
-> **版本**：M3-R1（2026-02-14，与 flowc 0.1.0 同步）
+> **版本**：M3-R1（2026-02-14，与 aine 0.1.0 同步）
 >
 > 对应设计稿：§71.4（大对象验收）、§74（性能验收统计）、§75（编译时间原则）、§9（物化三档成本）。
-> 方法：因 flowc 尚无 codegen/运行时，**大对象在工作负载形状层面验证**——
+> 方法：因 aine 尚无 codegen/运行时，**大对象在工作负载形状层面验证**——
 > 合成与 10MB/100MB/1GB 数据形状等价的分析程序（String/Vec 大值经视图/逃逸/转移路径），
 > 验证 Borrow/Materialize 决策正确性与 §74 指标。运行时实测（真实分配计数）待 codegen 里程碑。
 
 ## 1. 基准结果（synthetic × 200 迭代 = 1200 函数）
 
 ```text
-=== Flow M3 大对象验证报告 ===
+=== Aine M3 大对象验证报告 ===
 程序: synthetic (200 迭代, 1200 个函数)
 分析时间: 29.33 ms
 
@@ -53,7 +53,7 @@
 3. **拥有值**：`let c = load(); stash(c)` → 无需物化 ✓
 4. **返回物化**：`get_name` 返回 `user.name` → 必须拥有值 → 物化 ✓
 5. **任务捕获物化**：`go { burn(s) }` 捕获视图 → 物化 ✓
-6. **示例零误报**：hello.flow / account_book.flow → 0 物化提示（Unknown provenance 正确回退）✓
+6. **示例零误报**：hello.aine / account_book.aine → 0 物化提示（Unknown provenance 正确回退）✓
 
 ## 3. §75 编译时间验证
 

@@ -1,8 +1,8 @@
-# Flow 类型系统规范（Type System Specification）
+# Aine 类型系统规范（Type System Specification）
 
-> **版本**：T1.0（M1.4 定稿，与 flowc 0.1.0 类型检查器同步）
+> **版本**：T1.0（M1.4 定稿，与 aine 0.1.0 类型检查器同步）
 >
-> **地位**：Flow 类型系统的正式规范。对应设计稿 §22 函数参数、§45 错误处理、§55 基本语法；
+> **地位**：Aine 类型系统的正式规范。对应设计稿 §22 函数参数、§45 错误处理、§55 基本语法；
 > 交付物：21 Specifications（Type System Specification）。
 > 语法根基见《Flow_Language_Grammar.md》§2.2（类型文法）。
 >

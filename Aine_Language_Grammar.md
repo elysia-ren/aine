@@ -1,8 +1,8 @@
-# Flow 语言语法规范（Grammar Specification）
+# Aine 语言语法规范（Grammar Specification）
 
-> **版本**：G1.0（M1 定稿，与 flowc 0.1.0 实现同步）
+> **版本**：G1.0（M1 定稿，与 aine 0.1.0 实现同步）
 >
-> **地位**：本规范是 Flow 语言的**正式语法根基**。词法分析、语法分析、HIR、类型检查、格式化器均以本规范为准。
+> **地位**：本规范是 Aine 语言的**正式语法根基**。词法分析、语法分析、HIR、类型检查、格式化器均以本规范为准。
 > 对应设计稿：§54 核心语法、§55 基本语法；交付物：12 Language Reference、21 Specifications（Language Specification）。
 >
 > **记号约定**（EBNF 扩展）：
@@ -10,9 +10,9 @@
 > - `A ::= B C` 产生式；`A | B` 选择；`[ A ]` 可选；`{ A }` 零次或多次；`A ,` 表示逗号分隔列表
 > - 终结符用小写字母/符号（`'fn'`、`'('`）；非终结符用 PascalCase
 > - `⟨换行⟩` 是软语句终结符（见 §3 消歧规则）；`{ A }` 内换行通常可忽略
-> - 每条产生式标注【实现】：对应 flowc 源码位置与设计稿章节
+> - 每条产生式标注【实现】：对应 aine 源码位置与设计稿章节
 >
-> 本规范 vG1.0 覆盖 flowc 当前已实现构造；未实现的语法（如完整的 where 子句语义）标注为 ⏳。
+> 本规范 vG1.0 覆盖 aine 当前已实现构造；未实现的语法（如完整的 where 子句语义）标注为 ⏳。
 
 ---
 
@@ -94,7 +94,7 @@ Attribute ::= '@' Path [ '(' AttributeArg { ',' AttributeArg } ')' ]    (* G2.0-
 
 > **定位**：采用 Rust 风格现代语法，但由编译器自动承担所有权复杂度、
 > 面向原生应用开发的独立语言（Rust-like syntax, compiler-derived ownership,
-> application-first semantics）。独立性由 Value Flow / Compiler View /
+> application-first semantics）。独立性由 Value Aine / Compiler View /
 > Semantic Summary / Task·UI Domain 的语义层证明，不依赖表面语法差异。
 > ## 语法版本标注（消除双规范歧义）
 >
@@ -138,7 +138,7 @@ Attribute ::= '@' Path [ '(' AttributeArg { ',' AttributeArg } ')' ]    (* G2.0-
 
 > 内建全局（无需声明）：`print` `read_file` `write_file` `append_file`
 > `file_exists` `now` `assert(cond[, msg])`（断言内建，失败即确定性 panic
-> 且消息含函数栈）`cli_args`（命令行实参，flowc run/build 注入）等。
+> 且消息含函数栈）`cli_args`（命令行实参，aine run/build 注入）等。
 
 ```ebnf
 Program ::= { Item }
@@ -150,7 +150,7 @@ ItemKind ::= FnDef | StructDef | EnumDef | TypeAlias | TraitDef | ImplDef
 Import   ::= 'import' Path                    (* 声明标记：名字已存在时引用之；
                                                    自举期扁平注册下无命名空间效果 *)
 ModDef    ::= 'module' Ident '{' { Item } '}'   (* 内联模块 *)
-            | 'module' Ident ';'               (* 文件模块：读入 Ident.flow（搜索路径
+            | 'module' Ident ';'               (* 文件模块：读入 Ident.aine（搜索路径
                                                   examples/ → stdlib/），项原名扁平注册 *)
 StructDef ::= 'struct' Ident [ '<' Ident { ',' Ident } '>' ]
               '{' { StructField } '}'

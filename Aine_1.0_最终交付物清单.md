@@ -1,12 +1,12 @@
-# Flow 1.0 最终交付物清单
+# Aine 1.0 最终交付物清单
 
-> 本清单描述 Flow 作为一门可以正式发布、安装、学习、开发和发布应用的完整编程语言，最终必须交付给用户和开发者的成品。
+> 本清单描述 Aine 作为一门可以正式发布、安装、学习、开发和发布应用的完整编程语言，最终必须交付给用户和开发者的成品。
 >
 > **这里描述的是最终交付物，不是源码仓库目录。**
 
-## 1. Flow 编译器软件
+## 1. Aine 编译器软件
 
-这是 Flow 最核心的一级交付物。
+这是 Aine 最核心的一级交付物。
 
 ### 1.1 统一命令行工具
 
@@ -31,7 +31,7 @@ flow publish
 ### 1.2 核心编译器
 
 ```text
-flowc
+aine
 ```
 
 负责：
@@ -51,7 +51,7 @@ Name Resolution
 ↓
 Type Check
 ↓
-VIR / Value Flow
+VIR / Value Aine
 ↓
 Ownership Analysis
 ↓
@@ -79,7 +79,7 @@ Link
 - Borrow / Compiler View
 - Escape Analysis
 - Closure Capture Analysis
-- Value Flow Graph
+- Value Aine Graph
 - VIR
 - Function Semantic Summary
 - Summary Composition
@@ -92,12 +92,12 @@ Link
 - 多平台 Codegen
 - FFI / ABI 支持
 
-## 2. Flow 标准库
+## 2. Aine 标准库
 
 正式交付：
 
 ```text
-Flow Standard Library
+Aine Standard Library
 ```
 
 第一版至少包含：
@@ -137,9 +137,9 @@ Flow Standard Library
 - 是否产生分配
 - 平台差异
 
-## 3. Flow Runtime
+## 3. Aine Runtime
 
-Flow 的最小原生运行时。
+Aine 的最小原生运行时。
 
 负责：
 
@@ -157,7 +157,7 @@ Flow 的最小原生运行时。
 
 原则：
 
-> Flow Runtime 不是 JVM、Python VM 一类的大型解释运行时。
+> Aine Runtime 不是 JVM、Python VM 一类的大型解释运行时。
 
 目标是：
 
@@ -167,7 +167,7 @@ Flow 的最小原生运行时。
 - 尽量消除未使用功能
 - 小型应用尽可能低运行时开销
 
-## 4. Flow UI Framework
+## 4. Aine UI Framework
 
 第一方声明式 UI 框架。
 
@@ -220,7 +220,7 @@ State Update
 Skia
 ```
 
-## 5. Flow IDE
+## 5. Aine IDE
 
 官方集成开发环境。
 
@@ -245,7 +245,7 @@ Skia
 - Hot Reload
 - Language Veil
 
-Flow IDE 必须突出 Flow 自身的诊断能力，例如：
+Aine IDE 必须突出 Aine 自身的诊断能力，例如：
 
 ```text
 data
@@ -271,9 +271,9 @@ data
 3. 使用高级借用 API
 ```
 
-## 6. Flow Debugger
+## 6. Aine Debugger
 
-可独立提供，也可以完整集成到 Flow IDE。
+可独立提供，也可以完整集成到 Aine IDE。
 
 至少支持：
 
@@ -291,7 +291,7 @@ data
 - Thread
 - Source Map
 
-## 7. Flow Profiler
+## 7. Aine Profiler
 
 正式交付性能分析工具。
 
@@ -333,14 +333,14 @@ data
 - State 更新
 - Frame 性能
 
-### Flow 专属
+### Aine 专属
 
 - Materialization
 - Large Copy
 - Borrow 优化结果
 - Allocation Elimination
 
-## 8. Flow Package Manager
+## 8. Aine Package Manager
 
 正式提供：
 
@@ -352,7 +352,7 @@ flowpkg
 
 - 依赖解析
 - 版本管理
-- `flow.toml`
+- `aine.toml`
 - `flow.lock`
 - Workspace
 - Feature
@@ -365,12 +365,12 @@ flowpkg
 最终配套：
 
 ```text
-Flow Registry
+Aine Registry
 ```
 
 用于发布和获取第三方包。
 
-## 9. Flow Build & Publish Toolchain
+## 9. Aine Build & Publish Toolchain
 
 正式提供：
 
@@ -405,7 +405,7 @@ installer
 - 发布渠道
 - Release Metadata
 
-## 10. Flow FFI / Platform SDK
+## 10. Aine FFI / Platform SDK
 
 正式提供：
 
@@ -431,17 +431,17 @@ iOS
 
 普通开发者尽量不需要直接接触裸指针。
 
-## 11. Flow 用户手册
+## 11. Aine 用户手册
 
 这是一级正式交付物，不是附属资料。
 
-### 11.1 《The Flow Book》
+### 11.1 《The Aine Book》
 
-面向完全没有 Flow 经验的普通开发者。
+面向完全没有 Aine 经验的普通开发者。
 
 内容：
 
-1. 安装 Flow
+1. 安装 Aine
 2. 第一个程序
 3. 变量
 4. 表达式
@@ -468,7 +468,7 @@ iOS
 
 > **前半部分不要求用户学习生命周期、Borrow Checker 或生命周期参数。**
 
-## 12. Flow Language Reference
+## 12. Aine Language Reference
 
 正式语言参考手册。
 
@@ -483,7 +483,7 @@ iOS
 - Move / Copy
 - Borrow
 - Compiler View
-- Value Flow
+- Value Aine
 - Closure Capture
 - Escape
 - `defer`
@@ -498,9 +498,9 @@ iOS
 
 这是：
 
-> **Flow 语言行为的正式规范。**
+> **Aine 语言行为的正式规范。**
 
-## 13. Flow Standard Library Reference
+## 13. Aine Standard Library Reference
 
 标准库 API 参考手册。
 
@@ -521,7 +521,7 @@ Send / Sync
 示例
 ```
 
-## 14. Flow UI Guide
+## 14. Aine UI Guide
 
 专门讲 UI。
 
@@ -558,7 +558,7 @@ ui {}
 State
 ```
 
-## 15. Flow Concurrency Guide
+## 15. Aine Concurrency Guide
 
 专门讲并发。
 
@@ -581,7 +581,7 @@ State
 
 > **先教怎么用，再解释内部安全机制。**
 
-## 16. Flow Advanced Programming Guide
+## 16. Aine Advanced Programming Guide
 
 给高级开发者。
 
@@ -603,11 +603,11 @@ State
 
 普通开发者不需要先阅读本手册。
 
-## 17. Flow Package & Build Guide
+## 17. Aine Package & Build Guide
 
 专门解释：
 
-- `flow.toml`
+- `aine.toml`
 - `flow.lock`
 - Dependency
 - Workspace
@@ -625,7 +625,7 @@ State
 - Update
 - Delta Update
 
-## 18. Flow Platform Guides
+## 18. Aine Platform Guides
 
 至少：
 
@@ -650,7 +650,7 @@ iOS Guide
 - 平台发布
 - 商店发布
 
-## 19. Flow Cookbook / Examples
+## 19. Aine Cookbook / Examples
 
 官方必须提供完整、可以直接运行的真实项目。
 
@@ -673,7 +673,7 @@ iOS Guide
 
 > 用户可以直接从完整项目开始，而不是先读完语言理论。
 
-## 20. Flow Compiler Internals
+## 20. Aine Compiler Internals
 
 面向：
 
@@ -686,7 +686,7 @@ iOS Guide
 - AST
 - HIR
 - VIR
-- Value Flow Graph
+- Value Aine Graph
 - Ownership Analysis
 - Escape Analysis
 - Capture Analysis
@@ -700,7 +700,7 @@ iOS Guide
 - Diagnostics
 - Source Mapping
 
-## 21. Flow Specification
+## 21. Aine Specification
 
 正式规范集合：
 
@@ -708,7 +708,7 @@ iOS Guide
 Language Specification
 Type System Specification
 Ownership Specification
-Value Flow Specification
+Value Aine Specification
 Semantic Summary Specification
 Concurrency Specification
 UI Specification
@@ -718,7 +718,7 @@ Build Specification
 Diagnostic Specification
 ```
 
-## 22. Flow Conformance Test Suite
+## 22. Aine Conformance Test Suite
 
 正式一致性测试。
 
@@ -730,7 +730,7 @@ Diagnostic Specification
 - Ownership
 - Borrow
 - Compiler View
-- Value Flow
+- Value Aine
 - Semantic Summary
 - Cross-module Analysis
 - Closure
@@ -744,23 +744,23 @@ Diagnostic Specification
 
 目的：
 
-> 保证 Flow 实现严格符合正式规范。
+> 保证 Aine 实现严格符合正式规范。
 
-# Flow 1.0 最终交付物总表
+# Aine 1.0 最终交付物总表
 
 | # | 交付物 | 必须 |
 |---|---|---|
-| 1 | **Flow 编译器软件** | ✅ |
-| 2 | **Flow 标准库** | ✅ |
-| 3 | **Flow Runtime** | ✅ |
-| 4 | **Flow UI Framework** | ✅ |
-| 5 | **Flow IDE** | ✅ |
-| 6 | **Flow Debugger** | ✅ |
-| 7 | **Flow Profiler** | ✅ |
-| 8 | **Flow Package Manager / Registry** | ✅ |
-| 9 | **Flow Build / Publish Toolchain** | ✅ |
-| 10 | **Flow FFI / Platform SDK** | ✅ |
-| 11 | **The Flow Book 用户手册** | ✅ |
+| 1 | **Aine 编译器软件** | ✅ |
+| 2 | **Aine 标准库** | ✅ |
+| 3 | **Aine Runtime** | ✅ |
+| 4 | **Aine UI Framework** | ✅ |
+| 5 | **Aine IDE** | ✅ |
+| 6 | **Aine Debugger** | ✅ |
+| 7 | **Aine Profiler** | ✅ |
+| 8 | **Aine Package Manager / Registry** | ✅ |
+| 9 | **Aine Build / Publish Toolchain** | ✅ |
+| 10 | **Aine FFI / Platform SDK** | ✅ |
+| 11 | **The Aine Book 用户手册** | ✅ |
 | 12 | **Language Reference** | ✅ |
 | 13 | **Standard Library Reference** | ✅ |
 | 14 | **UI Guide** | ✅ |
@@ -773,20 +773,20 @@ Diagnostic Specification
 | 21 | **Formal Specifications** | ✅ |
 | 22 | **Conformance Test Suite** | ✅ |
 
-# Flow 1.0 的完成定义
+# Aine 1.0 的完成定义
 
-Flow 1.0 不能只以：
+Aine 1.0 不能只以：
 
-> “编译器能够编译 Flow 代码”
+> “编译器能够编译 Aine 代码”
 
 作为完成标准。
 
 完整完成必须意味着：
 
 ```text
-Flow Source
+Aine Source
       ↓
-Flow Compiler
+Aine Compiler
       ↓
 Standard Library
       ↓
@@ -804,7 +804,7 @@ Package / Sign / Publish
 与此同时，开发者能够通过：
 
 ```text
-The Flow Book
+The Aine Book
 Language Reference
 Standard Library Reference
 UI Guide
@@ -819,4 +819,4 @@ Cookbook
 
 最终目标是：
 
-> **Flow 不只是“一个编译器项目”，而是一套可以独立交付给开发者使用的完整编程语言产品。**
+> **Aine 不只是“一个编译器项目”，而是一套可以独立交付给开发者使用的完整编程语言产品。**
