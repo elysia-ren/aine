@@ -252,6 +252,27 @@ impl Resolver {
                     for t in &v.payload {
                         self.resolve_type(t);
                     }
+                    // N0001: 变体名与 UI 内建组件冲突 → 组件优先，运行期构造返回 Nil
+                    const UI_WIDGETS: [&str; 8] = [
+                        "Text", "Button", "TextInput", "List", "Row", "Column", "ListItem", "Window",
+                    ];
+                    if UI_WIDGETS.contains(&v.name.as_str()) {
+                        let (line, col) = self.loc(v.span.start);
+                        self.diagnostics.push(
+                            Diagnostic::new(
+                                "N0001",
+                                Severity::Warning,
+                                "enum variant shadows ui widget",
+                                &format!(
+                                    "枚举变体 '{}' 与 UI 内建组件同名：运行期组件优先，该变体构造将返回 Nil；请重命名变体（或枚举）",
+                                    v.name
+                                ),
+                                line,
+                                col,
+                            )
+                            .with_span(v.span.start, v.span.end),
+                        );
+                    }
                     // register the variant as a value symbol (constructor)
                     let vsym = self.intern(&v.name, SymbolKind::EnumVariant, v.span, false);
                     self.define_allow_shadow(&v.name, vsym);

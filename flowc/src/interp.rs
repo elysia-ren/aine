@@ -1839,7 +1839,7 @@ impl Interp {
                 match method {
                     "push" => {
                         items.push(args.first().cloned().unwrap_or(Value::Unit));
-                        Ok(Some(Value::Unit))
+                        Ok(Some(slot.clone()))
                     }
                     "pop" => Ok(Some(items.pop().unwrap_or(Value::Nil))),
                     "clear" => {
