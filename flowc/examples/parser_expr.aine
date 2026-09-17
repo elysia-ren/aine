@@ -1,0 +1,289 @@
+// parser_expr.aine — 用 Aine 写的表达式解析器（自举 B4-M1：Pratt 优先核心）
+// 覆盖：字面量/标识符/一元/二元（优先级）/括号/调用/方法链；用 Aine enum 表达 AST
+
+enum TokKind {
+    TIdent
+    TInt
+    TFloat
+    TStr
+    TOp
+    TEof
+}
+
+struct Token {
+    kind: TokKind
+    text: String
+}
+
+enum Expr {
+    EInt(i32)
+    EFloat(f64)
+    EStr(String)
+    EIdent(String)
+    EBin(String, Expr, Expr)
+    EUnary(String, Expr)
+    ECall(Expr, Vec<Expr>)
+    EField(Expr, String)
+}
+
+struct EPResult {
+    value: Expr
+    next: i32
+}
+
+fn is_digit(c: String) -> bool {
+    c >= "0" && c <= "9"
+}
+
+fn is_ident_start(c: String) -> bool {
+    (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c == "_"
+}
+
+fn is_ident_continue(c: String) -> bool {
+    is_ident_start(c) || is_digit(c)
+}
+
+fn is_op_char(c: String) -> bool {
+    let ops = "+-*/%=<>!&|^~?:.,;(){}[]"
+    for o in ops {
+        if o == c {
+            return true
+        }
+    }
+    return false
+}
+
+fn is_space(c: String) -> bool {
+    c == " " || c == "\t" || c == "\n" || c == "\r"
+}
+
+// 简化词法：把表达式字符串切成 token 列表
+fn tokenize(src: String) -> Vec<Token> {
+    var tokens: Vec<Token> = []
+    var i = 0
+    let len = src.len()
+    while i < len {
+        let c = src[i]
+        if is_space(c) {
+            i += 1
+            continue
+        }
+        if is_ident_start(c) {
+            let start = i
+            while i < len && is_ident_continue(src[i]) {
+                i += 1
+            }
+            tokens.push(Token { kind: TIdent text: src[start..i] })
+            continue
+        }
+        if is_digit(c) {
+            let start = i
+            while i < len && is_digit(src[i]) {
+                i += 1
+            }
+            if i < len && src[i] == "." && i + 1 < len && is_digit(src[i + 1]) {
+                i += 1
+                while i < len && is_digit(src[i]) {
+                    i += 1
+                }
+                tokens.push(Token { kind: TFloat text: src[start..i] })
+            } else {
+                tokens.push(Token { kind: TInt text: src[start..i] })
+            }
+            continue
+        }
+        if is_op_char(c) {
+            // 两字符运算符
+            let two = if i + 1 < len { src[i..i + 2] } else { "" }
+            if two == "==" || two == "!=" || two == "<=" || two == ">=" || two == "&&" || two == "||" {
+                tokens.push(Token { kind: TOp text: two })
+                i += 2
+                continue
+            }
+            tokens.push(Token { kind: TOp text: c })
+            i += 1
+            continue
+        }
+        return tokens
+    }
+    tokens.push(Token { kind: TEof text: "" })
+    return tokens
+}
+
+fn bp_of(op: String) -> i32 {
+    if op == "||" {
+        return 3
+    }
+    if op == "&&" {
+        return 4
+    }
+    if op == "==" || op == "!=" {
+        return 5
+    }
+    if op == "<" || op == "<=" || op == ">" || op == ">=" {
+        return 6
+    }
+    if op == "+" || op == "-" {
+        return 7
+    }
+    if op == "*" || op == "/" || op == "%" {
+        return 8
+    }
+    return 0
+}
+
+fn parse_expr(tokens: Vec<Token>, i: i32, min_bp: i32) -> Result<EPResult, String> {
+    let lhs = parse_prefix(tokens, i)?
+    return parse_expr_bp(tokens, lhs.value, lhs.next, min_bp)
+}
+
+fn parse_expr_bp(tokens: Vec<Token>, mut lhs: Expr, mut i: i32, min_bp: i32) -> Result<EPResult, String> {
+    while true {
+        let tok = tokens[i]
+        if tok.kind != TOp {
+            break
+        }
+        let op = tok.text
+        let lbp = bp_of(op)
+        // lbp == 0：不是二元运算符（如 ) 与 ,）
+        if lbp == 0 || lbp < min_bp {
+            break
+        }
+        i += 1
+        let rhs_r = parse_prefix(tokens, i)?
+        var rhs = rhs_r.value
+        i = rhs_r.next
+        // 左结合：下一层 min_bp = lbp + 1
+        let rest = parse_expr_bp(tokens, rhs, i, lbp + 1)?
+        rhs = rest.value
+        i = rest.next
+        lhs = EBin(op, lhs, rhs)
+    }
+    return Ok(EPResult { value: lhs next: i })
+}
+
+fn parse_postfix(tokens: Vec<Token>, mut base: Expr, mut i: i32) -> Result<EPResult, String> {
+    while true {
+        let tok = tokens[i]
+        if tok.text == "(" {
+            i += 1
+            var args: Vec<Expr> = []
+            if tokens[i].text == ")" {
+                i += 1
+                base = ECall(base, args)
+                continue
+            }
+            while true {
+                let r = parse_expr(tokens, i, 0)?
+                args.push(r.value)
+                i = r.next
+                let t = tokens[i]
+                if t.text == "," {
+                    i += 1
+                    continue
+                }
+                if t.text == ")" {
+                    i += 1
+                    break
+                }
+                return Err("调用缺少右括号")
+            }
+            base = ECall(base, args)
+            continue
+        }
+        if tok.text == "." {
+            let name = tokens[i + 1]
+            if name.kind == TIdent {
+                base = EField(base, name.text)
+                i += 2
+                continue
+            }
+        }
+        break
+    }
+    return Ok(EPResult { value: base next: i })
+}
+
+fn parse_prefix(tokens: Vec<Token>, i: i32) -> Result<EPResult, String> {
+    let tok = tokens[i]
+    if tok.kind == TInt {
+        return Ok(EPResult { value: EInt(tok.text.to_i32()) next: i + 1 })
+    }
+    if tok.kind == TFloat {
+        return Ok(EPResult { value: EFloat(tok.text.to_f64()) next: i + 1 })
+    }
+    if tok.kind == TIdent {
+        return parse_postfix(tokens, EIdent(tok.text), i + 1)
+    }
+    if tok.kind == TOp {
+        if tok.text == "-" || tok.text == "!" {
+            let r = parse_prefix(tokens, i + 1)?
+            return Ok(EPResult { value: EUnary(tok.text, r.value) next: r.next })
+        }
+        if tok.text == "(" {
+            let r = parse_expr(tokens, i + 1, 0)?
+            if tokens[r.next].text != ")" {
+                return Err("缺少右括号")
+            }
+            return Ok(EPResult { value: r.value next: r.next + 1 })
+        }
+    }
+    return Err(f"无法解析前缀: '{tok.text}'")
+}
+
+fn stringify(e: Expr) -> String {
+    match e {
+        EInt(n) { f"{n}" }
+        EFloat(n) { f"{n}" }
+        EStr(s) { "\"" + s + "\"" }
+        EIdent(n) { n }
+        EBin(op, l, r) { "(" + stringify(l) + " " + op + " " + stringify(r) + ")" }
+        EUnary(op, x) { "(" + op + stringify(x) + ")" }
+        ECall(f, args) {
+            var parts: Vec<String> = []
+            for a in args {
+                parts.push(stringify(a))
+            }
+            return stringify(f) + "(" + join(parts, ", ") + ")"
+        }
+        EField(b, name) { stringify(b) + "." + name }
+    }
+}
+
+fn join(items: Vec<String>, sep: String) -> String {
+    var out = ""
+    var first = true
+    for it in items {
+        if first {
+            out = out + it
+            first = false
+        } else {
+            out = out + sep + it
+        }
+    }
+    return out
+}
+
+fn main() -> Result<(), String> {
+    // 用例 1：优先级
+    let tokens1 = tokenize("1 + 2 * 3")
+    let r1 = parse_expr(tokens1, 0, 0)?
+    print("1 + 2 * 3  =>", stringify(r1.value))
+
+    // 用例 2：方法链 + 比较 + 逻辑
+    let tokens2 = tokenize("a.b(2) - 5 < 10 && !ok")
+    let r2 = parse_expr(tokens2, 0, 0)?
+    print("a.b(2)-5<10&&!ok  =>", stringify(r2.value))
+
+    // 用例 3：括号改变结合
+    let tokens3 = tokenize("(1 + 2) * 3")
+    let r3 = parse_expr(tokens3, 0, 0)?
+    print("(1+2)*3  =>", stringify(r3.value))
+
+    // 用例 4：浮点与字面量
+    let tokens4 = tokenize("3.14 + x")
+    let r4 = parse_expr(tokens4, 0, 0)?
+    print("3.14 + x  =>", stringify(r4.value))
+
+    return Ok(())
+}

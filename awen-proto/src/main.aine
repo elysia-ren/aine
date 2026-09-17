@@ -1,0 +1,52 @@
+// awen-proto/src/main.aine —— 演示入口
+// 运行:aine run src/main.aine(在 awen-proto 根目录)
+// 测试:aine test src/tests.aine
+
+module diag;
+module registry;
+module fullwidth;
+module escape;
+module explicit;
+module lightweight;
+module lexer;
+module seed;
+
+fn main() {
+    print("Awen 原型词法器(Aine 移植版,核心规范 v0.4)")
+    let src = read_file("corpus/all_syntax.awen")
+    if src.contains("[read_file error") {
+        print(f"[corpus 加载失败: {src}](应以 awen-proto 为工作目录运行)")
+        return
+    }
+    let out = lex(src)
+    var errors = 0
+    var warnings = 0
+    for d in out.diags {
+        if d.severity == SevError {
+            errors += 1
+            print(f"  错误(行 {d.line + 1}): {d.message}")
+        } else {
+            warnings += 1
+        }
+    }
+    var objects = 0
+    var headings = 0
+    var raws = 0
+    var rows = 0
+    for b in out.blocks {
+        match b.block {
+            Object(u) { objects += 1 }
+            Heading(level, inline) { headings += 1 }
+            RawOpen(cmd, lang) { raws += 1 }
+            TableRow(cells, delimiter) { rows += 1 }
+            _ { }
+        }
+    }
+    print(f"corpus/all_syntax.awen: {out.blocks.len()} 块, {headings} 标题, {objects} 独立对象, {raws} Raw 块, {rows} 表格行")
+    print(f"诊断: {errors} 错误, {warnings} 告警(告警应全部来自转义演示区的预期字面回退)")
+    if errors == 0 {
+        print("词法验收:通过 ✓")
+    } else {
+        print("词法验收:失败 ✗")
+    }
+}

@@ -1,0 +1,18 @@
+fn f(v: Vec<i32>, n: i32) {
+    if n == 0 {
+        return
+    }
+    f(v, n - 1)
+}
+
+fn main() {
+    var v = []
+    var i = 0
+    while i < 1000 {
+        v.push(i)
+        i += 1
+    }
+    // 1000 元素 Vec × 100 次按值传参
+    f(v, 100)
+    print("clonetest done")
+}

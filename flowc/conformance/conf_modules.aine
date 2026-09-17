@@ -1,0 +1,42 @@
+// Conformance C5 —— 模块子集（mod/stdlib 扁平注册契约 · 正向）
+// 依据: Reference §10 模块系统（B5-M26 定稿）、B5-M26 文件模块实现
+// 运行: aine test conformance/conf_modules.aine
+// 契约: `mod name;` 文本级载入（同目录 → stdlib/ 搜索路径）、
+// 项以原名进入全局命名空间（扁平注册）、跨模块调用透明。
+
+module confmod_helper;
+module collections;
+
+fn expect(cond: bool, msg: String) -> Result<i32, String> {
+    if cond {
+        return Ok(0)
+    }
+    return Err(msg)
+}
+
+@test
+fn c5_local_module_call() -> Result<i32, String> {
+    let d = greet("aine")
+    return expect(d == "hello aine", "同目录模块函数以原名直接调用")
+}
+
+@test
+fn c5_flat_names() -> Result<i32, String> {
+    let a = helper_double(21)
+    let b = helper_double(20) + helper_double(1)
+    return expect(a == 42 && b == 42, "扁平注册: 模块项原名进入全局命名空间，无限定名")
+}
+
+@test
+fn c5_module_type_transparent() -> Result<i32, String> {
+    let p = HelperPoint { x: 2, y: 5 }
+    let s = helper_sum(p)
+    return expect(s == 7, "模块内定义的结构体与函数跨模块透明使用")
+}
+
+@test
+fn c5_stdlib_module() -> Result<i32, String> {
+    let v = range_vec(4)
+    let t = sum_ints(v)
+    return expect(t == 6, "stdlib 搜索路径: mod collections → stdlib/collections.aine")
+}

@@ -1,0 +1,353 @@
+// alcollect 模块：顶层信息收集器（类型/变体/函数/变量表）
+
+
+// 枚举类型名（声明顺序）与各枚举的变体名列表（逗号连接）
+fn collect_enum_ty_names(program: Vec<Stmt>) -> Vec<String> {
+    var ns: Vec<String> = []
+    for s in program {
+        match s {
+            SEnum(name, _) { ns.push(name) }
+            _ {}
+        }
+    }
+    return ns
+}
+
+
+fn collect_enum_variant_lists(program: Vec<Stmt>) -> Vec<String> {
+    var ls: Vec<String> = []
+    for s in program {
+        match s {
+            SEnum(name, variants) {
+                var vs: Vec<String> = []
+                for v in variants { vs.push(v.name) }
+                ls.push(join(vs, ","))
+            }
+            _ {}
+        }
+    }
+    return ls
+}
+
+
+// 枚举变体字段类型表
+fn collect_enum_variant_names(program: Vec<Stmt>) -> Vec<String> {
+    var names: Vec<String> = []
+    for s in program {
+        match s {
+            SEnum(name, variants) {
+                for v in variants {
+                    for ft in v.fields { names.push(v.name) }
+                }
+            }
+            _ {}
+        }
+    }
+    return names
+}
+
+
+fn collect_enum_variant_ftypes(program: Vec<Stmt>) -> Vec<String> {
+    var types: Vec<String> = []
+    for s in program {
+        match s {
+            SEnum(name, variants) {
+                for v in variants {
+                    for ft in v.fields { types.push(ft) }
+                }
+            }
+            _ {}
+        }
+    }
+    return types
+}
+
+
+// 结构体字段表
+fn collect_struct_snames(program: Vec<Stmt>) -> Vec<String> {
+    var names: Vec<String> = []
+    for s in program {
+        match s {
+            SStruct(sname, fields) {
+                for fd in fields { names.push(sname) }
+            }
+            _ {}
+        }
+    }
+    return names
+}
+
+
+fn collect_struct_fnames(program: Vec<Stmt>) -> Vec<String> {
+    var names: Vec<String> = []
+    for s in program {
+        match s {
+            SStruct(sname, fields) {
+                for fd in fields { names.push(fd.name) }
+            }
+            _ {}
+        }
+    }
+    return names
+}
+
+
+fn collect_struct_ftypes(program: Vec<Stmt>) -> Vec<String> {
+    var types: Vec<String> = []
+    for s in program {
+        match s {
+            SStruct(sname, fields) {
+                for fd in fields { types.push(fd.ty) }
+            }
+            _ {}
+        }
+    }
+    return types
+}
+
+
+// scan program for user types
+fn collect_user_types(program: Vec<Stmt>) -> Vec<String> {
+    var types: Vec<String> = []
+    for s in program {
+        match s {
+            SStruct(name, fields) { types.push(name) }
+            SEnum(name, variants) { types.push(name) }
+            _ {}
+        }
+    }
+    return types
+}
+
+
+// variant -> enum owner tables
+fn collect_variant_names(program: Vec<Stmt>) -> Vec<String> {
+    var vs: Vec<String> = []
+    for s in program {
+        match s {
+            SEnum(name, variants) {
+                for v in variants { vs.push(v.name) }
+            }
+            _ {}
+        }
+    }
+    return vs
+}
+
+
+fn collect_variant_owners(program: Vec<Stmt>) -> Vec<String> {
+    var os: Vec<String> = []
+    for s in program {
+        match s {
+            SEnum(name, variants) {
+                for v in variants { os.push(name) }
+            }
+            _ {}
+        }
+    }
+    return os
+}
+
+
+// fn name -> return type tables
+fn collect_fn_names(program: Vec<Stmt>) -> Vec<String> {
+    var ns: Vec<String> = []
+    for s in program {
+        match s {
+            SDef(name, params, ret, body_s) { ns.push(name) }
+            SImpl(ty, methods) {
+                for m in methods {
+                    match m {
+                        SDef(mname, _, _, _) { ns.push(ty + "_" + mname) }
+                        _ {}
+                    }
+                }
+            }
+            _ {}
+        }
+    }
+    return ns
+}
+
+
+fn collect_fn_returns(program: Vec<Stmt>) -> Vec<String> {
+    var rs: Vec<String> = []
+    for s in program {
+        match s {
+            SDef(name, params, ret, body_s) {
+                match ret {
+                    Some(rr) { rs.push(rr) }
+                    None { rs.push("void") }
+                }
+            }
+            SImpl(ty, methods) {
+                for m in methods {
+                    match m {
+                        SDef(_, _, mret, _) {
+                            match mret {
+                                Some(rr) { rs.push(rr) }
+                                None { rs.push("void") }
+                            }
+                        }
+                        _ {}
+                    }
+                }
+            }
+            _ {}
+        }
+    }
+    return rs
+}
+
+
+// 函数参数类型表（与 fnames 对齐）：每项为逗号连接的形参类型串（"String,i32"）
+fn collect_fn_ptypes(program: Vec<Stmt>) -> Vec<String> {
+    var ps: Vec<String> = []
+    for s in program {
+        match s {
+            SDef(name, params, ret, body_s) {
+                var pts: Vec<String> = []
+                for p in params { pts.push(p.ty) }
+                ps.push(join(pts, ","))
+            }
+            SImpl(ty, methods) {
+                for m in methods {
+                    match m {
+                        SDef(_, mparams, _, _) {
+                            var pts: Vec<String> = []
+                            for p in mparams {
+                                if p.ty == "self" { pts.push(ty) } else { pts.push(p.ty) }
+                            }
+                            ps.push(join(pts, ","))
+                        }
+                        _ {}
+                    }
+                }
+            }
+            _ {}
+        }
+    }
+    return ps
+}
+
+
+fn collect_var_names(program: Vec<Stmt>) -> Vec<String> {
+    var ns: Vec<String> = []
+    let all_fnames = collect_fn_names(program)
+    let all_freturns = collect_fn_returns(program)
+    for s in program {
+        match s {
+            SGlobalVar(name, ty, init) { ns.push(name) }
+            SDef(name, params, ret, body_s) {
+                for p in params { ns.push(p.name) }
+                let vi = var_info_of_stmts(body_s, all_fnames, all_freturns, [], [], collect_enum_variant_names(program), collect_enum_variant_ftypes(program), collect_struct_snames(program), collect_struct_fnames(program), collect_struct_ftypes(program))
+                for n in vi.names { ns.push(n) }
+            }
+            _ {}
+        }
+    }
+    return ns
+}
+
+
+fn collect_var_types(program: Vec<Stmt>) -> Vec<String> {
+    var ts: Vec<String> = []
+    let all_fnames = collect_fn_names(program)
+    let all_freturns = collect_fn_returns(program)
+    for s in program {
+        match s {
+            SGlobalVar(name, ty, init) {
+                match ty {
+                    Some(t) { ts.push(t) }
+                    None { ts.push("infer") }
+                }
+            }
+            SDef(name, params, ret, body_s) {
+                for p in params { ts.push(p.ty) }
+                let vi = var_info_of_stmts(body_s, all_fnames, all_freturns, [], [], collect_enum_variant_names(program), collect_enum_variant_ftypes(program), collect_struct_snames(program), collect_struct_fnames(program), collect_struct_ftypes(program))
+                for t in vi.types { ts.push(t) }
+            }
+            _ {}
+        }
+    }
+    return ts
+}
+
+
+// 每个函数的独立变量表（函数作用域查找，消除跨函数名字冲突）
+fn collect_fn_var_infos(program: Vec<Stmt>) -> Vec<VarInfo> {
+    var infos: Vec<VarInfo> = []
+    let all_fnames = collect_fn_names(program)
+    let all_freturns = collect_fn_returns(program)
+    // 全局变量前置进每个函数的变量表(S1c): 回调/函数体内可读写全局
+    var g_names: Vec<String> = []
+    var g_types: Vec<String> = []
+    for sg in program {
+        match sg {
+            SGlobalVar(gn, gt, gi2) {
+                g_names.push(gn)
+                match gt {
+                    Some(gtv) { g_types.push(gtv) }
+                    None { g_types.push("infer") }
+                }
+            }
+            _ {}
+        }
+    }
+    for s in program {
+        match s {
+            SDef(name, params, ret, body_s) {
+                var names: Vec<String> = []
+                var types: Vec<String> = []
+                for gk in 0..g_names.len() {
+                    names.push(g_names[gk])
+                    types.push(g_types[gk])
+                }
+                for p in params {
+                    names.push(p.name)
+                    types.push(p.ty)
+                }
+                let vi = var_info_of_stmts(body_s, all_fnames, all_freturns, names, types, collect_enum_variant_names(program), collect_enum_variant_ftypes(program), collect_struct_snames(program), collect_struct_fnames(program), collect_struct_ftypes(program))
+                infos.push(vi)
+            }
+            SImpl(ty, methods) {
+                for m in methods {
+                    match m {
+                        SDef(mname, mparams, mret, mbody) {
+                            var names: Vec<String> = []
+                            var types: Vec<String> = []
+                            for p in mparams {
+                                names.push(p.name)
+                                if p.ty == "self" { types.push(ty) } else { types.push(p.ty) }
+                            }
+                            let vi = var_info_of_stmts(mbody, all_fnames, all_freturns, names, types, collect_enum_variant_names(program), collect_enum_variant_ftypes(program), collect_struct_snames(program), collect_struct_fnames(program), collect_struct_ftypes(program))
+                            infos.push(vi)
+                        }
+                        _ {}
+                    }
+                }
+            }
+            _ {}
+        }
+    }
+    return infos
+}
+
+// impl 方法表：编码 "Type.method"（alee 方法调用发射兜底查表用）
+fn collect_impl_methods(program: Vec<Stmt>) -> Vec<String> {
+    var out: Vec<String> = []
+    for s in program {
+        match s {
+            SImpl(ty, methods) {
+                for m in methods {
+                    match m {
+                        SDef(name, _, _, _) { out.push(ty + "." + name) }
+                        _ {}
+                    }
+                }
+            }
+            _ {}
+        }
+    }
+    return out
+}

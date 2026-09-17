@@ -1,0 +1,182 @@
+// allex 模块：词法分析（自举拆分，扁平注册）
+
+
+// ---------- 词法 ----------
+
+fn is_digit(ch: char) -> bool {
+    ch >= "0" && ch <= "9"
+}
+
+
+fn is_ident_start(ch: char) -> bool {
+    (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || ch == "_"
+}
+
+
+fn is_ident_continue(ch: char) -> bool {
+    is_ident_start(ch) || is_digit(ch)
+}
+
+
+fn is_space(ch: char) -> bool {
+    ch == " " || ch == "\t" || ch == "\r"
+}
+
+
+fn is_op_char(ch: char) -> bool {
+    let ops = "+-*/%=<>!&|^~?:.,;(){}[]"
+    for o in ops {
+        if o == ch {
+            return true
+        }
+    }
+    return false
+}
+
+
+// 简化词法：换行 → TSemi（语句边界）；识别字符串字面量
+fn tokenize(src: String) -> Vec<Token> {
+    var tokens: Vec<Token> = []
+    var i = 0
+    let len = src.len()
+    while i < len {
+        let c = src[i]
+        if c == "\n" {
+            tokens.push(Token { kind: TSemi text: "\n" })
+            i += 1
+            continue
+        }
+        if is_space(c) {
+            i += 1
+            continue
+        }
+        if c == "\"" {
+            i += 1
+            let start = i
+            while i < len && src[i] != "\"" {
+                if src[i] == "\\" && i + 1 < len {
+                    i += 2
+                } else {
+                    i += 1
+                }
+            }
+            let text = src[start..i]
+            if i < len {
+                i += 1
+            }
+            tokens.push(Token { kind: TStr text: text })
+            continue
+        }
+        if is_ident_start(c) {
+            let start = i
+            while i < len && is_ident_continue(src[i]) {
+                i += 1
+            }
+            let word = src[start..i]
+            if word == "f" && i < len && src[i] == "\"" {
+                // f-string：f"..." 整体作为一个字符串 token（含插值文本）
+                // 插值 {...} 内允许嵌套字符串（含嵌套引号）——与宿主 lexer 行为一致
+                i += 1
+                let s2 = i
+                var depth = 0
+                while i < len {
+                    if src[i] == "\"" {
+                        if depth == 0 {
+                            break
+                        }
+                        // 插值内嵌套字符串：消费到其闭合引号
+                        i += 1
+                        while i < len && src[i] != "\"" {
+                            if src[i] == "\\" && i + 1 < len {
+                                i += 2
+                            } else {
+                                i += 1
+                            }
+                        }
+                        if i < len {
+                            i += 1
+                        }
+                        continue
+                    }
+                    if src[i] == "{" {
+                        depth += 1
+                    }
+                    if src[i] == "}" && depth > 0 {
+                        depth -= 1
+                    }
+                    if src[i] == "\\" && i + 1 < len {
+                        i += 2
+                    } else {
+                        i += 1
+                    }
+                }
+                let body = src[s2..i]
+                if i < len {
+                    i += 1
+                }
+                tokens.push(Token { kind: TStr text: "f\"" + body + "\"" })
+                continue
+            }
+            tokens.push(Token { kind: TIdent text: src[start..i] })
+            continue
+        }
+        if is_digit(c) {
+            let start = i
+            while i < len && is_digit(src[i]) {
+                i += 1
+            }
+            if i < len && src[i] == "." && i + 1 < len && is_digit(src[i + 1]) {
+                i += 1
+                while i < len && is_digit(src[i]) {
+                    i += 1
+                }
+                tokens.push(Token { kind: TFloat text: src[start..i] })
+            } else {
+                tokens.push(Token { kind: TInt text: src[start..i] })
+            }
+            continue
+        }
+        if c == "/" && i + 1 < len && src[i + 1] == "/" {
+            // 行注释：跳到行尾
+            while i < len && src[i] != "\n" {
+                i += 1
+            }
+            continue
+        }
+        if c == "/" && i + 1 < len && src[i + 1] == "*" {
+            // 块注释：跳到 */
+            i += 2
+            while true {
+                if i + 1 >= len {
+                    break
+                }
+                if src[i] == "*" && src[i + 1] == "/" {
+                    break
+                }
+                i += 1
+            }
+            i += 2
+            continue
+        }
+        if c == "@" {
+            // G2.0 ②：@ 装饰器/属性起始（@test/@global/@state）；遇未知 @ 不再截断
+            tokens.push(Token { kind: TOp text: "@" })
+            i += 1
+            continue
+        }
+        if is_op_char(c) {
+            let two = if i + 1 < len { src[i..i + 2] } else { "" }
+            if two == "==" || two == "!=" || two == "<=" || two == ">=" || two == "&&" || two == "||" || two == ".." || two == "->" || two == "=>" || two == "+=" || two == "-=" || two == "*=" || two == "/=" || two == "%=" {
+                tokens.push(Token { kind: TOp text: two })
+                i += 2
+                continue
+            }
+            tokens.push(Token { kind: TOp text: c })
+            i += 1
+            continue
+        }
+        return tokens
+    }
+    tokens.push(Token { kind: TEof text: "" })
+    return tokens
+}

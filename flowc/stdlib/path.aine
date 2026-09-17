@@ -1,0 +1,62 @@
+// std/path —— 路径工具（Aine 标准库 · 自举期扁平注册）
+
+fn path_join(a: String, b: String) -> String {
+    if a.len() == 0 {
+        return b
+    }
+    if b.len() == 0 {
+        return a
+    }
+    let last = a[a.len() - 1..a.len()]
+    if last == "/" || last == "\\\\" {
+        return a + b
+    }
+    return a + "/" + b
+}
+
+fn path_dir(p: String) -> String {
+    // 找最后一个 / 之前的部分
+    var last_slash = -1
+    var i = 0
+    while i < p.len() {
+        if p[i..i + 1] == "/" {
+            last_slash = i
+        }
+        i += 1
+    }
+    if last_slash < 0 {
+        return ""
+    }
+    return p[0..last_slash]
+}
+
+fn path_base(p: String) -> String {
+    var last_slash = -1
+    var i = 0
+    while i < p.len() {
+        if p[i..i + 1] == "/" {
+            last_slash = i
+        }
+        i += 1
+    }
+    return p[last_slash + 1..p.len()]
+}
+
+fn path_ext(p: String) -> String {
+    // 最后一个 . 之后（不含 / 内的）
+    var dot = -1
+    var i = 0
+    while i < p.len() {
+        if p[i..i + 1] == "." {
+            dot = i
+        }
+        if p[i..i + 1] == "/" {
+            dot = -1
+        }
+        i += 1
+    }
+    if dot < 0 {
+        return ""
+    }
+    return p[dot + 1..p.len()]
+}

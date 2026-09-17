@@ -1,0 +1,125 @@
+// Conformance C1 —— 类型子集（类型契约 · 正向行为）
+// 依据: Flow_Type_System.md + Flow_1.0_执行计划 §22 Conformance（MVP 核心子集）
+// 运行: aine test conformance/conf_types.aine
+// 每个测试是一个类型契约点: 断言"该类型形态在 Aine 中的确定行为"。
+
+fn expect(cond: bool, msg: String) -> Result<i32, String> {
+    if cond {
+        return Ok(0)
+    }
+    return Err(msg)
+}
+
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+struct Row {
+    name: String,
+    values: Vec<i32>,
+}
+
+enum Shape {
+    Circle(i32),
+    Rect(i32, i32),
+    Empty,
+}
+
+@test
+fn c1_let_type_inference() -> Result<i32, String> {
+    let a = 42
+    let b = 3.5
+    let s = "aine"
+    let flag = true
+    return expect(a == 42 && b == 3.5 && flag && s.len() == 4, "字面量推断: i32/f64/bool/String")
+}
+
+@test
+fn c1_struct_fields() -> Result<i32, String> {
+    let p = Point { x: 3, y: 4 }
+    let n = p.x * p.x + p.y * p.y
+    return expect(n == 25, "结构体字段读取: 3-4-5")
+}
+
+@test
+fn c1_struct_with_vec_field() -> Result<i32, String> {
+    let r = Row { name: "r1", values: [10, 20, 30] }
+    let total = sum(r.values)
+    return expect(total == 60 && r.name == "r1", "结构体内嵌 Vec + String 字段")
+}
+
+@test
+fn c1_enum_match_payloads() -> Result<i32, String> {
+    let a = area(Circle(2))
+    let b = area(Rect(3, 4))
+    let c = area(Empty)
+    return expect(a == 12 && b == 12 && c == 0, "枚举带载荷变体 match: Circle/Rect/Empty")
+}
+
+@test
+fn c1_option_some_none() -> Result<i32, String> {
+    let s1 = describe(Some(7))
+    let s2 = describe(None)
+    return expect(s1 == "7" && s2 == "无", "Option Some/None match")
+}
+
+@test
+fn c1_i32_arithmetic_boundary() -> Result<i32, String> {
+    let neg = -5 + 3
+    let mul = 6 * 7
+    let div = 7 / 2
+    let rem = 7 % 3
+    return expect(neg == -2 && mul == 42 && div == 3 && rem == 1, "i32 四则与一元负号")
+}
+
+@test
+fn c1_f64_arithmetic() -> Result<i32, String> {
+    let x = 1.5 + 2.25
+    return expect(x == 3.75, "f64 加法精确比较")
+}
+
+@test
+fn c1_string_equality_and_concat() -> Result<i32, String> {
+    let s = "aine" + "lang"
+    return expect(s == "ainelang" && "a" + "b" == "ab", "String 拼接与相等比较")
+}
+
+@test
+fn c1_bool_logic() -> Result<i32, String> {
+    let t = true && !false
+    let f = false || false
+    return expect(t && !f, "布尔与或非")
+}
+
+@test
+fn c1_vec_index_read() -> Result<i32, String> {
+    let v = [5, 6, 7]
+    let mid = v[1]
+    return expect(mid == 6 && v.len() == 3, "Vec 字面量/索引读取/len")
+}
+
+fn sum(v: Vec<i32>) -> i32 {
+    var t = 0
+    var i = 0
+    while i < v.len() {
+        t += v[i]
+        i += 1
+    }
+    return t
+}
+
+fn area(s: Shape) -> i32 {
+    match s {
+        Circle(r) { return r * r * 3 }
+        Rect(w, h) { return w * h }
+        Empty { return 0 }
+    }
+}
+
+fn describe(o: Option<i32>) -> String {
+    match o {
+        Some(v) { return f"{v}" }
+        None { return "无" }
+    }
+}

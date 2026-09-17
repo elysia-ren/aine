@@ -1,0 +1,19 @@
+fn f(body: String) -> String {
+    var out = ""
+    var i = 0
+    let len = body.len()
+    while i < len {
+        let c = body[i..i + 1]
+        if c == "\\" && i + 1 < len {
+            let e = body[i + 1..i + 2]
+            if e == "n" { out = out + "\n"; i += 2; continue }
+        }
+        out = out + c
+        i += 1
+    }
+    return out
+}
+
+fn main() {
+    print(f("a\nb"))
+}

@@ -1,0 +1,32 @@
+enum TokKind {
+    TIdent
+    TInt
+    TFloat
+    TStr
+    TOp
+    TSemi
+    TEof
+}
+
+struct Token {
+    kind: TokKind
+    text: String
+}
+
+module allex;
+module alparse;
+module alstr;
+module alcollect;
+module altype;
+
+fn main() -> Result<(), String> {
+    let src1 = "fn fib(n: i32) -> i32 {\n    if n < 2 {\n        return n\n    }\n    return fib(n - 1) + fib(n - 2)\n}\nfn main() {\n    print(fib(10))\n}"
+    let toks = tokenize(src1)
+    print("MINI tok n=" + f"{toks.len()}")
+    let pr = parse_program(toks)
+    match pr {
+        Ok(p1) { print("MINI parsed " + f"{p1.len()}") }
+        Err(e) { print("MINI ERR: " + e) }
+    }
+    return Ok(())
+}

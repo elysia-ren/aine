@@ -1,0 +1,5 @@
+fn main() {
+    var i = 3
+    var r = i + 1
+    print(f"r={r}")
+}

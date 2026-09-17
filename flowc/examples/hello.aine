@@ -1,0 +1,24 @@
+// hello.aine — Aine 最小示例
+// 设计稿 §55 基本语法
+
+fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+fn main() {
+    let name = "张三"
+    var count = 0
+
+    if count > 10 {
+        print("超过上限")
+    } else {
+        print("正常")
+    }
+
+    for i in 0..10 {
+        print(f"i = {i}")
+    }
+
+    let result = add(1, 2)
+    print(f"add(1, 2) = {result}")
+}

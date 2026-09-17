@@ -1,0 +1,98 @@
+// awen-proto/src/registry.aine —— 显式命令白名单注册表(核心规范 §11)
+// §11.0:任何新命令必须先登记本章与本表再实现,不允许未注册命令进入解析器。
+// 中文方言别名(§6.14)仅收录规范/文档中实际出现的:图片、字体、大小、标签。
+
+enum ExplicitCommand {
+    Image
+    Figure
+    Table
+    Cell
+    Font
+    Size
+    Color
+    U
+    Link
+    Ref
+    Label
+    Footnote
+    Toc
+    Comment
+    Page
+    Margin
+    Theme
+    Numbering
+    LineSpacing
+    FirstLine
+    Bold
+    Math
+    Code
+}
+
+fn lookup(name: String) -> Option<ExplicitCommand> {
+    if name == "image" || name == "图片" { return Some(Image) }
+    if name == "figure" { return Some(Figure) }
+    if name == "table" { return Some(Table) }
+    if name == "cell" { return Some(Cell) }
+    if name == "font" || name == "字体" { return Some(Font) }
+    if name == "size" || name == "大小" { return Some(Size) }
+    if name == "color" { return Some(Color) }
+    if name == "u" || name == "underline" { return Some(U) }
+    if name == "link" { return Some(Link) }
+    if name == "ref" { return Some(Ref) }
+    if name == "label" || name == "标签" { return Some(Label) }
+    if name == "footnote" { return Some(Footnote) }
+    if name == "toc" { return Some(Toc) }
+    if name == "comment" { return Some(Comment) }
+    if name == "page" { return Some(Page) }
+    if name == "margin" { return Some(Margin) }
+    if name == "theme" { return Some(Theme) }
+    if name == "numbering" { return Some(Numbering) }
+    if name == "line-spacing" { return Some(LineSpacing) }
+    if name == "first-line" { return Some(FirstLine) }
+    if name == "bold" || name == "b" { return Some(Bold) }
+    if name == "math" || name == "m" { return Some(Math) }
+    if name == "code" || name == "c" { return Some(Code) }
+    return None
+}
+
+// Raw Block 命令:内容完全不经语法解析(§6.7)
+fn is_raw_block(cmd: ExplicitCommand) -> bool {
+    return cmd == Math || cmd == Code || cmd == Comment
+}
+
+// 文档级设置(§11.1:只允许出现在文档头部,头部限定由解析阶段强制)
+fn is_doc_level(cmd: ExplicitCommand) -> bool {
+    return cmd == Page || cmd == Margin || cmd == Font || cmd == Size
+        || cmd == LineSpacing || cmd == FirstLine || cmd == Theme || cmd == Numbering
+}
+
+// 作用域命令(§11.1:配对结束标签,只影响作用域内部)
+fn is_scoped(cmd: ExplicitCommand) -> bool {
+    return cmd == Bold || cmd == Font || cmd == Size || cmd == Color || cmd == U
+}
+
+// 关闭标签是否匹配该命令(@[/code] 可关闭 @[c] 打开的块,§11.2)
+fn close_matches(cmd: ExplicitCommand, close_name: String) -> bool {
+    if cmd == Code {
+        return close_name == "c" || close_name == "code"
+    }
+    if cmd == Math {
+        return close_name == "m" || close_name == "math"
+    }
+    return lookup(close_name) == Some(cmd)
+}
+
+// v1 已知位置参数个数,超出即按"值含空格"诊断(§6.10);None = 本层不检查
+fn positional_arity(cmd: ExplicitCommand) -> Option<i32> {
+    if cmd == Font || cmd == Size || cmd == Color || cmd == Theme
+        || cmd == Page || cmd == Margin || cmd == LineSpacing || cmd == FirstLine {
+        return Some(1)
+    }
+    if cmd == Bold || cmd == U || cmd == Math || cmd == Toc {
+        return Some(0)
+    }
+    if cmd == Code {
+        return Some(1)
+    }
+    return None
+}

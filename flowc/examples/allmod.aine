@@ -1,0 +1,16 @@
+// 标准库全家桶:io + collections + time + path + json + al_strcat_own 系
+module io;
+module collections;
+module time;
+module path;
+module json;
+
+fn main() {
+    print(f"{now_secs()}")
+    let ok = write_file("all_io.txt", "x")
+    print(f"io={ok}")
+    let p = path_join("examples", "fib.aine")
+    print(f"base={path_base(p)} ext={path_ext(p)}")
+    let v = [2, 1]
+    print(f"sorted={sort_ints(v)[0]}")
+}

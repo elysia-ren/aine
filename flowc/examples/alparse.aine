@@ -1,0 +1,2061 @@
+// alparse 模块：语法解析（递归下降 + 模块打平）
+
+
+// ---------- 表达式（Pratt） ----------
+
+fn bp_of(op: String) -> i32 {
+    if op == "||" {
+        return 3
+    }
+    if op == "&&" {
+        return 4
+    }
+    if op == "==" || op == "!=" {
+        return 5
+    }
+    if op == "<" || op == "<=" || op == ">" || op == ">=" {
+        return 6
+    }
+    if op == "+" || op == "-" {
+        return 7
+    }
+    if op == "*" || op == "/" || op == "%" {
+        return 8
+    }
+    return 0
+}
+
+
+fn parse_expr(tokens: Vec<Token>, i: i32, min_bp: i32) -> Result<EPResult, String> {
+    let lhs = parse_prefix(tokens, i)?
+    return parse_expr_bp(tokens, lhs.value, lhs.next, min_bp)
+}
+
+
+fn parse_expr_bp(tokens: Vec<Token>, mut lhs: Expr, mut i: i32, min_bp: i32) -> Result<EPResult, String> {
+    while true {
+        // 跨行表达式：跳过语句边界换行（续行前导运算符如 || 属同一表达式）
+        while tokens[i].kind == TSemi {
+            i += 1
+        }
+        let tok = tokens[i]
+        if tok.kind != TOp {
+            break
+        }
+        let op = tok.text
+        let lbp = bp_of(op)
+        if lbp == 0 || lbp < min_bp {
+            break
+        }
+        i += 1
+        let rhs_r = parse_prefix(tokens, i)?
+        var rhs = rhs_r.value
+        i = rhs_r.next
+        let rest = parse_expr_bp(tokens, rhs, i, lbp + 1)?
+        rhs = rest.value
+        i = rest.next
+        lhs = EBin(op, lhs, rhs)
+    }
+    return Ok(EPResult { value: lhs next: i })
+}
+
+
+fn parse_postfix(tokens: Vec<Token>, mut base: Expr, mut i: i32) -> Result<EPResult, String> {
+    while true {
+        // 跨行表达式：跳过语句边界换行（续行后缀 . / [ / ( 属同一表达式）
+        while tokens[i].kind == TSemi {
+            i += 1
+        }
+        let tok = tokens[i]
+        if tok.text == "(" {
+            i += 1
+            var args: Vec<Expr> = []
+            if tokens[i].text == ")" {
+                i += 1
+                base = ECall(base, args)
+                continue
+            }
+            while true {
+                let r = parse_expr(tokens, i, 0)?
+                args.push(r.value)
+                i = r.next
+                let t = tokens[i]
+                if t.text == "," {
+                    i += 1
+                    continue
+                }
+                if t.text == ")" {
+                    i += 1
+                    break
+                }
+                return Err("调用缺少右括号")
+            }
+            base = ECall(base, args)
+            continue
+        }
+        if tok.text == "." {
+            let name = tokens[i + 1]
+            if name.kind == TIdent {
+                base = EField(base, name.text)
+                i += 2
+                continue
+            }
+        }
+        if tok.text == "?" {
+            base = ETry(base)
+            i += 1
+            continue
+        }
+        if tok.text == "[" {
+            // 索引或切片：base[idx] 或 base[a..b]
+            let idx = parse_expr(tokens, i + 1, 0)?
+            var j = idx.next
+            if tokens[j].text == ".." {
+                // 切片 base[a..b]
+                let hi = parse_expr(tokens, j + 1, 0)?
+                if tokens[hi.next].text != "]" {
+                    return Err("切片缺少 ]")
+                }
+                let rng = ERange(idx.value, hi.value)
+                base = EIndex(base, rng)
+                i = hi.next + 1
+                continue
+            }
+            if tokens[j].text != "]" {
+                return Err("索引缺少 ]")
+            }
+            base = EIndex(base, idx.value)
+            i = j + 1
+            continue
+        }
+        if tok.text == "{" {
+            // 结构体字面量：Ident { field: expr ... }（仅当 base 是 EIdent 且 { 后是 ident :）
+            // 其他情况（如 match c {）留给上层处理；{ 后换行(TSemi)跳过
+            var looks_like_struct = false
+            var probe = i + 1
+            while tokens[probe].kind == TSemi {
+                probe += 1
+            }
+            if tokens[probe].kind == TIdent && tokens[probe + 1].text == ":" {
+                looks_like_struct = true
+            }
+            if !looks_like_struct {
+                break
+            }
+            match base {
+                EIdent(ty_name) {
+                    var j = i + 1
+                    var fields: Vec<StructField> = []
+                    while true {
+                        while tokens[j].kind == TSemi {
+                            j += 1
+                        }
+                        if tokens[j].text == "," {
+                            j += 1
+                            continue
+                        }
+                        if tokens[j].text == "}" {
+                            j += 1
+                            break
+                        }
+                        let fn_t = tokens[j]
+                        if fn_t.kind != TIdent {
+                            return Err("结构体字段需要名字")
+                        }
+                        if tokens[j + 1].text != ":" {
+                            return Err(f"结构体字段 {fn_t.text} 需要 :")
+                        }
+                        j += 2
+                        let r = parse_expr(tokens, j, 0)?
+                        fields.push(StructField { name: fn_t.text value: r.value })
+                        j = r.next
+                    }
+                    base = EStruct(ty_name, fields)
+                    i = j
+                    continue
+                }
+                _ { break }
+            }
+        }
+        break
+    }
+    return Ok(EPResult { value: base next: i })
+}
+
+
+fn parse_closure(tokens: Vec<Token>, i: i32) -> Result<EPResult, String> {
+    // G2.0 ③: 闭包唯一文法为箭头形态 (docs/GRAMMAR.md): x => expr / (a, b) => expr / (x: i32) => expr / () => expr
+    var j = i
+    var params: Vec<Param> = []
+    if tokens[j].text == "(" {
+        j += 1
+        while tokens[j].text != ")" && tokens[j].kind != TEof {
+            if tokens[j].text == "," {
+                j += 1
+                continue
+            }
+            if tokens[j].kind != TIdent {
+                return Err(f"闭包参数需要名字 @'{tokens[j].text}'")
+            }
+            let pname = tokens[j].text
+            j += 1
+            var pty = ""
+            if tokens[j].text == ":" {
+                let tr = parse_ty(tokens, j + 1)?
+                pty = tr.ty
+                j = tr.next
+            }
+            params.push(Param { name: pname ty: pty })
+        }
+        if tokens[j].text != ")" {
+            return Err("闭包参数表未闭合")
+        }
+        j += 1
+    } else {
+        if tokens[j].kind != TIdent {
+            return Err(f"闭包参数需要名字 @'{tokens[j].text}'")
+        }
+        params.push(Param { name: tokens[j].text ty: "" })
+        j += 1
+    }
+    if tokens[j].text != "=>" {
+        return Err(f"闭包缺少 => @'{tokens[j].text}'")
+    }
+    j += 1
+    let r = parse_expr(tokens, j, 0)?
+    return Ok(EPResult { value: EClosure(params, r.value) next: r.next })
+}
+
+
+
+fn parse_if_expr(tokens: Vec<Token>, i: i32) -> Result<EPResult, String> {
+    let cond = parse_expr(tokens, i + 1, 0)?
+    let then_b = parse_block(tokens, cond.next)?
+    var else_stmts: Vec<Stmt> = []
+    var j = then_b.next
+    while tokens[j].kind == TSemi {
+        j += 1
+    }
+    if tokens[j].text == "else" {
+        let eb = parse_block(tokens, j + 1)?
+        else_stmts = eb.stmts
+        j = eb.next
+    }
+    return Ok(EPResult { value: EIf(cond.value, then_b.stmts, else_stmts) next: j })
+}
+
+fn parse_prefix(tokens: Vec<Token>, i: i32) -> Result<EPResult, String> {
+    let tok = tokens[i]
+    if tok.kind == TInt {
+        // 字面量也支持后缀（方法链/索引）：5.to_f64()、"a,b".split(..)
+        return parse_postfix(tokens, EInt(tok.text.to_i32()), i + 1)
+    }
+    if tok.kind == TFloat {
+        return parse_postfix(tokens, EFloat(tok.text.to_f64()), i + 1)
+    }
+    if tok.kind == TStr {
+        // 转义解码（与宿主一致）：普通串直接解码；f-string 保留 f" 前缀再解码正文
+        // (len 用显式 String 中转: 绕开发射期跨字段类型推断限制)
+        var sval: String = tok.text
+        let slen: i32 = sval.len()
+        if sval.starts_with("f\"") {
+            sval = sval[2..slen - 1]
+            sval = "f\"" + al_unescape_body(sval) + "\""
+        } else {
+            sval = al_unescape_body(sval)
+        }
+        return parse_postfix(tokens, EStr(sval), i + 1)
+    }
+    if tok.kind == TIdent {
+        if tok.text == "if" {
+            // if expression: if cond { a } else { b }
+            return parse_if_expr(tokens, i)
+        }
+        if tok.text == "match" {
+            // match 表达式：match scrut { pat { body ... }
+            return parse_match_expr(tokens, i)
+        }        if i + 1 < tokens.len() && tokens[i + 1].text == "=>" {
+            // G2.0 ③：单参无类型闭包 x => expr
+            return parse_closure(tokens, i)
+        }
+        return parse_postfix(tokens, EIdent(tok.text), i + 1)
+    }
+    if tok.kind == TOp && tok.text == "(" {
+        // G2.0 ③：(参数表) { expr —— 配对扫描后是否紧跟 => }
+        var d = 0
+        var k = i
+        var is_cl = false
+        while k < tokens.len() {
+            if tokens[k].text == "(" {
+                d += 1
+            }
+            if tokens[k].text == ")" {
+                d -= 1
+                if d == 0 {
+                    if k + 1 < tokens.len() && tokens[k + 1].text == "=>" {
+                        is_cl = true
+                    }
+                    break
+                }
+            }
+            if tokens[k].kind == TEof {
+                break
+            }
+            k += 1
+        }
+        if is_cl {
+            return parse_closure(tokens, i)
+        }
+    }
+    if tok.kind == TOp {
+        if tok.text == "|" {
+            return parse_closure(tokens, i)
+        }
+        if tok.text == "-" || tok.text == "!" {
+            let r = parse_prefix(tokens, i + 1)?
+            return Ok(EPResult { value: EUnary(tok.text, r.value) next: r.next })
+        }
+        if tok.text == "(" {
+            if tokens[i + 1].text == ")" {
+                // 空元组 ()
+                return Ok(EPResult { value: EUnit next: i + 2 })
+            }
+            let r = parse_expr(tokens, i + 1, 0)?
+            if tokens[r.next].text != ")" {
+                return Err("缺少右括号")
+            }
+            return parse_postfix(tokens, r.value, r.next + 1)
+        }
+        if tok.text == "{" {
+            let b = parse_block(tokens, i)?
+            return Ok(EPResult { value: EBlock(b.stmts) next: b.next })
+        }
+        if tok.text == "[" {
+            var j = i + 1
+            var items: Vec<Expr> = []
+            // 数组项可用换行（TSemi）分隔：跳过前导与项间换行
+            while tokens[j].kind == TSemi { j += 1 }
+            if tokens[j].text == "]" {
+                return Ok(EPResult { value: EVec(items) next: j + 1 })
+            }
+            while true {
+                let r = parse_expr(tokens, j, 0)?
+                items.push(r.value)
+                j = r.next
+                var had_semi = false
+                while tokens[j].kind == TSemi {
+                    j += 1
+                    had_semi = true
+                }
+                let t = tokens[j]
+                if t.text == "," {
+                    j += 1
+                    while tokens[j].kind == TSemi {
+                        j += 1
+                    }
+                    continue
+                }
+                if t.text == "]" {
+                    j += 1
+                    break
+                }
+                // 换行/空白分隔项（跨行表达式已消费换行）：继续解析下一项
+                continue
+            }
+            return Ok(EPResult { value: EVec(items) next: j })
+        }
+    }
+    return Err(f"无法解析前缀: '{tok.text}' pos=" + f"{i}")
+}
+
+
+// ---------- 语句 ----------
+
+// 收集类型注解文本，直到 逗号/右括号/语句边界
+fn parse_ty(tokens: Vec<Token>, i: i32) -> Result<TyResult, String> {    var out = ""
+    var j = i
+    var depth = 0
+    while true {
+        let t = tokens[j]
+        if t.kind == TSemi || t.kind == TEof {
+            break
+        }
+        // 先按"当前深度"判分隔符（fn(i32) 的闭括号先减深，不能被误判为分隔符）
+        if depth == 0 {
+            if t.text == "," || t.text == ")" || t.text == "]" || t.text == ">" || t.text == "=" || t.text == "{" || t.text == "|" {
+                break
+            }
+        }
+        if t.text == "<" || t.text == "(" || t.text == "[" {
+            depth += 1
+        }
+        if t.text == ">" || t.text == ")" || t.text == "]" {
+            depth -= 1
+        }
+        out = out + t.text
+        j += 1
+    }
+    return Ok(TyResult { ty: out next: j })
+}
+
+
+// EIdent 的名字提取（None = 非标识符表达式）
+fn expr_ident_name(e: Expr) -> Option<String> {
+    match e {
+        EIdent(n) { return Some(n) }
+        _ { return None }
+    }
+}
+
+
+fn parse_import(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
+    var j = i
+    var txt = ""
+    while tokens[j].kind != TSemi && tokens[j].kind != TEof {
+        txt = txt + tokens[j].text
+        j += 1
+    }
+    if tokens[j].kind == TSemi {
+        j += 1
+    }
+    return Ok(SPResult { stmt: SImport(txt) next: j })
+}
+
+
+fn flatten_stmts(stmts: Vec<Stmt>, dir: String, loaded: Vec<String>) -> Result<FlatResult, String> {
+    var out: Vec<Stmt> = []
+    var ld: Vec<String> = []
+    for x in loaded {
+        ld.push(x)
+    }
+    for s in stmts {
+        match s {
+            SImport(txt) {}
+            SMod(name, sub) {
+                if sub.len() > 0 {
+                    let r = flatten_stmts(sub, dir, ld)?
+                    for x in r.out {
+                        out.push(x)
+                    }
+                    ld = r.loaded
+                } else {
+                    // 搜索路径：dir（通常 examples/）-> stdlib/（标准库）
+                    var path = dir + name + ".aine"
+                    var src = read_file(path)
+                    // 只认前缀：模块源码自身可能包含该字面量（自举元编程）
+                    let errmark = "[read_file error"
+                    if src.len() >= errmark.len() {
+                        let head = src[0..errmark.len()]
+                        if head == errmark {
+                            path = "stdlib/" + name + ".aine"
+                            src = read_file(path)
+                        }
+                    }
+                    if src.len() >= errmark.len() {
+                        let head2 = src[0..errmark.len()]
+                        if head2 == errmark {
+                            return Err("cannot read module file " + name)
+                        }
+                    }
+                    var dup = false
+                    for p in ld {
+                        if p == path { dup = true }
+                    }
+                    if dup {
+                        return Err("module cycle: " + path)
+                    }
+                    ld.push(path)
+                    let toks = tokenize(src)
+                    let ps = parse_program(toks)?
+                    let r2 = flatten_stmts(ps, dir, ld)?
+                    for x in r2.out {
+                        out.push(x)
+                    }
+                    ld = r2.loaded
+                }
+            }
+            _ { out.push(s) }
+        }
+    }
+    return Ok(FlatResult { out: out loaded: ld })
+}
+
+
+fn parse_block(tokens: Vec<Token>, i: i32) -> Result<BlockResult, String> {    if tokens[i].text != "{" {
+        return Err("块需要 {")
+    }
+    var j = i + 1
+    var stmts: Vec<Stmt> = []
+    while true {
+        while tokens[j].kind == TSemi {
+            j += 1
+        }
+        let t = tokens[j]
+        if t.kind == TEof {
+            return Err("块未闭合")
+        }
+        if t.text == "}" {
+            return Ok(BlockResult { stmts: stmts next: j + 1 })
+        }
+        let r = parse_stmt(tokens, j)?
+        stmts.push(r.stmt)
+        j = r.next
+    }
+}
+
+
+fn skip_semis(tokens: Vec<Token>, i: i32) -> i32 {
+    var j = i
+    while tokens[j].kind == TSemi {
+        j += 1
+    }
+    return j
+}
+
+
+fn parse_stmt(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
+    let t = tokens[i]
+    if t.kind == TIdent {
+        let kw = t.text
+        if kw == "let" {
+            return parse_let(tokens, i + 1, false)
+        }
+        if kw == "var" {
+            // G2.0 ①：var = 可变绑定（let mut 已移除）
+            return parse_let(tokens, i + 1, true)
+        }
+        if kw == "if" {
+            return parse_if(tokens, i + 1)
+        }
+        if kw == "while" {
+            return parse_while(tokens, i + 1)
+        }
+        if kw == "for" {
+            return parse_for(tokens, i + 1)
+        }
+        if kw == "return" {
+            let nxt = skip_semis(tokens, i + 1)
+            let after = tokens[nxt]
+            if after.text == "}" || after.kind == TEof {
+                return Ok(SPResult { stmt: SReturn(None) next: nxt })
+            }
+            // G2.0 ⑥：语句关键字不续读（防吞下一语句为返回值）
+            if after.kind == TIdent {
+                if after.text == "let" || after.text == "var" || after.text == "if" || after.text == "match" || after.text == "for" || after.text == "while" || after.text == "return" || after.text == "break" || after.text == "continue" {
+                    return Ok(SPResult { stmt: SReturn(None) next: i + 1 })
+                }
+            }
+            let r = parse_expr(tokens, nxt, 0)?
+            return Ok(SPResult { stmt: SReturn(Some(r.value)) next: r.next })
+        }
+        if kw == "fn" {
+            return parse_fn(tokens, i + 1)
+        }
+        if kw == "extern" {
+            return parse_extern_fn(tokens, i + 1)
+        }
+        if kw == "struct" {
+            return parse_struct(tokens, i + 1)
+        }
+        if kw == "enum" {
+            return parse_enum(tokens, i + 1)
+        }
+        if kw == "implement" {
+            return parse_impl(tokens, i + 1)
+        }
+        if kw == "interface" {
+            return parse_interface(tokens, i + 1)
+        }
+        if kw == "mod" || kw == "module" {
+            return parse_mod(tokens, i + 1)
+        }
+        if kw == "import" || kw == "use" {
+            return parse_import(tokens, i + 1)
+        }
+        if kw == "match" {
+            return parse_match(tokens, i + 1)
+        }
+        if kw == "go" || kw == "go!" {
+            // go{}/go!{}：结构化/分离后台任务 —— 转译器层按同步块执行
+            //（所有权/捕获检查在 Rust 侧 valueal；真实并发为运行时实现细节）
+            var gi = i + 1
+            if kw == "go!" {
+                gi += 1
+            }
+            if tokens[gi].text != "{" {
+                return Err("go 需要 {")
+            }
+            let gb = parse_block(tokens, gi)?
+            let is_detached = kw == "go!"
+            return Ok(SPResult { stmt: SGo(is_detached, gb.stmts) next: gb.next })
+        }
+        if kw == "ui" {
+            if tokens[i + 1].text == "{" {
+                // ui{}：UI Domain Operation —— 转译器层按同步块执行
+                let ub = parse_block(tokens, i + 1)?
+                return Ok(SPResult { stmt: SUi(ub.stmts) next: ub.next })
+            }
+            // ui Name { ... }：UI 组件定义（声明式体；静态检查在 Rust 侧 valueal，
+            // 转译器结构感知跳过 —— UI 运行时 M7 才发射可执行代码）
+            return parse_ui_component(tokens, i + 1)
+        }
+    }
+    if t.text == "{" {
+        let b = parse_block(tokens, i)?
+        return Ok(SPResult { stmt: SBlock(b.stmts) next: b.next })
+    }
+    // 表达式语句（含赋值：name = expr / name += expr 等）
+    let r = parse_expr(tokens, i, 0)?
+    let after = tokens[r.next]
+    if after.text == "=" || after.text == "+=" || after.text == "-=" || after.text == "*=" || after.text == "/=" || after.text == "%=" {
+        match r.value {
+            EIdent(name) {
+                let rr = parse_expr(tokens, r.next + 1, 0)?
+                return Ok(SPResult { stmt: SAssign(name, after.text, rr.value) next: rr.next })
+            }
+            EIndex(e1, idxe) {
+                // 经 Option 中转取标识符（Expr 上的嵌套 match 形态编译路径不兼容，见 B5 已知限制）
+                let mb = expr_ident_name(e1)
+                match mb {
+                    Some(bname) {
+                        let rr = parse_expr(tokens, r.next + 1, 0)?
+                        return Ok(SPResult { stmt: SAssignIdx(bname, idxe, after.text, rr.value) next: rr.next })
+                    }
+                    None { return Err("赋值左侧必须是变量或变量索引（如 v[i]）") }
+                }
+            }
+            _ { return Err("赋值左侧必须是变量或变量索引（如 v[i]）") }
+        }
+    }
+    return Ok(SPResult { stmt: SExpr(r.value) next: r.next })
+}
+
+
+fn parse_let(tokens: Vec<Token>, mut i: i32, mut is_mut: bool) -> Result<SPResult, String> {
+    // G2.0 ①：可变绑定唯一形态 var（let mut 已移除）
+    let name_t = tokens[i]
+    if name_t.kind != TIdent {
+        return Err("let 后需要名字")
+    }
+    let name = name_t.text
+    var j = i + 1
+    var ty: Option<String> = None
+    if tokens[j].text == ":" {
+        let r = parse_ty(tokens, j + 1)?
+        ty = Some(r.ty)
+        j = r.next
+    }
+    if tokens[j].text != "=" {
+        // 无初始化器的类型声明（let x: T，随后赋值）
+        return Ok(SPResult { stmt: SLet(name, is_mut, ty, EIdent("__noinit__")) next: j })
+    }
+    j += 1
+    let r = parse_expr(tokens, j, 0)?
+    return Ok(SPResult { stmt: SLet(name, is_mut, ty, r.value) next: r.next })
+}
+
+
+fn parse_if(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
+    let cond = parse_expr(tokens, i, 0)?
+    let then_b = parse_block(tokens, cond.next)?
+    var else_stmts: Vec<Stmt> = []
+    var j = then_b.next
+    j = skip_semis(tokens, j)
+    if tokens[j].text == "else" {
+        let k = skip_semis(tokens, j + 1)
+        if tokens[k].text == "if" {
+            // else if 链 → 嵌套 SIf 作为 else 分支
+            let r2 = parse_if(tokens, k + 1)?
+            var es: Vec<Stmt> = []
+            es.push(r2.stmt)
+            else_stmts = es
+            j = r2.next
+        } else {
+            let eb = parse_block(tokens, k)?
+            else_stmts = eb.stmts
+            j = eb.next
+        }
+    }
+    return Ok(SPResult { stmt: SIf(cond.value, then_b.stmts, else_stmts) next: j })
+}
+
+
+fn parse_while(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
+    let cond = parse_expr(tokens, i, 0)?
+    let body = parse_block(tokens, cond.next)?
+    return Ok(SPResult { stmt: SWhile(cond.value, body.stmts) next: body.next })
+}
+
+
+fn parse_for(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
+    let name_t = tokens[i]
+    if name_t.kind != TIdent {
+        return Err("for 后需要循环变量")
+    }
+    if tokens[i + 1].text != "in" {
+        return Err("for 需要 in")
+    }
+    let iter = parse_expr(tokens, i + 2, 0)?
+    var j = iter.next
+    // 区间：a..b 解析为 ERange
+    if tokens[j].text == ".." {
+        let high = parse_expr(tokens, j + 1, 0)?
+        let body = parse_block(tokens, high.next)?
+        return Ok(SPResult { stmt: SFor(name_t.text, ERange(iter.value, high.value), body.stmts) next: body.next })
+    }
+    let body = parse_block(tokens, j)?
+    return Ok(SPResult { stmt: SFor(name_t.text, iter.value, body.stmts) next: body.next })
+}
+
+
+fn parse_fn(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {    let name_t = tokens[i]
+    if name_t.kind != TIdent {
+        return Err("fn 后需要名字")
+    }
+    let name = name_t.text
+    var j = i + 1
+    if tokens[j].text != "(" {
+        return Err("fn 参数需要 (")
+    }
+    j += 1
+    var params: Vec<Param> = []
+    while tokens[j].text != ")" {
+        // mut 形参前缀（自解析 parse_let 等时必需）
+        if tokens[j].text == "mut" {
+            j += 1
+        }
+        let pn = tokens[j]
+        if pn.kind != TIdent {
+            return Err("参数需要名字")
+        }
+        // impl 方法 self 形参：无类型注解（发射时按 impl 类型）
+        if pn.text == "self" && tokens[j + 1].text != ":" {
+            params.push(Param { name: "self" ty: "self" })
+            j += 1
+            if tokens[j].text == "," {
+                j += 1
+            }
+            continue
+        }
+        if tokens[j + 1].text != ":" {
+            return Err(f"参数 {pn.text} 需要类型")
+        }
+        let ty_r = parse_ty(tokens, j + 2)?
+        params.push(Param { name: pn.text ty: ty_r.ty })
+        j = ty_r.next
+        if tokens[j].text == "," {
+            j += 1
+        }
+    }
+    j += 1
+    var ret: Option<String> = None
+    if tokens[j].text == "->" {
+        let ty_r = parse_ty(tokens, j + 1)?
+        ret = Some(ty_r.ty)
+        j = ty_r.next
+    }
+    let body = parse_block(tokens, j)?
+    return Ok(SPResult { stmt: SDef(name, params, ret, body.stmts) next: body.next })
+}
+
+
+// extern fn name(params) -> ret —— FFI 声明（无函数体；符号由外部 C 提供）
+fn parse_extern_fn(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
+    var j = i
+    if tokens[j].text != "fn" {
+        return Err("extern 后需要 fn")
+    }
+    j += 1
+    let name_t = tokens[j]
+    if name_t.kind != TIdent {
+        return Err("extern fn 后需要名字")
+    }
+    j += 1
+    if tokens[j].text != "(" {
+        return Err("extern fn 需要 (")
+    }
+    j += 1
+    var params: Vec<Param> = []
+    while tokens[j].text != ")" {
+        if tokens[j].text == "," {
+            j += 1
+            continue
+        }
+        let pn = tokens[j]
+        if pn.kind != TIdent {
+            return Err("extern 参数需要名字")
+        }
+        if tokens[j + 1].text != ":" {
+            return Err(f"extern 参数 {pn.text} 需要类型")
+        }
+        let ty_r = parse_ty(tokens, j + 2)?
+        params.push(Param { name: pn.text ty: ty_r.ty })
+        j = ty_r.next
+    }
+    j += 1
+    var ret: Option<String> = None
+    if tokens[j].text == "->" {
+        let ty_r = parse_ty(tokens, j + 1)?
+        ret = Some(ty_r.ty)
+        j = ty_r.next
+    }
+    return Ok(SPResult { stmt: SDef(name_t.text, params, ret, []) next: j })
+}
+
+
+// ui Name { ... }：UI 组件定义 —— 结构感知跳过（字符串整体消费），返回空块占位
+fn parse_ui_component(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
+    var j = i
+    if tokens[j].kind != TIdent {
+        return Err("ui 组件后需要名字")
+    }
+    j += 1
+    if tokens[j].text != "{" {
+        return Err("ui 组件需要 {")
+    }
+    j += 1
+    var depth = 1
+    while depth > 0 && tokens[j].kind != TEof {
+        if tokens[j].kind == TStr {
+            // 字符串整体消费（内容可能含 { }）
+            j += 1
+            continue
+        }
+        if tokens[j].text == "{" {
+            depth += 1
+        }
+        if tokens[j].text == "}" {
+            depth -= 1
+        }
+        j += 1
+    }
+    return Ok(SPResult { stmt: SBlock([]) next: j })
+}
+
+
+fn parse_struct(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
+    let name_t = tokens[i]
+    if name_t.kind != TIdent {
+        return Err("struct 后需要名字")
+    }
+    let name = name_t.text
+    var j = i + 1
+    if tokens[j].text != "{" {
+        return Err("struct 需要 {")
+    }
+    j += 1
+    var fields: Vec<Field> = []
+    while true {
+        while tokens[j].kind == TSemi {
+            j += 1
+        }
+        if tokens[j].text == "}" {
+            j += 1
+            break
+        }
+        let fn_t = tokens[j]
+        if fn_t.kind != TIdent {
+            return Err("struct 字段需要名字")
+        }
+        if tokens[j + 1].text != ":" {
+            return Err(f"字段 {fn_t.text} 需要类型")
+        }
+        let tr = parse_ty(tokens, j + 2)?
+        fields.push(Field { name: fn_t.text ty: tr.ty })
+        j = tr.next
+    }
+    return Ok(SPResult { stmt: SStruct(name, fields) next: j })
+}
+
+
+fn parse_enum(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
+    let name_t = tokens[i]
+    if name_t.kind != TIdent {
+        return Err("enum 后需要名字")
+    }
+    let name = name_t.text
+    var j = i + 1
+    if tokens[j].text != "{" {
+        return Err("enum 需要 {")
+    }
+    j += 1
+    var variants: Vec<EVariant> = []
+    while true {
+        while tokens[j].kind == TSemi {
+            j += 1
+        }
+        if tokens[j].text == "}" {
+            j += 1
+            break
+        }
+        let vn = tokens[j]
+        if vn.kind != TIdent {
+            return Err("enum 变体需要名字")
+        }
+        j += 1
+        var fields: Vec<String> = []
+        if tokens[j].text == "(" {
+            j += 1
+            while tokens[j].text != ")" {
+                let tr = parse_ty(tokens, j)?
+                fields.push(tr.ty)
+                j = tr.next
+                if tokens[j].text == "," {
+                    j += 1
+                }
+            }
+            j += 1
+        }
+        variants.push(EVariant { name: vn.text fields: fields })
+    }
+    return Ok(SPResult { stmt: SEnum(name, variants) next: j })
+}
+
+
+// interface Name { fn 签名 } — 类型约束声明；转译阶段丢弃（约束由 implement 承载）
+fn parse_interface(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
+    var j = i
+    if tokens[j].kind != TIdent {
+        return Err("interface 后需要名字")
+    }
+    j += 1
+    if tokens[j].text != "{" {
+        return Err("interface 需要 {")
+    }
+    j += 1
+    var depth = 1
+    while depth > 0 && tokens[j].kind != TEof {
+        if tokens[j].text == "{" { depth += 1 }
+        if tokens[j].text == "}" { depth -= 1 }
+        j += 1
+    }
+    return Ok(SPResult { stmt: SExpr(EUnit) next: j })
+}
+
+fn parse_impl(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
+    // implement Interface for Type { }  /  impl Type { }（旧形态）
+    var ty_i = i
+    if tokens[ty_i + 1].text == "for" {
+        ty_i += 2
+    }
+    let ty_t = tokens[ty_i]
+    if ty_t.kind != TIdent {
+        return Err("impl 后需要类型名")
+    }
+    let ty = ty_t.text
+    var j = ty_i + 1
+    if tokens[j].text != "{" {
+        return Err("impl 需要 {")
+    }
+    j += 1
+    var methods: Vec<Stmt> = []
+    while true {
+        while tokens[j].kind == TSemi {
+            j += 1
+        }
+        if tokens[j].text == "}" {
+            j += 1
+            break
+        }
+        if tokens[j].kind == TEof {
+            return Err("impl 未闭合")
+        }
+        let r = parse_stmt(tokens, j)?
+        methods.push(r.stmt)
+        j = r.next
+    }
+    return Ok(SPResult { stmt: SImpl(ty, methods) next: j })
+}
+
+
+fn parse_mod(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
+    let name_t = tokens[i]
+    if name_t.kind != TIdent {
+        return Err("mod 后需要名字")
+    }
+    let name = name_t.text
+    var j = i + 1
+    if tokens[j].text == ";" {
+        return Ok(SPResult { stmt: SMod(name, []) next: j + 1 })
+    }
+    if tokens[j].text != "{" {
+        return Err("mod 需要 { 或 ;")
+    }
+    j += 1
+    var items: Vec<Stmt> = []
+    while true {
+        while tokens[j].kind == TSemi {
+            j += 1
+        }
+        if tokens[j].text == "}" {
+            j += 1
+            break
+        }
+        if tokens[j].kind == TEof {
+            return Err("mod 未闭合")
+        }
+        let r = parse_stmt(tokens, j)?
+        items.push(r.stmt)
+        j = r.next
+    }
+    return Ok(SPResult { stmt: SMod(name, items) next: j })
+}
+
+
+fn parse_match(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
+    let scrut = parse_expr(tokens, i, 0)?
+    var j = scrut.next
+    if tokens[j].text != "{" {
+        return Err("match 需要 {")
+    }
+    j += 1
+    var arms: Vec<MatchArm> = []
+    while true {
+        while tokens[j].kind == TSemi {
+            j += 1
+        }
+        if tokens[j].text == "}" {
+            j += 1
+            break
+        }
+        if tokens[j].kind == TEof {
+            return Err("match 未闭合")
+        }
+        // G2.0 ⑤：块式臂 Pat { body }（模式后直接 {，无 =>）；旧 => 形态兼容保留
+        var pat = ""
+        var block_arm = false
+        while true {
+            if tokens[j].kind == TStr {
+                // 字符串字面量整体消费（内容可能恰为 "=>" / "{"，不能误判为分隔符）
+                pat = pat + "\"" + tokens[j].text + "\""
+                j += 1
+                continue
+            }
+            if tokens[j].text == "=>" || tokens[j].text == "{" {
+                break
+            }
+            pat = pat + tokens[j].text
+            j += 1
+        }
+        if tokens[j].text == "{" {
+            block_arm = true
+        } else {
+            j += 1
+        }
+        // 臂体：块 / return / 表达式 / 赋值
+        var body: Stmt
+        if tokens[j].text == "{" {
+            let b = parse_block(tokens, j)?
+            body = SBlock(b.stmts)
+            j = b.next
+        } else if tokens[j].text == "return" {
+            let rr = parse_expr(tokens, j + 1, 0)?
+            body = SReturn(Some(rr.value))
+            j = rr.next
+        } else {
+            let r = parse_expr(tokens, j, 0)?
+            let after = tokens[r.next]
+            if after.text == "=" || after.text == "+=" || after.text == "-=" || after.text == "*=" || after.text == "/=" || after.text == "%=" {
+                match r.value {
+                    EIdent(bn) {
+                        let rr = parse_expr(tokens, r.next + 1, 0)?
+                        body = SAssign(bn, after.text, rr.value)
+                        j = rr.next
+                    }
+                    EIndex(e2, idxe2) {
+                        // 经 Option 中转取标识符（同上）
+                        let mb2 = expr_ident_name(e2)
+                        match mb2 {
+                            Some(bn2) {
+                                let rr = parse_expr(tokens, r.next + 1, 0)?
+                                body = SAssignIdx(bn2, idxe2, after.text, rr.value)
+                                j = rr.next
+                            }
+                            None { return Err("赋值左侧必须是变量或变量索引（如 v[i]）") }
+                        }
+                    }
+                    _ { return Err("赋值左侧必须是变量或变量索引（如 v[i]）") }
+                }
+            } else {
+                body = SExpr(r.value)
+                j = r.next
+            }
+        }
+        arms.push(MatchArm { pat: pat body: body })
+    }
+    return Ok(SPResult { stmt: SMatch(scrut.value, arms) next: j })
+}
+
+
+// match 表达式：match scrut { pat { body ... } → EMatch }
+fn parse_match_expr(tokens: Vec<Token>, i: i32) -> Result<EPResult, String> {
+    let scrut = parse_expr(tokens, i + 1, 0)?
+    var j = scrut.next
+    if tokens[j].text != "{" {
+        return Err("match 表达式需要 {")
+    }
+    j += 1
+    var arms: Vec<MatchArm> = []
+    while true {
+        while tokens[j].kind == TSemi {
+            j += 1
+        }
+        if tokens[j].text == "}" {
+            j += 1
+            break
+        }
+        if tokens[j].kind == TEof {
+            return Err("match 表达式未闭合")
+        }
+        var pat = ""
+        var block_arm = false
+        while true {
+            if tokens[j].kind == TStr {
+                pat = pat + "\"" + tokens[j].text + "\""
+                j += 1
+                continue
+            }
+            if tokens[j].text == "=>" || tokens[j].text == "{" {
+                break
+            }
+            pat = pat + tokens[j].text
+            j += 1
+        }
+        if tokens[j].text == "{" {
+            block_arm = true
+        } else {
+            j += 1
+        }
+        var body: Stmt
+        if tokens[j].text == "{" {
+            let b = parse_block(tokens, j)?
+            body = SBlock(b.stmts)
+            j = b.next
+        } else if tokens[j].text == "return" {
+            let rr = parse_expr(tokens, j + 1, 0)?
+            body = SReturn(Some(rr.value))
+            j = rr.next
+        } else {
+            let r = parse_expr(tokens, j, 0)?
+            body = SExpr(r.value)
+            j = r.next
+        }
+        arms.push(MatchArm { pat: pat body: body })
+    }
+    return Ok(EPResult { value: EMatch(scrut.value, arms) next: j })
+}
+
+
+fn parse_program(tokens: Vec<Token>) -> Result<Vec<Stmt>, String> {
+    var stmts: Vec<Stmt> = []
+    var i = 0
+    while true {
+        i = skip_semis(tokens, i)
+        let t = tokens[i]
+        if t.kind == TEof {
+            return Ok(stmts)
+        }
+        // @global var Name [: Type] [= Init] — 全局状态(S1c)
+        if t.kind == TOp && t.text == "@" {
+            let gi = i + 1
+            if tokens[gi].kind == TIdent && tokens[gi].text == "global" {
+                let ki = gi + 1
+                if tokens[ki].kind == TIdent && (tokens[ki].text == "var" || tokens[ki].text == "let") {
+                    let ni = ki + 1
+                    if tokens[ni].kind != TIdent {
+                        return Err("@global 后需要变量名")
+                    }
+                    let name = tokens[ni].text
+                    var j = ni + 1
+                    var ty: Option<String> = None
+                    if tokens[j].text == ":" {
+                        let tr = parse_ty(tokens, j + 1)?
+                        ty = Some(tr.ty)
+                        j = tr.next
+                    }
+                    var init: Expr = EUnit
+                    if tokens[j].text == "=" {
+                        let ir = parse_expr(tokens, j + 1, 0)?
+                        init = ir.value
+                        j = ir.next
+                    }
+                    // let 中转：变体构造器是匿名 rvalue，直接 push 取址不合法
+                    let sv: Stmt = SGlobalVar(name, ty, init)
+                    stmts.push(sv)
+                    i = j
+                    continue
+                }
+                return Err("@ 后需要 global")
+            }
+            return Err("无法识别的 @ 语法")
+        }
+        let rs = parse_stmt(tokens, i)
+        match rs {
+            Ok(r) {
+                if r.next <= i {
+                    return Err("parse 无进展 @ '" + tokens[i].text + "' i=" + f"{i}")
+                }
+                stmts.push(r.stmt)
+                i = r.next
+            }
+            Err(e) {
+                return Err(e)
+            }
+        }
+    }
+}
+
+// 容错解析(T18): 错误恢复到语句边界, 返回部分 AST + 错误列表。
+// parse_program 语义不变(全有或全无); 编辑器/LSP 走本入口。
+struct SafeParse {
+    stmts: Vec<Stmt>
+    errors: Vec<PErr>
+}
+
+struct PErr {
+    index: i32
+    message: String
+}
+
+fn parse_program_safe(tokens: Vec<Token>) -> SafeParse {
+    var stmts: Vec<Stmt> = []
+    var errors: Vec<PErr> = []
+    var i = 0
+    var guard = 0
+    while i < tokens.len() && guard < 100000 {
+        guard += 1
+        while i < tokens.len() && tokens[i].kind == TSemi {
+            i += 1
+        }
+        if i >= tokens.len() || tokens[i].kind == TEof {
+            break
+        }
+        let rs = parse_stmt(tokens, i)
+        match rs {
+            Ok(r) {
+                if r.next <= i {
+                    errors.push(PErr { index: i message: "parse 无进展 @ '" + tokens[i].text + "'" })
+                    i += 1
+                } else {
+                    stmts.push(r.stmt)
+                    i = r.next
+                }
+            }
+            Err(e) {
+                errors.push(PErr { index: i message: e })
+                // 恢复: 跳到下一个语句边界(TSemi/TEof)
+                while i < tokens.len() && tokens[i].kind != TSemi && tokens[i].kind != TEof {
+                    i += 1
+                }
+            }
+        }
+    }
+    return SafeParse { stmts: stmts errors: errors }
+}
+
+// 错误 token 索引 → 行号(0 起始; 数 TSemi)
+fn token_line(tokens: Vec<Token>, index: i32) -> i32 {
+    var line = 0
+    var i = 0
+    while i < index && i < tokens.len() {
+        if tokens[i].kind == TSemi {
+            line += 1
+        }
+        i += 1
+    }
+    return line
+}
+
+// ctype → Aine 类型名（闭包提升时推导返回类型）
+fn ctype_to_aine(ct: String) -> String {
+    if ct == "int" { return "i32" }
+    if ct == "double" { return "f64" }
+    if ct == "char*" { return "String" }
+    if ct == "char" { return "char" }
+    if ct.starts_with("struct ") {
+        return ct[7..ct.len()]
+    }
+    return ""
+}
+
+// 独立闭包脱糖（B5-M27）：
+//   let f = (x: i32) => body  →  顶层 fn f(x: i32) -> <推断> { body }
+// 提升后调用点 f(..) 即普通函数调用，零改动。约束（自举期 MVP）：
+//   1) 仅提升 fn 体顶层的非捕获闭包；2) 参数必须全部带类型注解；
+//   3) 闭包变量名提升为全局函数名，需全局唯一。
+
+// 提升函数调用的调用点改写：f(args) → f(捕获..., args)（递归块）
+fn str_replace_all(s: String, from: String, to: String) -> String {
+    var out = ""
+    var i = 0
+    let fl = from.len()
+    let sl = s.len()
+    while i < sl {
+        if i + fl <= sl && s[i..i + fl] == from {
+            out = out + to
+            i = i + fl
+        } else {
+            out = out + s[i..i + 1]
+            i += 1
+        }
+    }
+    return out
+}
+
+fn rewrite_lift_calls(s: Stmt, lift_fns: Vec<String>, lift_caps_txt: Vec<String>) -> Stmt {
+    // 语句式改写（B5-M32 后仍保留:避免依赖尾 match 语义的边界形态）
+    var res: Stmt = s
+    var done = false
+    match s {
+        SExpr(e) {
+            let e2 = rewrite_lift_expr(e, lift_fns, lift_caps_txt)
+            res = SExpr(e2)
+            done = true
+        }
+        SReturn(Some(e)) {
+            let e2 = rewrite_lift_expr(e, lift_fns, lift_caps_txt)
+            res = SReturn(Some(e2))
+            done = true
+        }
+        SLet(n, m, t, init) {
+            let e2 = rewrite_lift_expr(init, lift_fns, lift_caps_txt)
+            res = SLet(n, m, t, e2)
+            done = true
+        }
+        SAssign(n, op, rhs) {
+            let e2 = rewrite_lift_expr(rhs, lift_fns, lift_caps_txt)
+            res = SAssign(n, op, e2)
+            done = true
+        }
+        SAssignIdx(bn, idxe, op, rhs) {
+            let i2 = rewrite_lift_expr(idxe, lift_fns, lift_caps_txt)
+            let e2 = rewrite_lift_expr(rhs, lift_fns, lift_caps_txt)
+            res = SAssignIdx(bn, i2, op, e2)
+            done = true
+        }
+        _ {}
+    }
+    if !done {
+        match s {
+            SIf(cond, b, eb) {
+                let c2 = rewrite_lift_expr(cond, lift_fns, lift_caps_txt)
+                var b2: Vec<Stmt> = []
+                for st2 in b {
+                    let t2 = rewrite_lift_calls(st2, lift_fns, lift_caps_txt)
+                    b2.push(t2)
+                }
+                var eb2: Vec<Stmt> = []
+                for st2 in eb {
+                    let t3 = rewrite_lift_calls(st2, lift_fns, lift_caps_txt)
+                    eb2.push(t3)
+                }
+                res = SIf(c2, b2, eb2)
+            }
+            SWhile(cond, b) {
+                let c2 = rewrite_lift_expr(cond, lift_fns, lift_caps_txt)
+                var b2: Vec<Stmt> = []
+                for st2 in b {
+                    let t2 = rewrite_lift_calls(st2, lift_fns, lift_caps_txt)
+                    b2.push(t2)
+                }
+                res = SWhile(c2, b2)
+            }
+            _ {}
+        }
+    }
+    return res
+}
+
+fn rewrite_lift_expr(e: Expr, lift_fns: Vec<String>, lift_caps_txt: Vec<String>) -> Expr {
+    match e {
+        EStr(sv) {
+            if sv.len() >= 3 && sv[0..2] == "f\"" {
+                var v2 = sv
+                var li = 0
+                for lf in lift_fns {
+                    let caps_txt = lift_caps_txt[li]
+                    if caps_txt != "" {
+                        v2 = str_replace_all(v2, lf + "(", lf + "(" + caps_txt + ", ")
+                    }
+                    li += 1
+                }
+                return EStr(v2)
+            }
+            return EStr(sv)
+        }
+        ECall(cf, cargs) {
+            match cf {
+                EIdent(fname) {
+                    var fi = 0
+                    var found = false
+                    for k in 0..lift_fns.len() {
+                        if lift_fns[k] == fname {
+                            fi = k
+                            found = true
+                        }
+                    }
+                    if found {
+                        // A2 补传：提升闭包的调用点前插捕获变量（隐藏前缀参数）
+                        let caps_txt = lift_caps_txt[fi]
+                        var new_args: Vec<Expr> = []
+                        if caps_txt != "" {
+                            let caps = str_split(caps_txt, ",")
+                            for cp in caps {
+                                // 源层规避: 变体构造直接入 push 会发 &右值（B5 已知限制家族）
+                                var cap_e = EIdent(cp)
+                                new_args.push(cap_e)
+                            }
+                        }
+                        for a in cargs {
+                            let a1 = rewrite_lift_expr(a, lift_fns, lift_caps_txt)
+                            new_args.push(a1)
+                        }
+                        let out_call = ECall(EIdent(fname), new_args)
+                        return out_call
+                    }
+                    var new_args2: Vec<Expr> = []
+                    for a in cargs {
+                        let a2 = rewrite_lift_expr(a, lift_fns, lift_caps_txt)
+                        new_args2.push(a2)
+                    }
+                    let out_call2 = ECall(cf, new_args2)
+                    return out_call2
+                }
+                _ { return ECall(cf, cargs) }
+            }
+        }
+        _ { return e }
+    }
+}
+
+fn desugar_closures(program: Vec<Stmt>) -> Vec<Stmt> {
+    let fnames = collect_fn_names(program)
+    let freturns = collect_fn_returns(program)
+    let snames = collect_struct_snames(program)
+    let sfnames = collect_struct_fnames(program)
+    let sftypes = collect_struct_ftypes(program)
+    let user_types = collect_user_types(program)
+    var lifted: Vec<Stmt> = []
+    var lift_fns: Vec<String> = []
+    var lift_caps: Vec<Vec<Expr>> = []
+    var lift_caps_txt: Vec<String> = []
+    var out: Vec<Stmt> = []
+    for s in program {
+        match s {
+            SDef(fname, params, ret, body_s) {
+                var pnames: Vec<String> = []
+                var ptypes: Vec<String> = []
+                for p in params {
+                    pnames.push(p.name)
+                    ptypes.push(p.ty)
+                }
+                var newbody: Vec<Stmt> = []
+                for st in body_s {
+                    match st {
+                        SLet(vn, is_mut, ty, init) {
+                            match init {
+                                EClosure(ps, bexpr) {
+                                    // 参数全部带注解才提升
+                                    var all_typed = true
+                                    for p2 in ps {
+                                        if p2.ty == "" { all_typed = false }
+                                    }
+                                    if all_typed {
+                                        var seeded_n: Vec<String> = []
+                                        var seeded_t: Vec<String> = []
+                                        for pn in pnames { seeded_n.push(pn) }
+                                        for pt in ptypes { seeded_t.push(pt) }
+                                        for p3 in ps {
+                                            seeded_n.push(p3.name)
+                                            seeded_t.push(p3.ty)
+                                        }
+                                        let ct = expr_ctype(bexpr, seeded_n, seeded_t, fnames, freturns, snames, sfnames, sftypes, user_types)
+                                        let fret = ctype_to_aine(ct)
+                                        var fret2: Option<String> = None
+                                        if fret != "" {
+                                            fret2 = Some(fret)
+                                        }
+                                        var dbody: Vec<Stmt> = []
+                                        let s_ret = SReturn(Some(bexpr))
+                                        dbody.push(s_ret)
+                                        // 捕获分析：自由变量 = 外层函数的局部变量/参数
+                                        // → 提升为隐藏前缀参数（调用点同步补传）
+                                        let vi = var_info_of_stmts(body_s, fnames, freturns, pnames, ptypes, [], [], [], [], [])
+                                        let body_txt = stringify(bexpr)
+                                        var caps: Vec<Param> = []
+                                        var cap_call_args: Vec<Expr> = []
+                                        for k in 0..vi.names.len() {
+                                            let vn2 = vi.names[k]
+                                            let vt2 = vi.types[k]
+                                            if body_txt.contains(vn2) {
+                                                var dup_p = false
+                                                for pp in ps {
+                                                    if pp.name == vn2 { dup_p = true }
+                                                }
+                                                if !dup_p {
+                                                    let cp = Param { name: vn2 ty: vt2 }
+                                                    caps.push(cp)
+                                                    let cexpr = EIdent(vn2)
+                                                    cap_call_args.push(cexpr)
+                                                }
+                                            }
+                                        }
+                                        var ps2: Vec<Param> = []
+                                        for c0 in caps { ps2.push(c0) }
+                                        for p4 in ps { ps2.push(p4) }
+                                        let s_lift = SDef(vn, ps2, fret2, dbody)
+                                        lifted.push(s_lift)
+                                        // 调用点：f → f(caps..., 原实参...) 在 body 重写时同步
+                                        lift_fns.push(vn)
+                                        lift_caps.push(cap_call_args)
+                                        var ct_txt = ""
+                                        var cfirst = true
+                                        for c9 in cap_call_args {
+                                            match c9 {
+                                                EIdent(id9) {
+                                                    if cfirst {
+                                                        ct_txt = ct_txt + id9
+                                                        cfirst = false
+                                                    } else {
+                                                        ct_txt = ct_txt + ", " + id9
+                                                    }
+                                                }
+                                                _ {}
+                                            }
+                                        }
+                                        lift_caps_txt.push(ct_txt)
+                                    } else {
+                                        newbody.push(st)
+                                    }
+                                }
+                                _ { newbody.push(st) }
+                            }
+                        }
+                        _ { newbody.push(st) }
+                    }
+                }
+                // 调用点改写由程序级 rewrite_program_calls 统一执行
+                let s_fn = SDef(fname, params, ret, newbody)
+                out.push(s_fn)
+            }
+            _ { out.push(s) }
+        }
+    }
+    var res: Vec<Stmt> = []
+    for l in lifted {
+        res.push(l)
+    }
+    for o in out {
+        res.push(o)
+    }
+    // 程序级调用点改写（仅当存在提升函数；无闭包时零改动 —— C 共享语义安全）
+    var has_lift = false
+    for lf in lift_fns {
+        if lf != "" { has_lift = true }
+    }
+    if !has_lift {
+        return res
+    }
+    let rres = rewrite_program_calls(res, lift_fns, lift_caps_txt)
+    return rres
+}
+
+// ============ 值流子集（B5-M28）：字符串累加器末用复用 ============
+// 判定（保守白名单）：var 满足
+//   1) 初始化为字符串字面量；2) 函数体内全部赋值均为 `X = X + expr`；
+//   3) 无别名（`let y = X`）——则所有 `X = X + expr` 改写为
+//   `X = al_strcat_own(X, expr)`（realloc 原地追加），消除每次拼接的
+//   malloc + 全量拷贝。语义不变（28 用例回归 + fixpoint 验证）。
+
+struct VAScan {
+    selfs: Vec<String>
+    others: Vec<String>
+    alias: Vec<String>
+    decls: Vec<String>
+}
+
+fn va_scan(stmts: Vec<Stmt>) -> VAScan {
+    // 各层独立收集、调用方合并 —— 禁止跨层共享 al_vec 底层存储
+    //（C 侧 al_vec 按值=指针共享，callee push 的 realloc 会使 caller 数据悬空）
+    var sf: Vec<String> = []
+    var ot: Vec<String> = []
+    var al: Vec<String> = []
+    var dc: Vec<String> = []
+    for st in stmts {
+        match st {
+            SLet(vn, _, ty, init) {
+                match init {
+                    EStr(lit) {
+                        dc.push(vn)
+                    }
+                    EIdent(src) {
+                        al.push(src)
+                    }
+                    _ {
+                        ot.push(vn)
+                    }
+                }
+            }
+            SAssign(vn, op, rhs) {
+                if op == "=" {
+                    match rhs {
+                        EBin(pop, mid, r) {
+                            match mid {
+                                EIdent(l) {
+                                    if pop == "+" && l == vn {
+                                        sf.push(vn)
+                                    } else {
+                                        ot.push(vn)
+                                    }
+                                }
+                                _ { ot.push(vn) }
+                            }
+                        }
+                        _ { ot.push(vn) }
+                    }
+                } else {
+                    ot.push(vn)
+                }
+            }
+            SIf(_, b, eb) {
+                let r1 = va_scan(b)
+                let r2 = va_scan(eb)
+                for x in r1.selfs { sf.push(x) }
+                for x in r1.others { ot.push(x) }
+                for x in r1.alias { al.push(x) }
+                for x in r1.decls { dc.push(x) }
+                for x in r2.selfs { sf.push(x) }
+                for x in r2.others { ot.push(x) }
+                for x in r2.alias { al.push(x) }
+                for x in r2.decls { dc.push(x) }
+            }
+            SWhile(_, b) {
+                let r1 = va_scan(b)
+                for x in r1.selfs { sf.push(x) }
+                for x in r1.others { ot.push(x) }
+                for x in r1.alias { al.push(x) }
+                for x in r1.decls { dc.push(x) }
+            }
+            SFor(_, _, b) {
+                let r1 = va_scan(b)
+                for x in r1.selfs { sf.push(x) }
+                for x in r1.others { ot.push(x) }
+                for x in r1.alias { al.push(x) }
+                for x in r1.decls { dc.push(x) }
+            }
+            SBlock(b) {
+                let r1 = va_scan(b)
+                for x in r1.selfs { sf.push(x) }
+                for x in r1.others { ot.push(x) }
+                for x in r1.alias { al.push(x) }
+                for x in r1.decls { dc.push(x) }
+            }
+            _ {}
+        }
+    }
+    return VAScan { selfs: sf others: ot alias: al decls: dc }
+}
+
+fn va_is_acc(vn: String, selfs: Vec<String>, others: Vec<String>, alias: Vec<String>, decls: Vec<String>) -> bool {
+    if !contains_str(decls, vn) { false }
+    if contains_str(others, vn) { return false }
+    if contains_str(alias, vn) { return false }
+    if !contains_str(selfs, vn) { false }
+    return true
+}
+
+struct VALiteResult {
+    program: Vec<Stmt>
+    saves: i32
+}
+
+fn va_rewrite(stmts: Vec<Stmt>, accs: Vec<String>, saves: i32) -> VALiteResult {
+    var out: Vec<Stmt> = []
+    var sv = saves
+    for st in stmts {
+        match st {
+            SLet(vn, is_mut, ty, init) {
+                match init {
+                    EStr(lit) {
+                        if va_is_acc(vn, accs, accs, accs, accs) || contains_str(accs, vn) {
+                            var cargs: Vec<Expr> = []
+                            let ev = EStr(lit)
+                            cargs.push(ev)
+                            let call = ECall(EIdent("al_strdup_lit"), cargs)
+                            let s_new = SLet(vn, is_mut, ty, call)
+                            out.push(s_new)
+                        } else {
+                            out.push(st)
+                        }
+                    }
+                    _ { out.push(st) }
+                }
+            }
+            SAssign(vn, op, rhs) {
+                if contains_str(accs, vn) {
+                    match rhs {
+                        EBin(pop, mid, r) {
+                            match mid {
+                                EIdent(l) {
+                                    if pop == "+" && l == vn {
+                                        var cargs: Vec<Expr> = []
+                                        let a0 = EIdent(vn)
+                                        cargs.push(a0)
+                                        cargs.push(r)
+                                        let call2 = ECall(EIdent("al_strcat_own"), cargs)
+                                        let s_new = SAssign(vn, op, call2)
+                                        out.push(s_new)
+                                        sv += 1
+                                    } else {
+                                        out.push(st)
+                                    }
+                                }
+                                _ { out.push(st) }
+                            }
+                        }
+                        _ { out.push(st) }
+                    }
+                } else {
+                    out.push(st)
+                }
+            }
+            SIf(cond, b, eb) {
+                let r1 = va_rewrite(b, accs, sv)
+                sv = r1.saves
+                let r2 = va_rewrite(eb, accs, sv)
+                sv = r2.saves
+                let s_if = SIf(cond, r1.program, r2.program)
+                out.push(s_if)
+            }
+            SWhile(cond, b) {
+                let r1 = va_rewrite(b, accs, sv)
+                sv = r1.saves
+                let s_wh = SWhile(cond, r1.program)
+                out.push(s_wh)
+            }
+            SFor(v2, it, b) {
+                let r1 = va_rewrite(b, accs, sv)
+                sv = r1.saves
+                let s_fo = SFor(v2, it, r1.program)
+                out.push(s_fo)
+            }
+            SBlock(b) {
+                let r1 = va_rewrite(b, accs, sv)
+                sv = r1.saves
+                let s_bl = SBlock(r1.program)
+                out.push(s_bl)
+            }
+            _ { out.push(st) }
+        }
+    }
+    return VALiteResult { program: out saves: sv }
+}
+
+fn valueal_lite(program: Vec<Stmt>) -> VALiteResult {
+    var out: Vec<Stmt> = []
+    var saves = 0
+    for s in program {
+        match s {
+            SDef(fname, params, ret, body_s) {
+                let scan = va_scan(body_s)
+                var accs: Vec<String> = []
+                // 数值类型守卫: i32/f64/bool 的自我累加是算术, 不是字符串拼接
+                // (否则 count = count + 1 被误改写为 al_strcat_own)
+                let all_vn = collect_var_names(program)
+                let all_vt = collect_var_types(program)
+                for v in scan.selfs {
+                    if va_is_acc(v, scan.selfs, scan.others, scan.alias, scan.decls) {
+                        var v_is_num = false
+                        let vt3 = var_type(v, all_vn, all_vt)
+                        match vt3 {
+                            Some(t3) {
+                                if t3 == "i32" || t3 == "i64" || t3 == "f64" || t3 == "bool" {
+                                    v_is_num = true
+                                }
+                            }
+                            None {}
+                        }
+                        if !v_is_num && !contains_str(accs, v) {
+                            accs.push(v)
+                        }
+                    }
+                }
+                let rw = va_rewrite(body_s, accs, saves)
+                saves = rw.saves
+                let s_def = SDef(fname, params, ret, rw.program)
+                out.push(s_def)
+            }
+            _ { out.push(s) }
+        }
+    }
+    return VALiteResult { program: out saves: saves }
+}
+
+
+// ============ 值语义（B5-M29）：var-from-var 的 move/clone ============
+// Aine 语义：let x = y 对 Vec/Map/String 为 MOVE（y 失效）；y 仍被使用时
+// 退化为 CLONE（深拷贝基线，慢但正确）。判定用 stringify 全文保守扫描
+// （stringify 覆盖全部 Stmt/Expr 变体，假阳性只会退化为 clone，方向安全）。
+
+struct SemScan {
+    str_d: Vec<String>
+    vec_d: Vec<String>
+    map_d: Vec<String>
+    alias: Vec<String>
+}
+
+fn sem_scan(stmts: Vec<Stmt>) -> SemScan {
+    var sd: Vec<String> = []
+    var vd: Vec<String> = []
+    var md: Vec<String> = []
+    var al: Vec<String> = []
+    for st in stmts {
+        match st {
+            SLet(vn, _, ty, init) {
+                match init {
+                    EStr(_) { sd.push(vn) }
+                    EVec(_) { vd.push(vn) }
+                    EIdent(src) { al.push(src) }
+                    ECall(cf, cargs) {
+                        var known = false
+                        match cf {
+                            EIdent(f2) {
+                                if f2 == "al_strdup_lit" { sd.push(vn) known = true }
+                                if f2 == "al_vec_clone" { vd.push(vn) known = true }
+                                if f2 == "al_map_clone" { md.push(vn) known = true }
+                            }
+                            _ {}
+                        }
+                        if !known {
+                            var t3 = ""
+                            match ty {
+                                Some(t) { t3 = t }
+                                None {}
+                            }
+                            if t3.starts_with("Vec<") { vd.push(vn) }
+                            if t3.starts_with("Map<") { md.push(vn) }
+                        }
+                    }
+                    _ {
+                        var t3 = ""
+                        match ty {
+                            Some(t) { t3 = t }
+                            None {}
+                        }
+                        if t3.starts_with("Vec<") { vd.push(vn) }
+                        if t3.starts_with("Map<") { md.push(vn) }
+                    }
+                }
+            }
+            SAssign(_, _, rhs) {
+                match rhs {
+                    EIdent(src) { al.push(src) }
+                    _ {}
+                }
+            }
+            SIf(_, b, eb) {
+                let r1 = sem_scan(b)
+                let r2 = sem_scan(eb)
+                for x in r1.str_d { sd.push(x) }
+                for x in r1.vec_d { vd.push(x) }
+                for x in r1.map_d { md.push(x) }
+                for x in r1.alias { al.push(x) }
+                for x in r2.str_d { sd.push(x) }
+                for x in r2.vec_d { vd.push(x) }
+                for x in r2.map_d { md.push(x) }
+                for x in r2.alias { al.push(x) }
+            }
+            SWhile(_, b) {
+                let r1 = sem_scan(b)
+                for x in r1.str_d { sd.push(x) }
+                for x in r1.vec_d { vd.push(x) }
+                for x in r1.map_d { md.push(x) }
+                for x in r1.alias { al.push(x) }
+            }
+            SFor(_, _, b) {
+                let r1 = sem_scan(b)
+                for x in r1.str_d { sd.push(x) }
+                for x in r1.vec_d { vd.push(x) }
+                for x in r1.map_d { md.push(x) }
+                for x in r1.alias { al.push(x) }
+            }
+            SBlock(b) {
+                let r1 = sem_scan(b)
+                for x in r1.str_d { sd.push(x) }
+                for x in r1.vec_d { vd.push(x) }
+                for x in r1.map_d { md.push(x) }
+                for x in r1.alias { al.push(x) }
+            }
+            _ {}
+        }
+    }
+    return SemScan { str_d: sd vec_d: vd map_d: md alias: al }
+}
+
+fn sem_mention(stmts: Vec<Stmt>, name: String) -> bool {
+    for st in stmts {
+        if stringify_stmt(st, "").contains(name) {
+            return true
+        }
+    }
+    return false
+}
+
+fn sem_in(vn: String, list: Vec<String>) -> bool {
+    for x in list {
+        if x == vn { true }
+    }
+    return false
+}
+
+fn sem_kind(vn: String, sd: Vec<String>, vd: Vec<String>, md: Vec<String>) -> String {
+    if sem_in(vn, sd) { return "String" }
+    if sem_in(vn, vd) { return "Vec" }
+    if sem_in(vn, md) { return "Map" }
+    return ""
+}
+
+fn sem_zero(kind: String) -> Expr {
+    if kind == "Vec" { ECall(EIdent("al_zero_vec"), []) }
+    if kind == "Map" { ECall(EIdent("al_zero_map"), []) }
+    return EStr("")
+}
+
+fn sem_clone_call(kind: String, src: String) -> Expr {
+    // 数组字面量参数 → push 构建（Vec<Expr> 元素大小需按 struct Expr 正确发射）
+    var cargs: Vec<Expr> = []
+    let a1 = EIdent(src)
+    cargs.push(a1)
+    if kind == "Vec" { ECall(EIdent("al_vec_clone"), cargs) }
+    if kind == "Map" { ECall(EIdent("al_map_clone"), cargs) }
+    return ECall(EIdent("al_strdup_lit"), cargs)
+}
+
+struct SemRew {
+    program: Vec<Stmt>
+    moves: i32
+    copies: i32
+}
+
+fn sem_rewrite(stmts: Vec<Stmt>, sd: Vec<String>, vd: Vec<String>, md: Vec<String>, alias: Vec<String>, moves: i32, copies: i32) -> SemRew {
+    var out: Vec<Stmt> = []
+    var mv = moves
+    var cp = copies
+    var i2 = 0
+    while i2 < stmts.len() {
+        let st = stmts[i2]
+        // rest 用 Vec<Stmt>（切片发 al_slice 返回 int 语义错误）
+        var rest: Vec<Stmt> = []
+        var ri = i2 + 1
+        while ri < stmts.len() {
+            rest.push(stmts[ri])
+            ri += 1
+        }
+        match st {
+            SLet(x, is_mut, ty, init) {
+                match init {
+                    EIdent(y) {
+                        let kind = sem_kind(y, sd, vd, md)
+                        if kind != "" {
+                            if !sem_mention(rest, y) && !sem_in(x, alias) {
+                                let s_move = SLet(x, is_mut, ty, EIdent(y))
+                                out.push(s_move)
+                                let s_zero = SAssign(y, "=", sem_zero(kind))
+                                out.push(s_zero)
+                                mv += 1
+                            } else {
+                                let s_clone = SLet(x, is_mut, ty, sem_clone_call(kind, y))
+                                out.push(s_clone)
+                                cp += 1
+                            }
+                        } else {
+                            out.push(st)
+                        }
+                    }
+                    _ { out.push(st) }
+                }
+            }
+            SIf(cond, b, eb) {
+                let r1 = sem_rewrite(b, sd, vd, md, alias, mv, cp)
+                let r2 = sem_rewrite(eb, sd, vd, md, alias, r1.moves, r1.copies)
+                let s_if = SIf(cond, r1.program, r2.program)
+                out.push(s_if)
+                mv = r2.moves
+                cp = r2.copies
+            }
+            SWhile(cond, b) {
+                let r1 = sem_rewrite(b, sd, vd, md, alias, mv, cp)
+                mv = r1.moves
+                cp = r1.copies
+                let s_wh = SWhile(cond, r1.program)
+                out.push(s_wh)
+            }
+            SFor(v2, it, b) {
+                let r1 = sem_rewrite(b, sd, vd, md, alias, mv, cp)
+                mv = r1.moves
+                cp = r1.copies
+                let s_fo = SFor(v2, it, r1.program)
+                out.push(s_fo)
+            }
+            SBlock(b) {
+                let r1 = sem_rewrite(b, sd, vd, md, alias, mv, cp)
+                mv = r1.moves
+                cp = r1.copies
+                let s_bl = SBlock(r1.program)
+                out.push(s_bl)
+            }
+            _ { out.push(st) }
+        }
+        i2 += 1
+    }
+    return SemRew { program: out moves: mv copies: cp }
+}
+
+// 程序级调用点改写（覆盖所有函数，含嵌套实参）
+fn rewrite_program_calls(program: Vec<Stmt>, lift_fns: Vec<String>, lift_caps_txt: Vec<String>) -> Vec<Stmt> {
+    var out: Vec<Stmt> = []
+    for s in program {
+        match s {
+            SDef(fname, params, ret, body_s) {
+                // 跳过提升函数自身体（其参数已绑定捕获值）
+                var is_lift = false
+                for lf in lift_fns {
+                    if lf == fname { is_lift = true }
+                }
+                if is_lift {
+                    out.push(s)
+                    continue
+                }
+                var nb: Vec<Stmt> = []
+                for st in body_s {
+                    let t4 = rewrite_lift_calls(st, lift_fns, lift_caps_txt)
+                    nb.push(t4)
+                }
+                let s_d = SDef(fname, params, ret, nb)
+                out.push(s_d)
+            }
+            _ { out.push(s) }
+        }
+    }
+    return out
+}
+
+fn value_semantics(program: Vec<Stmt>) -> SemRew {
+    var out: Vec<Stmt> = []
+    var mv = 0
+    var cp = 0
+    for s in program {
+        match s {
+            SDef(fname, params, ret, body_s) {
+                let scan = sem_scan(body_s)
+                let r = sem_rewrite(body_s, scan.str_d, scan.vec_d, scan.map_d, scan.alias, 0, 0)
+                mv = mv + r.moves
+                cp = cp + r.copies
+                let s_def = SDef(fname, params, ret, r.program)
+                out.push(s_def)
+            }
+            _ { out.push(s) }
+        }
+    }
+    return SemRew { program: out moves: mv copies: cp }
+}

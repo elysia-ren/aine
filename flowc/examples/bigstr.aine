@@ -1,0 +1,41 @@
+// M3 大对象运行时实测：String 分层构建（10MB）+ Vec 大数组（100 万元素）
+// 分层构建规避 al_strcat_own 的 strlen O(n²)（已知限制，见 M3 报告）
+// 用法: aine run examples/bigstr.aine [100]（100 → 100MB 字符串 / 1000 万 Vec）
+fn main() -> Result<(), String> {
+    var big = false
+    if cli_args.len() >= 1 {
+        if cli_args[0] == "100" { big = true }
+    }
+    // String：64KB 片段 × 160 层 = 10MB（big: 1600 层 = 100MB）
+    var s = ""
+    var layer = 0
+    let layers = if big { 1600 } else { 160 }
+    while layer < layers {
+        // 每片段 4096 次 × 16B = 64KB（层内 O(层长) 扫描）
+        var chunk = ""
+        var ci = 0
+        while ci < 4096 {
+            chunk = chunk + "0123456789abcdef"
+            ci += 1
+        }
+        s = s + chunk
+        layer += 1
+    }
+    print(f"str_len={s.len()}")
+    // Vec<i32>: 100 万元素（big: 1000 万）构建 + 遍历求和
+    var n = if big { 10000000 } else { 1000000 }
+    var v: Vec<i32> = []
+    var j = 0
+    while j < n {
+        v.push(j)
+        j += 1
+    }
+    print(f"vec_len={v.len()}")
+    var total = 0
+    for x in v {
+        total += x
+    }
+    print(f"sum={total}")
+    print(f"s0={s[0]} sn={s[s.len() - 1]}")
+    return Ok(())
+}

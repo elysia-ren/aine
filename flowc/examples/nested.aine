@@ -1,0 +1,20 @@
+// Map 嵌套值类型递归：Map<String, Map<String, i32>>
+fn main() {
+    var grid: Map<String, Map<String, i32>> = Map.new()
+    var cell: Map<String, i32> = Map.new()
+    cell.set("hp", 100)
+    grid.set("hero", cell)
+    let got = grid.get("hero")
+    match got {
+        Some(c) {
+            let hp = c.get("hp")
+            match hp {
+                Some(v) { print(f"hp={v}") }
+                None { print("hp none") }
+            }
+        }
+        None { print("row none") }
+    }
+    let ks = grid.keys()
+    print(f"rows={ks.len()}")
+}

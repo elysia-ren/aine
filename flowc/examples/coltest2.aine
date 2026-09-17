@@ -1,0 +1,12 @@
+// collections 扩充端到端
+module collections;
+
+fn main() {
+    let v = [5, 3, 8, 1, 9, 2]
+    let s = sort_ints(v)
+    let total = sum_ints(v)
+    let has = contains_int(v, 8)
+    print(f"sorted_first={s[0]} sorted_last={s[5]} total={total} has8={has}")
+    let r = range_vec(4)
+    print(f"range={r.len()} rev_first={vec_reverse(r)[0]}")
+}

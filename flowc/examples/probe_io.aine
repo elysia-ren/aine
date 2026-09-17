@@ -1,0 +1,134 @@
+// 自举拆分：类型工具在 altype.aine（文件模块，扁平注册）
+
+
+// parser_stmt.aine — 用 Aine 写的语句级解析器（自举 B4-M2）
+// 在 parser_expr.aine 的 Pratt 表达式核心之上，扩展：
+//   语句：let(mut/类型注解)/if-else/while/for..in/return/赋值/块/表达式语句
+//   项：fn 定义（参数、返回类型）
+// 输出完整 AST 的 stringify 回显，main 内自断言。
+
+enum TokKind {
+    TIdent
+    TInt
+    TFloat
+    TStr
+    TOp
+    TSemi
+    TEof
+}
+
+struct Token {
+    kind: TokKind
+    text: String
+}
+
+enum Expr {
+    EInt(i32)
+    EFloat(f64)
+    EStr(String)
+    EIdent(String)
+    EBin(String, Expr, Expr)
+    EUnary(String, Expr)
+    ECall(Expr, Vec<Expr>)
+    EField(Expr, String)
+    EBlock(Vec<Stmt>)
+    EVec(Vec<Expr>)
+    EUnit
+    EStruct(String, Vec<StructField>)
+    ETry(Expr)
+    ERange(Expr, Expr)
+    EClosure(Vec<Param>, Expr)
+    EIndex(Expr, Expr)
+    EIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    EMatch(Expr, Vec<MatchArm>)
+}
+
+enum Stmt {
+    SLet(String, bool, Option<String>, Expr)
+    SIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    SWhile(Expr, Vec<Stmt>)
+    SFor(String, Expr, Vec<Stmt>)
+    SReturn(Option<Expr>)
+    SExpr(Expr)
+    SBlock(Vec<Stmt>)
+    SAssign(String, String, Expr)
+    SDef(String, Vec<Param>, Option<String>, Vec<Stmt>)
+    SStruct(String, Vec<Field>)
+    SEnum(String, Vec<EVariant>)
+    SImpl(String, Vec<Stmt>)
+    SMod(String, Vec<Stmt>)
+    SImport(String)
+    SMatch(Expr, Vec<MatchArm>)
+}
+
+struct MatchArm {
+    pat: String
+    body: Stmt
+}
+
+struct Field {
+    name: String
+    ty: String
+}
+
+struct StructField {
+    name: String
+    value: Expr
+}
+
+struct EVariant {
+    name: String
+    fields: Vec<String>
+}
+
+struct Param {
+    name: String
+    ty: String
+}
+
+struct EPResult {
+    value: Expr
+    next: i32
+}
+
+struct SPResult {
+    stmt: Stmt
+    next: i32
+}
+
+struct BlockResult {
+    stmts: Vec<Stmt>
+    next: i32
+}
+
+struct TyResult {
+    ty: String
+    next: i32
+}
+
+struct FlatResult {
+    out: Vec<Stmt>
+    loaded: Vec<String>
+}
+
+// var name -> type tables
+struct VarInfo {
+    names: Vec<String>
+    types: Vec<String>
+}
+
+module altype;
+module allex;
+module alparse;
+module alstr;
+module alcollect;
+module alee;
+fn main() -> Result<(), String> {
+    let src = read_file("examples/iotest.aine")
+    let p = parse_program(tokenize(src))?
+    let c = c_program(p, collect_user_types(p), collect_variant_names(p), collect_variant_owners(p), collect_fn_names(p), collect_fn_returns(p), collect_var_names(p), collect_var_types(p), collect_fn_ptypes(p), collect_enum_ty_names(p), collect_enum_variant_lists(p))
+    print("===GEN-BEGIN===")
+    print(c)
+    print("===GEN-END===")
+    Ok(())
+}

@@ -1,0 +1,21 @@
+# Aine Studio 多厂商部署表（复制为 models.toml 后填入你的 API Key）
+# protocol: openai_chat / openai_responses / anthropic_messages / gemini / provider_native
+# capabilities: chat / explain / fix / reason
+
+[[model]]
+id = "deepseek"
+provider = "deepseek"
+protocol = "openai_chat"
+base_url = "https://api.deepseek.com/v1"
+model = "deepseek-chat"
+api_key = ""
+capabilities = ["chat", "explain", "fix"]
+
+[[model]]
+id = "anthropic"
+provider = "anthropic"
+protocol = "anthropic_messages"
+base_url = "https://api.anthropic.com"
+model = "claude-sonnet-4"
+api_key = ""
+capabilities = ["chat", "explain", "fix", "reason"]

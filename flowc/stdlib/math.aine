@@ -1,0 +1,65 @@
+// std/math —— 数学工具（Aine 标准库 · 自举期扁平注册）
+// 仅用语言已验证特性编写；本模块同时是编译器的自举刚需组件。
+
+fn abs_i32(n: i32) -> i32 {
+    if n < 0 {
+        return -n
+    }
+    return n
+}
+
+fn abs_f64(n: f64) -> f64 {
+    if n < 0.0 {
+        return -n
+    }
+    return n
+}
+
+fn min_i32(a: i32, b: i32) -> i32 {
+    if a < b {
+        return a
+    }
+    return b
+}
+
+fn max_i32(a: i32, b: i32) -> i32 {
+    if a > b {
+        return a
+    }
+    return b
+}
+
+fn clamp_i32(n: i32, lo: i32, hi: i32) -> i32 {
+    if n < lo {
+        return lo
+    }
+    if n > hi {
+        return hi
+    }
+    return n
+}
+
+fn gcd(a: i32, b: i32) -> i32 {
+    var x = abs_i32(a)
+    var y = abs_i32(b)
+    while y > 0 {
+        let t = x % y
+        x = y
+        y = t
+    }
+    return x
+}
+
+fn pow_i32(base: i32, exp: i32) -> i32 {
+    var r = 1
+    var b = base
+    var e = exp
+    while e > 0 {
+        if e % 2 == 1 {
+            r = r * b
+        }
+        b = b * b
+        e = e / 2
+    }
+    return r
+}

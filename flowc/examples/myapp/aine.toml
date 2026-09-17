@@ -1,0 +1,5 @@
+# aine.toml —— aine_pkg 最小版示例
+[package]
+name = "myapp"
+version = "0.1.0"
+entry = "src/main.aine"

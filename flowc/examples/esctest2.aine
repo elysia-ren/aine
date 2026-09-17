@@ -1,0 +1,6 @@
+module alstr;
+
+fn main() {
+    let r = al_unescape_body("a\nb")
+    print(r)
+}

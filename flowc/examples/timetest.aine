@@ -1,0 +1,14 @@
+module time;
+module path;
+
+fn main() {
+    let start = now_secs()
+    let d = fmt_duration(3725)
+    print(d)
+    print(elapsed_since(start) >= 0)
+    let p = path_join("examples", "fib.aine")
+    print(p)
+    print(path_base(p))
+    print(path_ext(p))
+    print(path_dir(p))
+}

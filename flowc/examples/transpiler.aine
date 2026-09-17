@@ -1,0 +1,525 @@
+// 自举拆分：类型工具在 altype.aine（文件模块，扁平注册）
+
+
+// parser_stmt.aine — 用 Aine 写的语句级解析器（自举 B4-M2）
+// 在 parser_expr.aine 的 Pratt 表达式核心之上，扩展：
+//   语句：let(mut/类型注解)/if-else/while/for..in/return/赋值/块/表达式语句
+//   项：fn 定义（参数、返回类型）
+// 输出完整 AST 的 stringify 回显，main 内自断言。
+
+enum TokKind {
+    TIdent
+    TInt
+    TFloat
+    TStr
+    TOp
+    TSemi
+    TEof
+}
+
+struct Token {
+    kind: TokKind
+    text: String
+}
+
+enum Expr {
+    EInt(i32)
+    EFloat(f64)
+    EStr(String)
+    EIdent(String)
+    EBin(String, Expr, Expr)
+    EUnary(String, Expr)
+    ECall(Expr, Vec<Expr>)
+    EField(Expr, String)
+    EBlock(Vec<Stmt>)
+    EVec(Vec<Expr>)
+    EUnit
+    EStruct(String, Vec<StructField>)
+    ETry(Expr)
+    ERange(Expr, Expr)
+    EClosure(Vec<Param>, Expr)
+    EIndex(Expr, Expr)
+    EIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    EMatch(Expr, Vec<MatchArm>)
+}
+
+enum Stmt {
+    SLet(String, bool, Option<String>, Expr)
+    SIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    SWhile(Expr, Vec<Stmt>)
+    SFor(String, Expr, Vec<Stmt>)
+    SReturn(Option<Expr>)
+    SExpr(Expr)
+    SBlock(Vec<Stmt>)
+    SAssign(String, String, Expr)
+    SAssignIdx(String, Expr, String, Expr)
+    SDef(String, Vec<Param>, Option<String>, Vec<Stmt>)
+    SStruct(String, Vec<Field>)
+    SEnum(String, Vec<EVariant>)
+    SImpl(String, Vec<Stmt>)
+    SMod(String, Vec<Stmt>)
+    SImport(String)
+    SMatch(Expr, Vec<MatchArm>)
+    SGo(bool, Vec<Stmt>)
+    SUi(Vec<Stmt>)
+    SGlobalVar(String, Option<String>, Expr)
+}
+
+struct MatchArm {
+    pat: String
+    body: Stmt
+}
+
+struct Field {
+    name: String
+    ty: String
+}
+
+struct StructField {
+    name: String
+    value: Expr
+}
+
+struct EVariant {
+    name: String
+    fields: Vec<String>
+}
+
+struct Param {
+    name: String
+    ty: String
+}
+
+struct EPResult {
+    value: Expr
+    next: i32
+}
+
+struct SPResult {
+    stmt: Stmt
+    next: i32
+}
+
+struct BlockResult {
+    stmts: Vec<Stmt>
+    next: i32
+}
+
+struct TyResult {
+    ty: String
+    next: i32
+}
+
+struct FlatResult {
+    out: Vec<Stmt>
+    loaded: Vec<String>
+}
+
+// var name -> type tables
+struct VarInfo {
+    names: Vec<String>
+    types: Vec<String>
+}
+
+module altype;
+module altypeck;
+module alvalueal;
+module allex;
+module alparse;
+module alstr;
+module alcollect;
+module alee;
+fn main() -> Result<(), String> {
+    // build 模式：aine build 经全局 args 传入 [目标文件, 输出 C 路径]
+    if cli_args.len() >= 2 {
+        let src = read_file(cli_args[0])
+        let p = parse_program(tokenize(src))?
+        let frb = flatten_stmts(p, "examples/", [])
+        match frb {
+            Ok(frbok) {
+        let db = desugar_closures(frbok.out)
+        let sb = value_semantics(db)
+        let vb = valueal_lite(sb.program)
+        // Aine 类型检查器(全 Aine 迁移 Phase 2): build 时类型诊断(flatten 后, 含模块展开)
+        let tck_diags = tck_program(frbok.out)
+        for td in tck_diags {
+            print("type-check: " + td)
+        }
+        if tck_diags.len() > 0 {
+            return Err(f"类型检查失败: {tck_diags.len()} 处")
+        }
+        // Aine 所有权检查器(全 Aine 迁移 Phase 3): 任务捕获后使用
+        let val_diags = val_program(frbok.out)
+        for vd in val_diags {
+            print("value-check: " + vd)
+        }
+        if val_diags.len() > 0 {
+            return Err(f"所有权检查失败: {val_diags.len()} 处")
+        }
+        let c = c_program(p, collect_user_types(p), collect_variant_names(p), collect_variant_owners(p), collect_fn_names(p), collect_fn_returns(p), collect_var_names(p), collect_var_types(p), collect_fn_ptypes(p), collect_enum_ty_names(p), collect_enum_variant_lists(p))
+        if !write_file(cli_args[1], c) {
+            return Err("无法写入输出: " + cli_args[1])
+        }
+        print("已生成 " + cli_args[1])
+        return Ok(())
+            }
+            Err(eb) {
+                return Err("build flat: " + eb)
+            }
+        }
+    }
+    // case 1: fib
+    let src1 = "fn fib(n: i32) -> i32 {\n    if n < 2 {\n        return n\n    }\n    return fib(n - 1) + fib(n - 2)\n}\nfn main() {\n    print(fib(10))\n}"
+    let p1 = parse_program(tokenize(src1))?
+    let c1 = c_program(p1, collect_user_types(p1), collect_variant_names(p1), collect_variant_owners(p1), collect_fn_names(p1), collect_fn_returns(p1), collect_var_names(p1), collect_var_types(p1), collect_fn_ptypes(p1), collect_enum_ty_names(p1), collect_enum_variant_lists(p1))
+    if !c1.contains("int fib(int n) {") { return Err("case1 fib sig") }
+    if !c1.contains("printf(\"%d\\n\", fib(10))") { return Err("case1 print") }
+    print("case1 fib OK")
+    // case 2: string concat
+    let src2 = "fn greet(name: String) -> String {\n    return \"hello \" + name\n}"
+    let p2 = parse_program(tokenize(src2))?
+    let c2 = c_program(p2, collect_user_types(p2), collect_variant_names(p2), collect_variant_owners(p2), collect_fn_names(p2), collect_fn_returns(p2), collect_var_names(p2), collect_var_types(p2), collect_fn_ptypes(p2), collect_enum_ty_names(p2), collect_enum_variant_lists(p2))
+    if !c2.contains("al_strcat") { return Err("case2 strcat") }
+    print("case2 strcat OK")
+    // case 3: Vec push
+    let src3 = "fn build() -> Vec<i32> {\n    var v = []\n    v.push(1)\n    return v\n}"
+    let p3 = parse_program(tokenize(src3))?
+    let c3 = c_program(p3, collect_user_types(p3), collect_variant_names(p3), collect_variant_owners(p3), collect_fn_names(p3), collect_fn_returns(p3), collect_var_names(p3), collect_var_types(p3), collect_fn_ptypes(p3), collect_enum_ty_names(p3), collect_enum_variant_lists(p3))
+    if !c3.contains("al_push(&v, sizeof(int), &(int){ 1 })") { return Err("case3 push") }
+    print("case3 vec OK")
+
+    // case 4: if-expression and slice
+    let src4 = "fn f(x: i32) -> i32 {\n    let two = if x > 0 {\n        1\n    } else {\n        2\n    }\n    return two\n}\nfn g(s: String, i: i32) -> String {\n    return s[i..i + 2]\n}"
+    let p4 = parse_program(tokenize(src4))?
+    let c4 = c_program(p4, collect_user_types(p4), collect_variant_names(p4), collect_variant_owners(p4), collect_fn_names(p4), collect_fn_returns(p4), collect_var_names(p4), collect_var_types(p4), collect_fn_ptypes(p4), collect_enum_ty_names(p4), collect_enum_variant_lists(p4))
+    if !c4.contains("(x > 0) ? 1 : 2") { return Err("case4 if-expr") }
+    var p4a = c4.contains("al_substr")
+    var p4b = c4.contains("char* g(")
+    print("PROBE4 sub=" + f"{p4a}" + " g=" + f"{p4b}")
+    if !c4.contains("al_substr(s, i, (i + 2))") { return Err("case4 slice") }
+    print("case4 if-slice OK")
+    // case 5: array iteration
+    let src5 = "fn sum(v: Vec<i32>) -> i32 {\n    var total = 0\n    for x in v {\n        total += x\n    }\n    return total\n}"
+    let p5 = parse_program(tokenize(src5))?
+    let c5 = c_program(p5, collect_user_types(p5), collect_variant_names(p5), collect_variant_owners(p5), collect_fn_names(p5), collect_fn_returns(p5), collect_var_names(p5), collect_var_types(p5), collect_fn_ptypes(p5), collect_enum_ty_names(p5), collect_enum_variant_lists(p5))
+    if !c5.contains("_i < v.len; _i++") { return Err("case5 iter-len") }
+    if !c5.contains("int x = ((int*)(v.data))[_i];") { return Err("case5 iter-elem") }
+    print("case5 iter OK")
+
+    // case 6: String.len and compare
+    let src6 = "fn f(s: String) -> i32 {\n    return s.len()\n}\nfn is_digit(c: String) -> bool {\n    c >= \"0\" && c <= \"9\"\n}"
+    let p6 = parse_program(tokenize(src6))?
+    let c6 = c_program(p6, collect_user_types(p6), collect_variant_names(p6), collect_variant_owners(p6), collect_fn_names(p6), collect_fn_returns(p6), collect_var_names(p6), collect_var_types(p6), collect_fn_ptypes(p6), collect_enum_ty_names(p6), collect_enum_variant_lists(p6))
+    if !c6.contains("strlen(s)") { return Err("case6 strlen") }
+    if !c6.contains("strcmp(c, \"0\") >= 0") { return Err("case6 strcmp") }
+    print("case6 string-semantics OK")
+
+    // case 8: lexer read_op (if-expr + slice + strcmp)
+    let src8 = "fn read_op(src: String, i: i32) -> String {\n    let two = if i + 1 < src.len() {\n        src[i..i + 2]\n    } else {\n        \"\"\n    }\n    if two == \"==\" {\n        return two\n    }\n    return src[i..i + 1]\n}"
+    let p8 = parse_program(tokenize(src8))?
+    let c8 = c_program(p8, collect_user_types(p8), collect_variant_names(p8), collect_variant_owners(p8), collect_fn_names(p8), collect_fn_returns(p8), collect_var_names(p8), collect_var_types(p8), collect_fn_ptypes(p8), collect_enum_ty_names(p8), collect_enum_variant_lists(p8))
+    if !c8.contains("strcmp(two, \"==\") == 0") { return Err("case8 strcmp") }
+    if !c8.contains("al_substr(src, i, (i + 2))") { return Err("case8 slice") }
+    print("case8 lexer-readop OK")
+
+    // case 9: tokenize (struct + while + slice + strcmp + push)
+    let src9 = "struct Token {\n    kind: String\n    text: String\n    line: i32\n}\n\nfn tokenize(src: String) -> Vec<Token> {\n    var tokens = []\n    var i = 0\n    let len = src.len()\n    while i < len {\n        let c = src[i..i + 1]\n        if c == \" \" {\n            i += 1\n        } else {\n            tokens.push(Token { kind: \"tok\" text: c line: 1 })\n            i += 1\n        }\n    }\n    return tokens\n}"
+    let p9 = parse_program(tokenize(src9))?
+    let c9 = c_program(p9, collect_user_types(p9), collect_variant_names(p9), collect_variant_owners(p9), collect_fn_names(p9), collect_fn_returns(p9), collect_var_names(p9), collect_var_types(p9), collect_fn_ptypes(p9), collect_enum_ty_names(p9), collect_enum_variant_lists(p9))
+    if !c9.contains("al_vec tokenize(char* src)") { return Err("case9 fn sig") }
+    if !c9.contains("strcmp(c, \" \") == 0") { return Err("case9 strcmp") }
+    if !c9.contains("sizeof(struct Token)") { return Err("case9 sizeof") }
+    print("case9 tokenize OK")
+
+    // case 10: enum+match full loop
+    let src10 = "enum Shape {\n    Circle(f64)\n    Rect(f64, f64)\n}\n\nfn area(s: Shape) -> f64 {\n    match s {\n        Circle(r) => 3.14 * r * r\n        Rect(w, h) => w * h\n    }\n}\n\nfn main() {\n    let s = Circle(2.0)\n    print(area(s))\n}"
+    let p10 = parse_program(tokenize(src10))?
+    let c10 = c_program(p10, collect_user_types(p10), collect_variant_names(p10), collect_variant_owners(p10), collect_fn_names(p10), collect_fn_returns(p10), collect_var_names(p10), collect_var_types(p10), collect_fn_ptypes(p10), collect_enum_ty_names(p10), collect_enum_variant_lists(p10))
+    if !c10.contains("static struct Shape Shape_Circle") { return Err("case10 ctor") }
+    if !c10.contains("struct Shape s = Shape_Circle(2.0)") { return Err("case10 infer") }
+    if !c10.contains("return ((3.14 * r) * r);") { return Err("case10 match-return") }
+    print("case10 enum-match OK")
+
+    // case 11: Option 内置类型映射（al_opt + 类型化载荷）
+    let src11 = "fn describe(o: Option<String>) -> String {\n    match o {\n        Some(x) => \"got:\" + x\n        None => \"none\"\n    }\n}\n\nfn main() {\n    print(describe(Some(\"hi\")))\n    print(describe(None))\n}"
+    let p11 = parse_program(tokenize(src11))?
+    let c11 = c_program(p11, collect_user_types(p11), collect_variant_names(p11), collect_variant_owners(p11), collect_fn_names(p11), collect_fn_returns(p11), collect_var_names(p11), collect_var_types(p11), collect_fn_ptypes(p11), collect_enum_ty_names(p11), collect_enum_variant_lists(p11))
+    if !c11.contains("char* describe(al_opt o)") { return Err("case11 sig") }
+    if !c11.contains("al_some_s(\"hi\")") { return Err("case11 some") }
+    if !c11.contains("al_none()") { return Err("case11 none") }
+    if !c11.contains("auto x = o.data.s;") { return Err("case11 bind") }
+    if !c11.contains("o.tag == 1") || !c11.contains("o.tag == 0") { return Err("case11 labels") }
+    print("case11 option OK")
+
+    // case 12: Option<i32> 载荷（al_some_i / .data.i）
+    let src12 = "fn main() {\n    let r: Option<i32> = Some(5)\n    match r {\n        Some(x) => {\n            if x == 5 {\n                print(\"five\")\n            } else {\n                print(\"other\")\n            }\n        }\n        None => print(\"none\")\n    }\n}"
+    let p12 = parse_program(tokenize(src12))?
+    let c12 = c_program(p12, collect_user_types(p12), collect_variant_names(p12), collect_variant_owners(p12), collect_fn_names(p12), collect_fn_returns(p12), collect_var_names(p12), collect_var_types(p12), collect_fn_ptypes(p12), collect_enum_ty_names(p12), collect_enum_variant_lists(p12))
+    if !c12.contains("al_some_i(5)") { return Err("case12 some-i") }
+    if !c12.contains("auto x = r.data.i;") { return Err("case12 bind-i") }
+    if !c12.contains("(x == 5)") { return Err("case12 cmp") }
+    print("case12 option-i32 OK")
+
+    // case 13: 自转译 — 读取自身源码并转译（自举闭环）
+    let self_src = read_file("examples/transpiler.aine")
+    let mmr = parse_program(tokenize(read_file("tmp_mm.aine")))
+    match mmr {
+        Ok(mp3) => { print("PROBE mm ok")
+            var mi = 0
+            while mi < mp3.len() {
+                match mp3[mi] {
+                    SDef(fn3, pr3, rt3, bd3) { print("PROBE mm def: " + fn3) }
+                    _ {}
+                }
+                mi += 1
+            } }
+        Err(me3) => { print("PROBE mm ERR: " + me3) }
+    }
+    let alee_src = read_file("examples/alee.aine")
+    let alee_p = parse_program(tokenize(alee_src))
+    match alee_p {
+        Ok(fp) => { print("PROBE alee ok items=" + f"{fp.len()}")
+            var fi2 = 0
+            while fi2 < fp.len() {
+                match fp[fi2] {
+                    SDef(fn2, pr2, rt2, bd2) { print("PROBE alee def: " + fn2) }
+                    _ {}
+                }
+                fi2 += 1
+            } }
+        Err(fe) => { print("PROBE alee ERR: " + fe) }
+    }
+    let toks13 = tokenize(self_src)
+    let p13 = parse_program(toks13)?
+    let c13 = c_program(p13, collect_user_types(p13), collect_variant_names(p13), collect_variant_owners(p13), collect_fn_names(p13), collect_fn_returns(p13), collect_var_names(p13), collect_var_types(p13), collect_fn_ptypes(p13), collect_enum_ty_names(p13), collect_enum_variant_lists(p13))
+
+    if !c13.contains("char* c_program(") { return Err("case13 self-sig") }
+    if !c13.contains("read_file") { return Err("case13 read_file") }
+    print("case13 self-transpile OK")
+    print("===SELF-BEGIN===")
+    print(c13)
+    print("===SELF-END===")
+
+    // case 14: 通用编译 — 编译真实 Aine 程序（fib.aine：递归 + for 区间 + f-string 调用插值）
+    let fib_src = read_file("examples/fib.aine")
+    let toks14 = tokenize(fib_src)
+    let p14 = parse_program(toks14)?
+    let c14 = c_program(p14, collect_user_types(p14), collect_variant_names(p14), collect_variant_owners(p14), collect_fn_names(p14), collect_fn_returns(p14), collect_var_names(p14), collect_var_types(p14), collect_fn_ptypes(p14), collect_enum_ty_names(p14), collect_enum_variant_lists(p14))
+    if !c14.contains("int fib(int n) {") { return Err("case14 fib sig") }
+    if !c14.contains("for (int i = 0; i < 10; i++)") { return Err("case14 for-range") }
+    if !c14.contains("al_num(fib(i))") { return Err("case14 fstr-call") }
+    if !c14.contains("printf(\"%s\\n\", ") { return Err("case14 print") }
+    print("case14 fib-compile OK")
+    print("===FIB-BEGIN===")
+    print(c14)
+    print("===FIB-END===")
+
+    // case 15: 通用编译 — hello.aine（尾返回 + 中文 + if-else + for 区间 + f-string）
+    let hello_src = read_file("examples/hello.aine")
+    let toks15 = tokenize(hello_src)
+    let p15 = parse_program(toks15)?
+    let c15 = c_program(p15, collect_user_types(p15), collect_variant_names(p15), collect_variant_owners(p15), collect_fn_names(p15), collect_fn_returns(p15), collect_var_names(p15), collect_var_types(p15), collect_fn_ptypes(p15), collect_enum_ty_names(p15), collect_enum_variant_lists(p15))
+    if !c15.contains("int add(int a, int b)") { return Err("case15 add sig") }
+    if !c15.contains("return (a + b);") { return Err("case15 tail-return") }
+    if !c15.contains("for (int i = 0; i < 10; i++)") { return Err("case15 for-range") }
+    if !c15.contains("al_num(result)") { return Err("case15 fstr-var") }
+    print("case15 hello-compile OK")
+    print("===HELLO-BEGIN===")
+    print(c15)
+    print("===HELLO-END===")
+
+    // case 16: String split/trim/replace 方法
+    let src16 = read_file("examples/strings.aine")
+    let p16 = parse_program(tokenize(src16))?
+    let c16 = c_program(p16, collect_user_types(p16), collect_variant_names(p16), collect_variant_owners(p16), collect_fn_names(p16), collect_fn_returns(p16), collect_var_names(p16), collect_var_types(p16), collect_fn_ptypes(p16), collect_enum_ty_names(p16), collect_enum_variant_lists(p16))
+    if !c16.contains("al_trim(s)") { return Err("case16 trim") }
+    if !c16.contains("al_split(\"a,b,c\", \",\").len") { return Err("case16 split") }
+    if !c16.contains("al_replace(\"hello world\", \"world\", \"aine\")") { return Err("case16 replace") }
+    print("case16 strings OK")
+    print("===STRINGS-BEGIN===")
+    print(c16)
+    print("===STRINGS-END===")
+
+    // case 17: Vec<struct> 数组字面量（换行分隔 struct 项）
+    let vs_src = read_file("examples/records.aine")
+    let toks17 = tokenize(vs_src)
+    let p17 = parse_program(toks17)
+    match p17 {
+        Ok(pp) {
+            let c17 = c_program(pp, collect_user_types(pp), collect_variant_names(pp), collect_variant_owners(pp), collect_fn_names(pp), collect_fn_returns(pp), collect_var_names(pp), collect_var_types(pp), collect_fn_ptypes(pp), collect_enum_ty_names(pp), collect_enum_variant_lists(pp))
+            if !c17.contains("struct Record records") && !c17.contains("al_vec records") { return Err("case17 vec-struct") }
+            print("case17 vec-struct OK")
+            print("===VS-BEGIN===")
+            print(c17)
+            print("===VS-END===")
+        }
+        Err(e) {
+            print("case17 parse err: " + e)
+            return Err("case17 parse")
+        }
+    }
+
+    // case 18: 方法链 iter/map/sum（闭包内联）
+    let ms_src = read_file("examples/mapsum.aine")
+    let toks18 = tokenize(ms_src)
+    let p18 = parse_program(toks18)?
+    let c18 = c_program(p18, collect_user_types(p18), collect_variant_names(p18), collect_variant_owners(p18), collect_fn_names(p18), collect_fn_returns(p18), collect_var_names(p18), collect_var_types(p18), collect_fn_ptypes(p18), collect_enum_ty_names(p18), collect_enum_variant_lists(p18))
+    if !c18.contains("__acc") { print("PROBE18 no-acc")
+        return Err("case18 mapsum") }
+    if !c18.contains("r.amount") { print("PROBE18 no-amount")
+        return Err("case18 closure-body") }
+    if !c18.contains("r.amount") { return Err("case18 closure-body") }
+    print("case18 mapsum OK")
+    print("===MS-BEGIN===")
+    print(c18)
+    print("===MS-END===")
+
+    // case 19: 真实程序 todo.aine（方法链 + Result + ? 传播 + f64）
+    let td_src = read_file("examples/todo.aine")
+    let toks19 = tokenize(td_src)
+    let p19 = parse_program(toks19)?
+    let c19 = c_program(p19, collect_user_types(p19), collect_variant_names(p19), collect_variant_owners(p19), collect_fn_names(p19), collect_fn_returns(p19), collect_var_names(p19), collect_var_types(p19), collect_fn_ptypes(p19), collect_enum_ty_names(p19), collect_enum_variant_lists(p19))
+    if !c19.contains("__acc") { return Err("case19 todo") }
+    if !c19.contains("总余额") && !c19.contains("parse_amount") { return Err("case19 todo-src") }
+    print("case19 todo OK")
+    print("===TD-BEGIN===")
+    print(c19)
+    print("===TD-END===")
+
+    // case 20: json.aine（Map 类型：set/keys/get + 枚举 Map 载荷）
+    let js_src = read_file("stdlib/json.aine")
+    let toks20 = tokenize(js_src)
+    let p20 = parse_program(toks20)?
+    let c20 = c_program(p20, collect_user_types(p20), collect_variant_names(p20), collect_variant_owners(p20), collect_fn_names(p20), collect_fn_returns(p20), collect_var_names(p20), collect_var_types(p20), collect_fn_ptypes(p20), collect_enum_ty_names(p20), collect_enum_variant_lists(p20))
+    if !c20.contains("al_map") { return Err("case20 map-type") }
+    if !c20.contains("m.keys") { return Err("case20 keys") }
+    print("case20 json-map OK")
+    print("===JSON-BEGIN===")
+    print(c20)
+    print("===JSON-END===")
+
+    // case 21: char 实参 → String 形参自动转换（al_char_to_str）
+    let ca_src = "fn is_digit(c: String) -> bool {\n    c >= \"0\" && c <= \"9\"\n}\n\nfn main() {\n    let s = \"a5\"\n    print(is_digit(s[0]))\n    print(is_digit(s[1]))\n}"
+    let p21 = parse_program(tokenize(ca_src))?
+    let c21 = c_program(p21, collect_user_types(p21), collect_variant_names(p21), collect_variant_owners(p21), collect_fn_names(p21), collect_fn_returns(p21), collect_var_names(p21), collect_var_types(p21), collect_fn_ptypes(p21), collect_enum_ty_names(p21), collect_enum_variant_lists(p21))
+    var p21_in_c = c21.contains("is_digit")
+    var p21_conv = c21.contains("al_char_to_str(s[0])")
+    if !c21.contains("al_char_to_str(s[0])") { return Err("case21 char-arg") }
+    print("case21 char-arg OK")
+
+    // case 22: 编译 Aine 组件 parser_expr.aine（B4-M1 表达式解析器）
+    let pe_src = read_file("examples/parser_expr.aine")
+    let p22 = parse_program(tokenize(pe_src))?
+    let c22 = c_program(p22, collect_user_types(p22), collect_variant_names(p22), collect_variant_owners(p22), collect_fn_names(p22), collect_fn_returns(p22), collect_var_names(p22), collect_var_types(p22), collect_fn_ptypes(p22), collect_enum_ty_names(p22), collect_enum_variant_lists(p22))
+    if !c22.contains("parse_expr") { return Err("case22 parser-expr") }
+    print("case22 parser-expr OK")
+    print("===PE-BEGIN===")
+    print(c22)
+    print("===PE-END===")
+
+    // case 23: 编译 Aine 组件 lexer.aine（B1 词法分析器）
+    let lx_src = read_file("examples/lexer.aine")
+    let p23 = parse_program(tokenize(lx_src))?
+    let c23 = c_program(p23, collect_user_types(p23), collect_variant_names(p23), collect_variant_owners(p23), collect_fn_names(p23), collect_fn_returns(p23), collect_var_names(p23), collect_var_types(p23), collect_fn_ptypes(p23), collect_enum_ty_names(p23), collect_enum_variant_lists(p23))
+    if !c23.contains("tokenize") { return Err("case23 lexer") }
+    print("case23 lexer OK")
+    print("===LX-BEGIN===")
+    print(c23)
+    print("===LX-END===")
+
+    // case 24: 编译 Aine 组件 parser_stmt.aine（B4-M2 语句解析器）
+    let ps_src = read_file("examples/parser_stmt.aine")
+    let p24 = parse_program(tokenize(ps_src))?
+    let c24 = c_program(p24, collect_user_types(p24), collect_variant_names(p24), collect_variant_owners(p24), collect_fn_names(p24), collect_fn_returns(p24), collect_var_names(p24), collect_var_types(p24), collect_fn_ptypes(p24), collect_enum_ty_names(p24), collect_enum_variant_lists(p24))
+    if !c24.contains("parse_stmt") { return Err("case24 parser-stmt") }
+    print("case24 parser-stmt OK")
+
+    // case 25: 嵌套类型 —— Map<String, Vec<i32>> 值类型递归（端到端）
+    let mn_src = read_file("examples/mapnest.aine")
+    let p25 = parse_program(tokenize(mn_src))?
+    let c25 = c_program(p25, collect_user_types(p25), collect_variant_names(p25), collect_variant_owners(p25), collect_fn_names(p25), collect_fn_returns(p25), collect_var_names(p25), collect_var_types(p25), collect_fn_ptypes(p25), collect_enum_ty_names(p25), collect_enum_variant_lists(p25))
+    if !c25.contains("((al_vec*)index.vals.data)[_i]") { return Err("case25 set-vec") }
+    if !c25.contains("al_some_v(") { return Err("case25 some-vec") }
+    if !c25.contains("al_vec v = hit.data.v;") { return Err("case25 bind-vec") }
+    if !c25.contains("al_vec vs = index.vals;") { return Err("case25 values") }
+    print("case25 mapnest OK")
+
+    // case 26: 文件模块 —— mod name; 读入 examples/modtest_util.aine 打平编译
+    let mt_src = read_file("examples/modtest_main.aine")
+    let p26 = parse_program(tokenize(mt_src))?
+    let c26 = c_program(p26, collect_user_types(p26), collect_variant_names(p26), collect_variant_owners(p26), collect_fn_names(p26), collect_fn_returns(p26), collect_var_names(p26), collect_var_types(p26), collect_fn_ptypes(p26), collect_enum_ty_names(p26), collect_enum_variant_lists(p26))
+    if !c26.contains("char* shout(char* s);") { return Err("case26 module fn decl") }
+    if !c26.contains("char* repeat(char* s, int n);") { return Err("case26 module fn decl2") }
+    if !c26.contains("shout(\"aine\")") { return Err("case26 call") }
+    if !c26.contains("al_map") { return Err("case26 header") }
+    print("case26 file-module OK")
+
+    // case 27: 标准库 —— mod 搜索路径（同目录 -> stdlib/），math/strutil/collections
+    let std_src = read_file("examples/stdtest.aine")
+    let p27 = parse_program(tokenize(std_src))?
+    let c27 = c_program(p27, collect_user_types(p27), collect_variant_names(p27), collect_variant_owners(p27), collect_fn_names(p27), collect_fn_returns(p27), collect_var_names(p27), collect_var_types(p27), collect_fn_ptypes(p27), collect_enum_ty_names(p27), collect_enum_variant_lists(p27))
+    if !c27.contains("int gcd(int a, int b)") { return Err("case27 math") }
+    if !c27.contains("char* reverse(char* s)") { return Err("case27 strutil") }
+    if !c27.contains("al_vec range_vec(int n)") { return Err("case27 collections") }
+    print("case27 stdlib OK")
+    print("===STD-BEGIN===")
+    print(c27)
+    print("===STD-END===")
+
+    // case 28: 闭包独立值 —— let 绑定 + 直接调用（非捕获、参数带注解、脱糖提升）
+    let cl_src = read_file("examples/closuretest.aine")
+    let p28 = parse_program(tokenize(cl_src))?
+    let c28 = c_program(p28, collect_user_types(p28), collect_variant_names(p28), collect_variant_owners(p28), collect_fn_names(p28), collect_fn_returns(p28), collect_var_names(p28), collect_var_types(p28), collect_fn_ptypes(p28), collect_enum_ty_names(p28), collect_enum_variant_lists(p28))
+    if !c28.contains("int f(int x)") { return Err("case28 lift") }
+    if !c28.contains("char* greet(char* name)") { return Err("case28 lift-str") }
+    if !c28.contains("f(21)") { return Err("case28 call") }
+    print("case28 closure OK")
+    print("===CLS-BEGIN===")
+    print(c28)
+    print("===CLS-END===")
+
+    // case 29: 索引赋值 + assert —— v[i] = x 原地写入与断言内建（M4 用户导向补全）
+    let idx_src = read_file("examples/idxtest.aine")
+    let p29 = parse_program(tokenize(idx_src))?
+    let c29 = c_program(p29, collect_user_types(p29), collect_variant_names(p29), collect_variant_owners(p29), collect_fn_names(p29), collect_fn_returns(p29), collect_var_names(p29), collect_var_types(p29), collect_fn_ptypes(p29), collect_enum_ty_names(p29), collect_enum_variant_lists(p29))
+    if !c29.contains("((int*)v.data)[0] = 99") { return Err("case29 idx-assign") }
+    if !c29.contains("((int*)v.data)[1] += 1") { return Err("case29 idx-compound") }
+    if !c29.contains("al_assert(") { return Err("case29 assert") }
+    print("case29 idx-assign OK")
+    print("===IDX-BEGIN===")
+    print(c29)
+    print("===IDX-END===")
+
+    // case 30: 统一函数类型 —— fn(A,B)->R 参数发射为 C 函数指针（高阶函数）
+    let ho_src = read_file("examples/hotest.aine")
+    let p30 = parse_program(tokenize(ho_src))?
+    let c30 = c_program(p30, collect_user_types(p30), collect_variant_names(p30), collect_variant_owners(p30), collect_fn_names(p30), collect_fn_returns(p30), collect_var_names(p30), collect_var_types(p30), collect_fn_ptypes(p30), collect_enum_ty_names(p30), collect_enum_variant_lists(p30))
+    if !c30.contains("int (*f)(int, int)") { return Err("case30 fn-ptr") }
+    if !c30.contains("f(a, b)") { return Err("case30 fn-call") }
+    print("case30 fn-type OK")
+    print("===HO-BEGIN===")
+    print(c30)
+    print("===HO-END===")
+
+    // case 31: 字面量 match 模式 —— 整数与负数模式发射值比较（B5-M33-2/3 固化）
+    let lp_src = "fn sign(n: i32) -> String {\n    match n {\n        -1 => \"neg-one\"\n        0 => \"zero\"\n        1 => \"one\"\n        _ => \"other\"\n    }\n}"
+    let p31 = parse_program(tokenize(lp_src))?
+    let c31 = c_program(p31, collect_user_types(p31), collect_variant_names(p31), collect_variant_owners(p31), collect_fn_names(p31), collect_fn_returns(p31), collect_var_names(p31), collect_var_types(p31), collect_fn_ptypes(p31), collect_enum_ty_names(p31), collect_enum_variant_lists(p31))
+    if !c31.contains("(n == -1)") { return Err("case31 neg-pat") }
+    if !c31.contains("(n == 0)") { return Err("case31 zero-pat") }
+    if !c31.contains("(n == 1)") { return Err("case31 one-pat") }
+    print("case31 lit-pattern OK")
+
+    // case 32: 函数尾 match 臂体块尾值 → return 发射（B5-M33-1 固化）
+    let tm_src = "fn describe(o: Option<String>) -> String {\n    match o {\n        Some(x) {\n            let s = \"got:\"\n            s + x\n        }\n        None { \"none\" }\n    }\n}"
+    let p32 = parse_program(tokenize(tm_src))?
+    let c32 = c_program(p32, collect_user_types(p32), collect_variant_names(p32), collect_variant_owners(p32), collect_fn_names(p32), collect_fn_returns(p32), collect_var_names(p32), collect_var_types(p32), collect_fn_ptypes(p32), collect_enum_ty_names(p32), collect_enum_variant_lists(p32))
+    if !c32.contains("return al_strcat(s, x);") { return Err("case32 tail-match") }
+    if !c32.contains("return \"none\";") { return Err("case32 tail-none") }
+    print("case32 tail-match OK")
+    return Ok(())
+    print("transpiler B5-M13 OK")
+    print("transpiler full OK")
+    print("transpiler rebuilt OK")
+    return Ok(())
+}

@@ -1,0 +1,387 @@
+// 自举拆分：类型工具在 altype.aine（文件模块，扁平注册）
+
+
+// parser_stmt.aine — 用 Aine 写的语句级解析器（自举 B4-M2）
+// 在 parser_expr.aine 的 Pratt 表达式核心之上，扩展：
+//   语句：let(mut/类型注解)/if-else/while/for..in/return/赋值/块/表达式语句
+//   项：fn 定义（参数、返回类型）
+// 输出完整 AST 的 stringify 回显，main 内自断言。
+
+enum TokKind {
+    TIdent
+    TInt
+    TFloat
+    TStr
+    TOp
+    TSemi
+    TEof
+}
+
+struct Token {
+    kind: TokKind
+    text: String
+}
+
+enum Expr {
+    EInt(i32)
+    EFloat(f64)
+    EStr(String)
+    EIdent(String)
+    EBin(String, Expr, Expr)
+    EUnary(String, Expr)
+    ECall(Expr, Vec<Expr>)
+    EField(Expr, String)
+    EBlock(Vec<Stmt>)
+    EVec(Vec<Expr>)
+    EUnit
+    EStruct(String, Vec<StructField>)
+    ETry(Expr)
+    ERange(Expr, Expr)
+    EClosure(Vec<Param>, Expr)
+    EIndex(Expr, Expr)
+    EIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    EMatch(Expr, Vec<MatchArm>)
+}
+
+enum Stmt {
+    SLet(String, bool, Option<String>, Expr)
+    SIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    SWhile(Expr, Vec<Stmt>)
+    SFor(String, Expr, Vec<Stmt>)
+    SReturn(Option<Expr>)
+    SExpr(Expr)
+    SBlock(Vec<Stmt>)
+    SAssign(String, String, Expr)
+    SAssignIdx(String, Expr, String, Expr)
+    SDef(String, Vec<Param>, Option<String>, Vec<Stmt>)
+    SStruct(String, Vec<Field>)
+    SEnum(String, Vec<EVariant>)
+    SImpl(String, Vec<Stmt>)
+    SMod(String, Vec<Stmt>)
+    SImport(String)
+    SMatch(Expr, Vec<MatchArm>)
+    SGo(bool, Vec<Stmt>)
+    SUi(Vec<Stmt>)
+    SGlobalVar(String, Option<String>, Expr)
+}
+
+struct MatchArm {
+    pat: String
+    body: Stmt
+}
+
+struct Field {
+    name: String
+    ty: String
+}
+
+struct StructField {
+    name: String
+    value: Expr
+}
+
+struct EVariant {
+    name: String
+    fields: Vec<String>
+}
+
+struct Param {
+    name: String
+    ty: String
+}
+
+struct EPResult {
+    value: Expr
+    next: i32
+}
+
+struct SPResult {
+    stmt: Stmt
+    next: i32
+}
+
+struct BlockResult {
+    stmts: Vec<Stmt>
+    next: i32
+}
+
+struct TyResult {
+    ty: String
+    next: i32
+}
+
+struct FlatResult {
+    out: Vec<Stmt>
+    loaded: Vec<String>
+}
+
+// var name -> type tables
+struct VarInfo {
+    names: Vec<String>
+    types: Vec<String>
+}
+
+module altype;
+module allex;
+module alparse;
+module alstr;
+module alcollect;
+module alee;
+
+// ---- 规范格式化（与 aine fmt 对齐）：4 空格缩进、最小括号、多行块 ----
+fn binop_prec(op: String) -> i32 {
+    if op == "||" { return 3 }
+    if op == "&&" { return 4 }
+    if op == "==" || op == "!=" { return 5 }
+    if op == "<" || op == ">" || op == "<=" || op == ">=" { return 9 }
+    if op == "+" || op == "-" { return 13 }
+    if op == "*" || op == "/" || op == "%" { return 15 }
+    return 15
+}
+
+fn fmt_expr(e: Expr, parent_prec: i32) -> String {
+    match e {
+        EInt(n) { return f"{n}" }
+        EFloat(nf) { return f"{nf}" }
+        EStr(s) {
+            if s.len() >= 2 && s[0..2] == "f\"" && s[s.len() - 1..s.len()] == "\"" {
+                return s
+            }
+            return "\"" + s + "\""
+        }
+        EIdent(n) { return n }
+        EUnit { return "()" }
+        ERange(a, b) { return fmt_expr(a, 0) + ".." + fmt_expr(b, 0) }
+        EClosure(params, body) {
+            var head = ""
+            if params.len() == 0 {
+                head = "() => "
+            } else if params.len() == 1 {
+                let p0 = params[0]
+                head = p0.name + " => "
+            } else {
+                var ns: Vec<String> = []
+                for pp in params { ns.push(pp.name) }
+                head = "(" + join(ns, ", ") + ") => "
+            }
+            return head + fmt_expr(body, 0)
+        }
+        EIndex(b, idx) {
+            let base = fmt_expr(b, 19)
+            if parent_prec > 19 { return "(" + base + ")[" + fmt_expr(idx, 0) + "]" }
+            return base + "[" + fmt_expr(idx, 0) + "]"
+        }
+        EIf(cond, then_s, else_s) { return fmt_if(cond, then_s, else_s, "") }
+        EStruct(ty, fields) {
+            var out = ty + " {"
+            if fields.len() > 0 {
+                for fd in fields { out = out + "\n    " + fd.name + ": " + fmt_expr(fd.value, 0) }
+                out = out + "\n}"
+            } else {
+                out = out + " }"
+            }
+            return out
+        }
+        EBin(op, l, r) {
+            let prec = binop_prec(op)
+            var s = fmt_expr(l, prec) + " " + op + " " + fmt_expr(r, prec + 1)
+            if prec < parent_prec { return "(" + s + ")" }
+            return s
+        }
+        EUnary(op, x) {
+            var s = op + fmt_expr(x, 17)
+            if 17 < parent_prec { return "(" + s + ")" }
+            return s
+        }
+        ECall(f, args) {
+            var parts: Vec<String> = []
+            for a in args { parts.push(fmt_expr(a, 0)) }
+            return fmt_expr(f, 19) + "(" + join(parts, ", ") + ")"
+        }
+        EField(b, name) {
+            let base = fmt_expr(b, 19)
+            if parent_prec > 19 { return "(" + base + ")." + name }
+            return base + "." + name
+        }
+        EBlock(stmts) {
+            var out = "{"
+            if stmts.len() > 0 {
+                for st in stmts { out = out + "\n    " + fmt_stmt(st, "    ") }
+                out = out + "\n}"
+            } else {
+                out = out + " }"
+            }
+            return out
+        }
+        EVec(items) {
+            var parts: Vec<String> = []
+            for it in items { parts.push(fmt_expr(it, 0)) }
+            return "[" + join(parts, ", ") + "]"
+        }
+        EMatch(mscrut, marms) {
+            var mout = "match " + fmt_expr(mscrut, 0) + " {"
+            for marm in marms {
+                mout = mout + "\n    " + marm.pat + " => " + arm_fmt(marm.body, "    ")
+            }
+            return mout + "\n}"
+        }
+        _ { return "?" }
+    }
+}
+
+fn fmt_if(cond: Expr, then_s: Vec<Stmt>, else_s: Vec<Stmt>, pad: String) -> String {
+    var out = pad + "if " + fmt_expr(cond, 0) + " {"
+    for st in then_s { out = out + "\n" + fmt_stmt(st, pad + "    ") }
+    out = out + "\n" + pad + "}"
+    if else_s.len() > 0 {
+        out = out + " else {"
+        for st in else_s { out = out + "\n" + fmt_stmt(st, pad + "    ") }
+        out = out + "\n" + pad + "}"
+    }
+    return out
+}
+
+// 类型文本规范化：泛型/函数类型逗号后空格、箭头两侧空格
+fn ty_fmt(t: String) -> String {
+    return t.replace(",", ", ").replace("->", " -> ")
+}
+
+fn arm_fmt(b: Stmt, pad: String) -> String {    match b {
+        SExpr(e) { return fmt_expr(e, 0) }
+        SBlock(stmts) {
+            var out = "{"
+            if stmts.len() > 0 {
+                for st in stmts { out = out + "\n" + fmt_stmt(st, pad + "    ") }
+                out = out + "\n" + pad + "}"
+            } else {
+                out = out + " }"
+            }
+            return out
+        }
+        _ { return fmt_stmt(b, pad) }
+    }
+}
+
+fn fmt_stmt(s: Stmt, pad: String) -> String {
+    match s {
+        SLet(vn, is_mut, ty, init) {
+            var out = pad
+            if is_mut { out = out + "var " } else { out = out + "let " }
+            out = out + vn
+            match ty {
+                Some(t) { out = out + ": " + ty_fmt(t) }
+                None {}
+            }
+            return out + " = " + fmt_expr(init, 0)
+        }
+        SIf(cond, then_s, else_s) { return fmt_if(cond, then_s, else_s, pad) }
+        SWhile(cond, body_s) {
+            var out = pad + "while " + fmt_expr(cond, 0) + " {"
+            for st in body_s { out = out + "\n" + fmt_stmt(st, pad + "    ") }
+            return out + "\n" + pad + "}"
+        }
+        SFor(v, iter, body_s) {
+            var out = pad + "for " + v + " in " + fmt_expr(iter, 0) + " {"
+            for st in body_s { out = out + "\n" + fmt_stmt(st, pad + "    ") }
+            return out + "\n" + pad + "}"
+        }
+        SReturn(eo) {
+            match eo {
+                Some(x) { return pad + "return " + fmt_expr(x, 0) }
+                None { return pad + "return" }
+            }
+        }
+        SExpr(e) { return pad + fmt_expr(e, 0) }
+        SBlock(stmts) {
+            var out = pad + "{"
+            if stmts.len() > 0 {
+                for st in stmts { out = out + "\n" + fmt_stmt(st, pad + "    ") }
+                out = out + "\n" + pad + "}"
+            } else {
+                out = out + " }"
+            }
+            return out
+        }
+        SAssign(vn, op, rhs) { return pad + vn + " " + op + " " + fmt_expr(rhs, 0) }
+        SAssignIdx(vn, idx, op, rhs) { return pad + vn + "[" + fmt_expr(idx, 0) + "] " + op + " " + fmt_expr(rhs, 0) }
+        SDef(name, params, ret, body_s) {
+            var out = pad + "fn " + name + "("
+            var ps: Vec<String> = []
+            for p in params {
+                var ps_ = p.name
+                if p.ty.len() > 0 { ps_ = ps_ + ": " + ty_fmt(p.ty) }
+                ps.push(ps_)
+            }
+            out = out + join(ps, ", ") + ")"
+            match ret {
+                Some(r) { out = out + " -> " + ty_fmt(r) }
+                None {}
+            }
+            out = out + " {"
+            for st in body_s { out = out + "\n" + fmt_stmt(st, pad + "    ") }
+            return out + "\n" + pad + "}"
+        }
+        SStruct(n, fields) {
+            var out = pad + "struct " + n + " {"
+            for fd in fields { out = out + "\n" + pad + "    " + fd.name + ": " + fd.ty }
+            return out + "\n" + pad + "}"
+        }
+        SEnum(n, variants) {
+            var out = pad + "enum " + n + " {"
+            for v in variants {
+                var vl = pad + "    " + v.name
+                if v.fields.len() > 0 { vl = vl + "(" + join(v.fields, ", ") + ")" }
+                out = out + "\n" + vl
+            }
+            return out + "\n" + pad + "}"
+        }
+        SImpl(ty, body_s) {
+            var out = pad + "impl " + ty + " {"
+            for st in body_s { out = out + "\n" + fmt_stmt(st, pad + "    ") }
+            return out + "\n" + pad + "}"
+        }
+        SMod(n, body_s) {
+            var out = pad + "mod " + n + ";"
+            return out
+        }
+        SImport(n) { return pad + "import " + n }
+        SMatch(scrut, arms) {
+            var out = pad + "match " + fmt_expr(scrut, 0) + " {"
+            for arm in arms {
+                out = out + "\n" + pad + "    " + arm.pat + " => " + arm_fmt(arm.body, pad + "    ")
+            }
+            return out + "\n" + pad + "}"
+        }
+        _ { return pad + "?" }
+    }
+}
+
+fn main() -> Result<(), String> {
+    var src_path = "examples/fib.aine"
+    if cli_args.len() >= 1 {
+        src_path = cli_args[0]
+    }
+    let src = read_file(src_path)
+    let toks = tokenize(src)
+    let p = parse_program(toks)?
+    var out: Vec<String> = []
+    for s in p {
+        out.push(fmt_stmt(s, ""))
+    }
+    let formatted = join(out, "\n")
+    print("===FMT-BEGIN===")
+    print(formatted)
+    print("===FMT-END===")
+    let toks2 = tokenize(formatted)
+    let p2 = parse_program(toks2)?
+    var out2: Vec<String> = []
+    for s in p2 {
+        out2.push(fmt_stmt(s, ""))
+    }
+    let formatted2 = join(out2, "\n")
+    if formatted != formatted2 {
+        return Err("fmt not idempotent")
+    }
+    print("FMT idempotent OK")
+    Ok(())
+}

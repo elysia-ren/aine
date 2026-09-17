@@ -1,0 +1,132 @@
+// account_book.aine — 记账本完整示例
+// 来源: 《Aine 语言完整设计方案定稿版》§69
+// 本文件用于验证词法分析（lexer）对完整应用代码的覆盖。
+
+import sqlite
+import ui
+
+struct Record {
+    id: i32
+    desc: String
+    amount: f64
+    time: i64
+}
+
+ui AccountBook {
+    title = "记账本"
+    size = (700, 500)
+
+    @state
+    var records: Vec<Record> = []
+
+    @state
+    var total: f64 = 0.0
+
+    @state
+    var desc_input: String = ""
+
+    @state
+    var amount_input: String = ""
+
+    render {
+        Column {
+            Text(f"总余额: {total}").font_size(28)
+
+            Row {
+                TextInput(
+                    placeholder = "描述",
+                    bind = desc_input
+                )
+
+                TextInput(
+                    placeholder = "金额",
+                    bind = amount_input,
+                    type = number
+                )
+
+                Button("添加") {
+                    let description = desc_input.clone()
+                    let amount = amount_input.to_f64()?
+
+                    go {
+                        let record = Record {
+                            id: 0
+                            desc: description
+                            amount: amount
+                            time: now()
+                        }
+
+                        db.insert("records", record)?
+
+                        let rows =
+                            db.query(
+                                "SELECT * FROM records ORDER BY time DESC"
+                            )?
+
+                        var new_records: Vec<Record> = []
+                        for row in rows {
+                            new_records.push(Record {
+                                id: row.get("id").unwrap_or("0").to_i32()
+                                desc: row.get("desc").unwrap_or("")
+                                amount: row.get("amount").unwrap_or("0").to_f64()
+                                time: row.get("time").unwrap_or("0").to_i32()
+                            })
+                        }
+
+                        ui {
+                            records = new_records
+
+                            total = records
+                                .iter()
+                                .map(r => r.amount)
+                                .sum()
+                        }
+                    }
+                }
+            }
+
+            List(records) r => {
+                ListItem {
+                    Text(f"{r.desc} - {r.amount}")
+
+                    Button("删除") {
+                        let id = r.id
+
+                        go {
+                            db.delete("records", id)?
+
+                            let rows =
+                                db.query(
+                                    "SELECT * FROM records ORDER BY time DESC"
+                                )?
+
+                            var new_records: Vec<Record> = []
+                            for row in rows {
+                                new_records.push(Record {
+                                    id: row.get("id").unwrap_or("0").to_i32()
+                                    desc: row.get("desc").unwrap_or("")
+                                    amount: row.get("amount").unwrap_or("0").to_f64()
+                                    time: row.get("time").unwrap_or("0").to_i32()
+                                })
+                            }
+
+                            ui {
+                                records = new_records
+
+                                total = records
+                                    .iter()
+                                    .map(r => r.amount)
+                                    .sum()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn main() -> Result<(), AppError> {
+    db.init("account.db")?
+    run_ui(AccountBook)
+}

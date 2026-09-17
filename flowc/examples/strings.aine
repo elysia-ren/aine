@@ -1,0 +1,12 @@
+// strings.aine — String split/trim/replace 方法测试（编译器刚需：文本处理）
+fn main() {
+    let s = "  hello world  "
+    let t = s.trim()
+    print(f"[{t}]")
+    let n = "a,b,c".split(",").len()
+    print(n)
+    let parts = "x,y,z".split(",")
+    print(parts[0])
+    let r = "hello world".replace("world", "aine")
+    print(r)
+}

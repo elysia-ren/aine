@@ -1,0 +1,194 @@
+// alvalueal.aine — Aine 所有权检查器(全 Aine 迁移 Phase 3)
+// 检查项: go{} 捕获的复合类型变量, 之后在函数内再次使用 → "移入任务后使用"
+// 定位: 函数名#语句序号(AST 无 span, 粒度登记改进)
+// 接入: transpiler.aine build 模式(altypeck 之后)
+
+fn val_in(vn: String, list: Vec<String>) -> bool {
+    for x in list {
+        if x == vn {
+            return true
+        }
+    }
+    return false
+}
+
+// 复合类型判断: Vec/Map/用户结构体(值语义下非 Copy)
+fn val_is_composite(t: String) -> bool {
+    if t.starts_with("Vec<") { return true }
+    if t.starts_with("Map<") || t == "Map" { return true }
+    return false
+}
+
+// 表达式引用的变量名(排除绑定名)
+fn val_expr_uses(e: Expr, bound: Vec<String>) -> Vec<String> {
+    var out: Vec<String> = []
+    match e {
+        EIdent(n) {
+            if !val_in(n, bound) {
+                out.push(n)
+            }
+        }
+        ECall(callee, args) {
+            let sub = val_expr_uses(callee, bound)
+            for x in sub { out.push(x) }
+            for a in args {
+                let sub2 = val_expr_uses(a, bound)
+                for x in sub2 { out.push(x) }
+            }
+        }
+        EField(b, name) {
+            let sub = val_expr_uses(b, bound)
+            for x in sub { out.push(x) }
+        }
+        EIndex(b, idx) {
+            let sub = val_expr_uses(b, bound)
+            for x in sub { out.push(x) }
+            let sub2 = val_expr_uses(idx, bound)
+            for x in sub2 { out.push(x) }
+        }
+        ETry(x) {
+            let sub = val_expr_uses(x, bound)
+            for x2 in sub { out.push(x2) }
+        }
+        EBin(op, l, r) {
+            let sub = val_expr_uses(l, bound)
+            for x in sub { out.push(x) }
+            let sub2 = val_expr_uses(r, bound)
+            for x in sub2 { out.push(x) }
+        }
+        EUnary(op, x) {
+            let sub = val_expr_uses(x, bound)
+            for x2 in sub { out.push(x2) }
+        }
+        EStruct(ty, fields) {
+            for fd in fields {
+                let sub = val_expr_uses(fd.value, bound)
+                for x in sub { out.push(x) }
+            }
+        }
+        EIf(cond, then_s, else_s) {
+            let sub = val_expr_uses(cond, bound)
+            for x in sub { out.push(x) }
+        }
+        EMatch(scrut, arms) {
+            let sub = val_expr_uses(scrut, bound)
+            for x in sub { out.push(x) }
+        }
+        _ {}
+    }
+    return out
+}
+
+// 语句内表达式引用
+fn val_stmt_uses(s: Stmt, bound: Vec<String>) -> Vec<String> {
+    var out: Vec<String> = []
+    match s {
+        SExpr(e) {
+            let sub = val_expr_uses(e, bound)
+            for x in sub { out.push(x) }
+        }
+        SLet(vn, is_mut, ty, init) {
+            let sub = val_expr_uses(init, bound)
+            for x in sub { out.push(x) }
+        }
+        SReturn(eo) {
+            match eo {
+                Some(x) {
+                    let sub = val_expr_uses(x, bound)
+                    for x2 in sub { out.push(x2) }
+                }
+                None {}
+            }
+        }
+        SAssign(vn, op, rhs) {
+            let sub = val_expr_uses(rhs, bound)
+            for x in sub { out.push(x) }
+        }
+        SAssignIdx(vn, idx, op, rhs) {
+            let sub = val_expr_uses(rhs, bound)
+            for x in sub { out.push(x) }
+        }
+        _ {}
+    }
+    return out
+}
+
+// 语句内 let 绑定名
+fn val_stmt_binds(s: Stmt) -> Vec<String> {
+    var out: Vec<String> = []
+    match s {
+        SLet(vn, is_mut, ty, init) { out.push(vn) }
+        _ {}
+    }
+    return out
+}
+
+// 函数体检查: go 块捕获复合变量 → 之后使用报错
+fn val_stmts(stmts: Vec<Stmt>, cur: String, vnames: Vec<String>, vtypes: Vec<String>) -> Vec<String> {
+    var diags: Vec<String> = []
+    var consumed: Vec<String> = []
+    var si = 0
+    for st in stmts {
+        match st {
+            SGo(is_detached, body) {
+                // 捕获: 块内引用的复合类型变量(排除块内绑定)
+                var bound: Vec<String> = []
+                for bs in body {
+                    let b2 = val_stmt_binds(bs)
+                    for b3 in b2 { bound.push(b3) }
+                }
+                var uses: Vec<String> = []
+                for bs in body {
+                    let u2 = val_stmt_uses(bs, bound)
+                    for u3 in u2 { uses.push(u3) }
+                }
+                for u in uses {
+                    // 复合类型才消费(move)
+                    var is_comp = false
+                    var ui_idx = 0
+                    for vn in vnames {
+                        if vn == u {
+                            if ui_idx < vtypes.len() {
+                                if val_is_composite(vtypes[ui_idx]) {
+                                    is_comp = true
+                                }
+                            }
+                        }
+                        ui_idx += 1
+                    }
+                    if is_comp && !val_in(u, consumed) {
+                        consumed.push(u)
+                    }
+                }
+            }
+            _ {}
+        }
+        // 使用检查(go 之后的语句)
+        if consumed.len() > 0 {
+            var uses_now = val_stmt_uses(st, [])
+            for u in uses_now {
+                if val_in(u, consumed) {
+                    diags.push(cur + "#" + f"{si}" + ": 变量 " + u + " 已移入后台任务, 不能再使用")
+                }
+            }
+        }
+        si += 1
+    }
+    return diags
+}
+
+fn val_program(program: Vec<Stmt>) -> Vec<String> {
+    var diags: Vec<String> = []
+    let vnames = collect_var_names(program)
+    let vtypes = collect_var_types(program)
+    for s in program {
+        match s {
+            SDef(name, params, ret, body) {
+                let sub = val_stmts(body, name, vnames, vtypes)
+                for d in sub { diags.push(d) }
+            }
+            _ {}
+        }
+    }
+    return diags
+}

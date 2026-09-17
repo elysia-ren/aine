@@ -1,0 +1,29 @@
+// 标准库端到端：mod 搜索路径（同目录 -> stdlib/）
+module math;
+module strutil;
+module collections;
+
+fn main() {
+    print(f"gcd(48,36)={gcd(48, 36)}")
+    print(f"pow2_10={pow_i32(2, 10)}")
+    print(f"clamp={clamp_i32(42, 0, 10)}")
+    print(reverse("aine"))
+    let n = count_char("a,b,c,a", "a")
+    print(f"count={n}")
+    print(pad_left("7", 3, "0"))
+    let v = range_vec(5)
+    var total = 0
+    for x in v {
+        total = total + x
+    }
+    print(f"len={v.len()} total={total} max={vec_max(v)}")
+    let r = vec_reverse(v)
+    print(f"first={r[0]} last={r[4]}")
+    let c = vec_concat(v, r)
+    print(f"concat={c.len()}")
+    if starts_with_digit("7x") {
+        print("digit: yes")
+    } else {
+        print("digit: no")
+    }
+}

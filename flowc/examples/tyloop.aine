@@ -1,0 +1,24 @@
+struct Token {
+    kind: String
+    text: String
+}
+
+fn parse_ty(tokens: Vec<Token>, i: i32) -> String {
+    var out = ""
+    var j = i
+    while true {
+        let t = tokens[j]
+        if t.kind == "semi" || t.kind == "eof" {
+            break
+        }
+        out = out + t.text
+        j += 1
+    }
+    return out
+}
+
+fn main() {
+    var toks = [Token { kind: "a" text: "i32" }, Token { kind: "semi" text: "" }]
+    var r = parse_ty(toks, 0)
+    print(f"r={r}")
+}

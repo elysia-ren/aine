@@ -1,0 +1,14 @@
+module allex;
+fn main() {
+    if is_ident_start("a") {
+        print("YES-literal")
+    } else {
+        print("NO-literal")
+    }
+    var c = "a"
+    if is_ident_start(c) {
+        print("YES-var")
+    } else {
+        print("NO-var")
+    }
+}

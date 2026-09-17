@@ -1,0 +1,23 @@
+module allex;
+fn main() {
+    var src = "ab cd ef"
+    let len = src.len()
+    var i = 0
+    while i < len {
+        let c = src[i]
+        print("TOP c=" + c + " i=" + f"{i}")
+        if is_ident_start(c) {
+            let start = i
+            while i < len && is_ident_continue(src[i]) {
+                i += 1
+            }
+            let word = src[start..i]
+            print("IDENT word=" + word + " i=" + f"{i}")
+            i += 1
+            continue
+        } else {
+            print("NO i=" + f"{i}")
+        }
+        i += 1
+    }
+}

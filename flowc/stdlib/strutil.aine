@@ -1,0 +1,40 @@
+// std/strutil —— 字符串工具（Aine 标准库 · 自举期扁平注册）
+// 注：Aine 字符串按字符索引（UTF-8，D-xx 决策）——len/索引/切片均按字符；
+// 本模块实现中 [0..1] 与 "0".."9" 的比较仅适用于 ASCII 数字/字母判断。
+
+fn reverse(s: String) -> String {
+    var out = ""
+    var i = s.len() - 1
+    while i >= 0 {
+        out = out + s[i..i + 1]
+        i -= 1
+    }
+    return out
+}
+
+fn count_char(s: String, target: String) -> i32 {
+    var n = 0
+    var i = 0
+    while i < s.len() {
+        if s[i..i + 1] == target {
+            n += 1
+        }
+        i += 1
+    }
+    return n
+}
+
+fn pad_left(s: String, width: i32, pad: String) -> String {
+    var out: String = s
+    while out.len() < width {
+        out = pad + out
+    }
+    return out
+}
+
+fn starts_with_digit(s: String) -> bool {
+    if s.len() == 0 {
+        return false
+    }
+    return s[0..1] >= "0" && s[0..1] <= "9"
+}

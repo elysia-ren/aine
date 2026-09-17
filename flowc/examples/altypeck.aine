@@ -1,0 +1,374 @@
+// altypeck.aine — Aine 类型检查器(全 Aine 迁移 Phase 2)
+// 检查项: 未定义函数 / 实参个数 / 结构体字段存在 / 结构体字面量字段
+// 定位: 函数名 + 语句序号(AST 无 span, 位置粒度登记改进)
+// 接入: transpiler.aine build 模式在 c_program 前调用
+
+// cur "name#si" → 函数名
+fn tck_fn_name(cur: String) -> String {
+    var i = 0
+    while i < cur.len() {
+        if cur[i..i + 1] == "#" {
+            return cur[0..i]
+        }
+        i += 1
+    }
+    return cur
+}
+
+// Aine 返回类型 → 期望 C 类型(与 expr_ctype 比较)
+fn tck_ret_ct(ret: String) -> String {
+    if ret == "i32" || ret == "bool" { return "int" }
+    if ret == "f64" { return "double" }
+    if ret == "String" { return "char*" }
+    if ret == "char" { return "char" }
+    return ""
+}
+
+fn tck_in(vn: String, list: Vec<String>) -> bool {
+    for x in list {
+        if x == vn {
+            return true
+        }
+    }
+    return false
+}
+
+fn tck_split(s: String, sep: String) -> Vec<String> {
+    var out: Vec<String> = []
+    if s.len() == 0 {
+        return out
+    }
+    var cur = ""
+    var depth = 0
+    var i = 0
+    while i < s.len() {
+        let c = s[i..i + 1]
+        if c == "(" {
+            depth += 1
+        }
+        if c == ")" {
+            depth -= 1
+        }
+        if c == sep && depth == 0 {
+            out.push(cur)
+            cur = ""
+        } else {
+            cur = cur + c
+        }
+        i += 1
+    }
+    out.push(cur)
+    return out
+}
+
+// 结构体字段表: (sname, fname, fty) 三平行表已由 collect 提供
+fn tck_struct_has(snames: Vec<String>, sfnames: Vec<String>, ty: String, fname: String) -> bool {
+    var i = 0
+    for sn in snames {
+        if sn == ty && sfnames[i] == fname {
+            return true
+        }
+        i += 1
+    }
+    return false
+}
+
+fn tck_expr(e: Expr, cur: String, fnames: Vec<String>, fptypes: Vec<String>, freturns: Vec<String>, params: Vec<String>, vnames: Vec<String>, vtypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, enames: Vec<String>, elists: Vec<String>, varnames2: Vec<String>, varowners2: Vec<String>) -> Vec<String> {
+    var diags: Vec<String> = []
+    match e {
+        EIdent(n) {
+            // 未定义变量检查(保守: 全程序变量表/参数/函数/内建/变体/类型名跳过)
+            if tck_in(n, params) {
+            } else if n == "self" || n == "true" || n == "false" {
+            } else if n == "print" || n == "assert" || n == "read_file" || n == "write_file" || n == "append_file" || n == "file_exists" || n == "Some" || n == "None" || n == "Ok" || n == "Err" || n == "now" || n == "run_ui" || n == "Map" || n == "cli_args" || n == "db" || n == "http" || n == "File" || n == "Path" || n == "Column" || n == "Row" || n == "Text" || n == "Button" || n == "TextInput" || n == "List" || n == "ListItem" || n == "Window" || n == "Dialog" || n == "Image" || n == "read_line" || n == "env" || n == "sleep" || n == "json_encode" || n == "json_decode" || n == "http_request" || n == "file_list" || n == "window_new" || n == "label_new" || n == "button_new" || n == "set_text" || n == "get_text" || n == "button_onclick" || n == "ui_run" || n == "input_new" || n == "listbox_new" || n == "listbox_add" || n == "listbox_clear" || n == "listbox_selected" || n == "edit_new" || n == "listbox_ondblclick" || n == "listbox_get" || n == "rt_window" || n == "rt_comp" || n == "rt_run" || n == "rt_set_comp_text" || n == "rt_begin" || n == "rt_fill" || n == "rt_rrect" || n == "rt_srect" || n == "rt_hline" || n == "rt_text" || n == "rt_click" || n == "rt_wait_click" || n == "rt_invalidate" || n == "rt_w" || n == "rt_h" || n == "rt_wait_event" || n == "sci_init" || n == "sci_new" || n == "sci_msg" || n == "sci_msgp" || n == "sci_set_text" || n == "sci_get_text" || n == "sci_fit" || n == "rt_on_style" || n == "sci_get_line" || n == "sys_exec" || n == "sys_open" {
+            } else if tck_in(n, fnames) {
+            } else if tck_in(n, vnames) {
+            } else {
+                // 枚举变体名/结构体类型名
+                let ov = variant_owner(n, varnames2, varowners2)
+                var is_ty = false
+                match ov {
+                    Some(o) { is_ty = true }
+                    None {}
+                }
+                if !is_ty && tck_in(n, snames) {
+                    is_ty = true
+                }
+                if !is_ty && tck_in(n, enames) {
+                    is_ty = true
+                }
+                if !is_ty {
+                    diags.push(cur + ": 未定义变量 " + n)
+                }
+            }
+        }
+        ECall(callee, args) {
+            match callee {
+                EIdent(fname) {
+                    // 内建/变体构造跳过
+                    var is_builtin = false
+                    if fname == "print" || fname == "assert" || fname == "read_file" || fname == "write_file" || fname == "append_file" || fname == "file_exists" || fname == "Some" || fname == "None" || fname == "Ok" || fname == "Err" || fname == "now" || fname == "run_ui" || fname == "Map" || fname == "read_line" || fname == "env" || fname == "sleep" || fname == "json_encode" || fname == "json_decode" || fname == "http_request" || fname == "file_list" || fname == "window_new" || fname == "label_new" || fname == "button_new" || fname == "set_text" || fname == "get_text" || fname == "button_onclick" || fname == "ui_run" || fname == "input_new" || fname == "listbox_new" || fname == "listbox_add" || fname == "listbox_clear" || fname == "listbox_selected" || fname == "edit_new" || fname == "listbox_ondblclick" || fname == "listbox_get" || fname == "rt_window" || fname == "rt_comp" || fname == "rt_run" || fname == "rt_set_comp_text" || fname == "rt_begin" || fname == "rt_fill" || fname == "rt_rrect" || fname == "rt_srect" || fname == "rt_hline" || fname == "rt_text" || fname == "rt_click" || fname == "rt_wait_click" || fname == "rt_invalidate" || fname == "rt_w" || fname == "rt_h" || fname == "rt_wait_event" || fname == "sci_init" || fname == "sci_new" || fname == "sci_msg" || fname == "sci_msgp" || fname == "sci_set_text" || fname == "sci_get_text" || fname == "sci_fit" || fname == "rt_on_style" || fname == "sci_get_line" || fname == "sys_exec" || fname == "sys_open" {
+                        is_builtin = true
+                    }
+                    if !is_builtin {
+                        // 枚举变体构造(有 owner)跳过
+                        let owner = variant_owner(fname, varnames2, varowners2)
+                        match owner {
+                            Some(o) { is_builtin = true }
+                            None {}
+                        }
+                    }
+                    if !is_builtin && tck_in(fname, params) {
+                        // fn 类型参数调用(高阶函数) — 跳过
+                    } else if !is_builtin && !tck_in(fname, fnames) {
+                        diags.push(cur + ": 未定义函数 " + fname)
+                    } else if !is_builtin && tck_in(fname, fnames) {
+                        // 实参个数
+                        var f_idx = 0
+                        var f_found = false
+                        var fi = 0
+                        for fnm in fnames {
+                            if fnm == fname {
+                                f_idx = fi
+                                f_found = true
+                            }
+                            fi += 1
+                        }
+                        if f_found && f_idx < fptypes.len() {
+                            let pts = tck_split(fptypes[f_idx], ",")
+                            if pts.len() != args.len() {
+                                diags.push(cur + ": 函数 " + fname + " 期望 " + f"{pts.len()}" + " 个参数, 实参 " + f"{args.len()}")
+                            }
+                        }
+                    }
+                }
+                _ {}
+            }
+            // 递归实参
+            for a in args {
+                let sub = tck_expr(a, cur, fnames, fptypes, freturns, params, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
+                for d in sub { diags.push(d) }
+            }
+        }
+        EField(base, name) {
+            // base 是变量且类型是用户结构体 → 字段存在检查
+            match base {
+                EIdent(bn) {
+                    let vt = var_type(bn, vnames, vtypes)
+                    match vt {
+                        Some(t) {
+                            if tck_in(t, snames) && !tck_struct_has(snames, sfnames, t, name) {
+                                diags.push(cur + ": 结构体 " + t + " 无字段 " + name)
+                            }
+                        }
+                        None {}
+                    }
+                }
+                _ {}
+            }
+        }
+        EStruct(ty, fields) {
+            // 字面量字段存在检查(ty 是已知结构体)
+            if tck_in(ty, snames) {
+                for fd in fields {
+                    if !tck_struct_has(snames, sfnames, ty, fd.name) {
+                        diags.push(cur + ": 结构体 " + ty + " 无字段 " + fd.name)
+                    }
+                }
+            }
+            for fd in fields {
+                let sub = tck_expr(fd.value, cur, fnames, fptypes, freturns, params, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
+                for d in sub { diags.push(d) }
+            }
+        }
+        EBin(op, l, r) {
+            let sub = tck_expr(l, cur, fnames, fptypes, freturns, params, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
+            for d in sub { diags.push(d) }
+            let sub2 = tck_expr(r, cur, fnames, fptypes, freturns, params, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
+            for d in sub2 { diags.push(d) }
+            // 运算类型检查(保守): 字符串 + 数字等明显不匹配
+            var is_arith = false
+            if op == "+" || op == "-" || op == "*" || op == "/" || op == "%" { is_arith = true }
+            if is_arith && op != "+" {
+                // - * / % 不允许字符串操作数
+                if expr_is_string(l, r, vnames, vtypes, fnames, freturns, snames, sfnames, sftypes) {
+                    diags.push(cur + ": 运算符 " + op + " 不支持字符串")
+                } else if expr_is_string(r, l, vnames, vtypes, fnames, freturns, snames, sfnames, sftypes) {
+                    diags.push(cur + ": 运算符 " + op + " 不支持字符串")
+                }
+            } else if op == "+" {
+                // 字符串 + 数字
+                let l_is_str = expr_is_string(l, r, vnames, vtypes, fnames, freturns, snames, sfnames, sftypes)
+                let r_is_str = expr_is_string(r, l, vnames, vtypes, fnames, freturns, snames, sfnames, sftypes)
+                if l_is_str && !r_is_str {
+                    let r_num = match r {
+                        EInt(n) { true }
+                        EFloat(n) { true }
+                        _ { false }
+                    }
+                    if r_num {
+                        diags.push(cur + ": 字符串不能与数字相加")
+                    }
+                }
+            }
+        }
+        EUnary(op, x) {
+            let sub = tck_expr(x, cur, fnames, fptypes, freturns, params, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
+            for d in sub { diags.push(d) }
+        }
+        EIndex(b, idx) {
+            let sub = tck_expr(b, cur, fnames, fptypes, freturns, params, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
+            for d in sub { diags.push(d) }
+        }
+        ETry(x) {
+            let sub = tck_expr(x, cur, fnames, fptypes, freturns, params, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
+            for d in sub { diags.push(d) }
+        }
+        EIf(cond, then_s, else_s) {
+            let sub = tck_expr(cond, cur, fnames, fptypes, freturns, params, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
+            for d in sub { diags.push(d) }
+            let sub2 = tck_stmts(then_s, cur, fnames, fptypes, freturns, params, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
+            for d in sub2 { diags.push(d) }
+            let sub3 = tck_stmts(else_s, cur, fnames, fptypes, freturns, params, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
+            for d in sub3 { diags.push(d) }
+        }
+        EMatch(scrut, arms) {
+            let sub = tck_expr(scrut, cur, fnames, fptypes, freturns, params, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
+            for d in sub { diags.push(d) }
+            for arm in arms {
+                let sub2 = tck_stmt(arm.body, cur, fnames, fptypes, freturns, params, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
+                for d in sub2 { diags.push(d) }
+            }
+        }
+        _ {}
+    }
+    return diags
+}
+
+fn tck_stmt(s: Stmt, cur: String, fnames: Vec<String>, fptypes: Vec<String>, freturns: Vec<String>, params: Vec<String>, vnames: Vec<String>, vtypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, enames: Vec<String>, elists: Vec<String>, varnames2: Vec<String>, varowners2: Vec<String>) -> Vec<String> {
+    var diags: Vec<String> = []
+    match s {
+        SExpr(e) {
+            let sub = tck_expr(e, cur, fnames, fptypes, freturns, params, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
+            for d in sub { diags.push(d) }
+        }
+        SLet(vn, is_mut, ty, init) {
+            let sub = tck_expr(init, cur, fnames, fptypes, freturns, params, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
+            for d in sub { diags.push(d) }
+        }
+        SReturn(eo) {
+            match eo {
+                Some(x) {
+                    let sub = tck_expr(x, cur, fnames, fptypes, freturns, params, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
+                    for d in sub { diags.push(d) }
+                    // 返回类型检查(保守: 字面量形态 vs 函数返回类型)
+                    let fn_name = tck_fn_name(cur)
+                    var r_idx = 0
+                    var r_found = false
+                    for fnm in fnames {
+                        if fnm == fn_name {
+                            r_found = true
+                            break
+                        }
+                        r_idx += 1
+                    }
+                    if r_found && r_idx < freturns.len() {
+                        let ret_ty = freturns[r_idx]
+                        // 保守: 仅字面量形态检查(复合表达式类型推断不可靠)
+                        var lit_ok = true
+                        var lit_ct = ""
+                        match x {
+                            EInt(n) { lit_ct = "int" }
+                            EFloat(n) { lit_ct = "double" }
+                            EStr(s2) { lit_ct = "char*" }
+                            _ {
+                                // 布尔字面量表达式: ==/!=/</>/<=/>=/&&/||
+                                lit_ok = false
+                            }
+                        }
+                        if lit_ok {
+                            let want = tck_ret_ct(ret_ty)
+                            if want != "" && lit_ct != want {
+                                diags.push(cur + ": 返回类型不匹配: " + fn_name + " 期望 " + ret_ty + ", 返回字面量 " + lit_ct)
+                            }
+                        }
+                    }
+                }
+                None {}
+            }
+        }
+        SAssign(vn, op, rhs) {
+            let sub = tck_expr(rhs, cur, fnames, fptypes, freturns, params, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
+            for d in sub { diags.push(d) }
+        }
+        SAssignIdx(vn, idx, op, rhs) {
+            let sub = tck_expr(rhs, cur, fnames, fptypes, freturns, params, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
+            for d in sub { diags.push(d) }
+        }
+        _ {}
+    }
+    return diags
+}
+
+fn tck_stmts(stmts: Vec<Stmt>, cur: String, fnames: Vec<String>, fptypes: Vec<String>, freturns: Vec<String>, params: Vec<String>, vnames: Vec<String>, vtypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, enames: Vec<String>, elists: Vec<String>, varnames2: Vec<String>, varowners2: Vec<String>) -> Vec<String> {
+    var diags: Vec<String> = []
+    var si = 0
+    for st in stmts {
+        let sub = tck_stmt(st, cur + "#" + f"{si}", fnames, fptypes, freturns, params, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
+        for d in sub { diags.push(d) }
+        si += 1
+    }
+    return diags
+}
+
+// 入口: 程序级检查
+fn tck_program(program: Vec<Stmt>) -> Vec<String> {
+    var diags: Vec<String> = []
+    let fnames = collect_fn_names(program)
+    let fptypes = collect_fn_ptypes(program)
+    let freturns = collect_fn_returns(program)
+    let snames = collect_struct_snames(program)
+    let sfnames = collect_struct_fnames(program)
+    let sftypes = collect_struct_ftypes(program)
+    let enames = collect_enum_ty_names(program)
+    let elists = collect_enum_variant_lists(program)
+    let vnames = collect_var_names(program)
+    let vtypes = collect_var_types(program)
+    let varnames2 = collect_variant_names(program)
+    let varowners2 = collect_variant_owners(program)
+    // let 闭包名(脱糖前)视为已知函数
+    var extra_fns: Vec<String> = []
+    for s2 in program {
+        match s2 {
+            SDef(_, _, _, body_s) {
+                for st2 in body_s {
+                    match st2 {
+                        SLet(vn2, _, _, init2) {
+                            match init2 {
+                                EClosure(_, _) { extra_fns.push(vn2) }
+                                _ {}
+                            }
+                        }
+                        _ {}
+                    }
+                }
+            }
+            _ {}
+        }
+    }
+    var fnames_all: Vec<String> = []
+    for fn_ in fnames { fnames_all.push(fn_) }
+    for ef in extra_fns { fnames_all.push(ef) }
+    for s in program {
+        match s {
+            SDef(name, params, ret, body) {
+                var pnames: Vec<String> = []
+                for pp in params { pnames.push(pp.name) }
+                let sub = tck_stmts(body, name, fnames_all, fptypes, freturns, pnames, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
+                for d in sub { diags.push(d) }
+            }
+            _ {}
+        }
+    }
+    return diags
+}

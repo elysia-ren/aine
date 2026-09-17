@@ -1,0 +1,26 @@
+[package]
+name = "aine"
+version = "0.1.0"
+edition = "2021"
+description = "Aine language compiler - M1: core language (lexer/parser/AST/HIR/typecheck)"
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "aine"
+path = "src/main.rs"
+
+[lib]
+name = "aine"
+path = "src/lib.rs"
+
+[profile.release]
+lto = true
+codegen-units = 1
+
+[dependencies]
+eframe = { version = "0.27", features = ["wgpu"] }
+ureq = "2"
+
+[[bin]]
+name = "aine-studio"
+path = "src/bin/aine_studio.rs"

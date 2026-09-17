@@ -1,0 +1,13 @@
+// fib.aine — 可运行的递归示例
+fn fib(n: i32) -> i32 {
+    if n < 2 {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+fn main() {
+    for i in 0..10 {
+        print(f"fib({i}) = {fib(i)}")
+    }
+}

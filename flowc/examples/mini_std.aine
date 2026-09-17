@@ -1,0 +1,17 @@
+// Std API 双引擎验证 (T07): read_line/env/json_encode/json_decode
+// 宿主: aine run examples/mini_std.aine
+// alinterp: aine run examples/alinterp.aine examples/mini_std.aine
+// 预期两者输出一致(喂同一 stdin/env)
+fn main() {
+    let a = read_line()
+    print("RL[" + a + "]")
+    print("ENV[" + env("AINE_TEST_VAR") + "]")
+    let m = Map.new()
+    m.set("k", 42)
+    m.set("s", "hi")
+    print("ENC " + json_encode(m))
+    print("ENC2 " + json_encode([1, 2.5, true, "x"]))
+    let d = json_decode("{\"a\": [1, 2], \"b\": null, \"c\": \"x\"}")
+    print("DEC " + f"{d}")
+    print("END")
+}

@@ -1,0 +1,202 @@
+// 自举拆分：类型工具在 altype.aine（文件模块，扁平注册）
+
+
+// parser_stmt.aine — 用 Aine 写的语句级解析器（自举 B4-M2）
+// 在 parser_expr.aine 的 Pratt 表达式核心之上，扩展：
+//   语句：let(mut/类型注解)/if-else/while/for..in/return/赋值/块/表达式语句
+//   项：fn 定义（参数、返回类型）
+// 输出完整 AST 的 stringify 回显，main 内自断言。
+
+enum TokKind {
+    TIdent
+    TInt
+    TFloat
+    TStr
+    TOp
+    TSemi
+    TEof
+}
+
+struct Token {
+    kind: TokKind
+    text: String
+}
+
+enum Expr {
+    EInt(i32)
+    EFloat(f64)
+    EStr(String)
+    EIdent(String)
+    EBin(String, Expr, Expr)
+    EUnary(String, Expr)
+    ECall(Expr, Vec<Expr>)
+    EField(Expr, String)
+    EBlock(Vec<Stmt>)
+    EVec(Vec<Expr>)
+    EUnit
+    EStruct(String, Vec<StructField>)
+    ETry(Expr)
+    ERange(Expr, Expr)
+    EClosure(Vec<Param>, Expr)
+    EIndex(Expr, Expr)
+    EIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    EMatch(Expr, Vec<MatchArm>)
+}
+
+enum Stmt {
+    SLet(String, bool, Option<String>, Expr)
+    SIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    SWhile(Expr, Vec<Stmt>)
+    SFor(String, Expr, Vec<Stmt>)
+    SReturn(Option<Expr>)
+    SExpr(Expr)
+    SBlock(Vec<Stmt>)
+    SAssign(String, String, Expr)
+    SAssignIdx(String, Expr, String, Expr)
+    SDef(String, Vec<Param>, Option<String>, Vec<Stmt>)
+    SStruct(String, Vec<Field>)
+    SEnum(String, Vec<EVariant>)
+    SImpl(String, Vec<Stmt>)
+    SMod(String, Vec<Stmt>)
+    SImport(String)
+    SMatch(Expr, Vec<MatchArm>)
+    SGo(bool, Vec<Stmt>)
+    SUi(Vec<Stmt>)
+    SGlobalVar(String, Option<String>, Expr)
+}
+
+struct MatchArm {
+    pat: String
+    body: Stmt
+}
+
+struct Field {
+    name: String
+    ty: String
+}
+
+struct StructField {
+    name: String
+    value: Expr
+}
+
+struct EVariant {
+    name: String
+    fields: Vec<String>
+}
+
+struct Param {
+    name: String
+    ty: String
+}
+
+struct EPResult {
+    value: Expr
+    next: i32
+}
+
+struct SPResult {
+    stmt: Stmt
+    next: i32
+}
+
+struct BlockResult {
+    stmts: Vec<Stmt>
+    next: i32
+}
+
+struct TyResult {
+    ty: String
+    next: i32
+}
+
+struct FlatResult {
+    out: Vec<Stmt>
+    loaded: Vec<String>
+}
+
+// var name -> type tables
+struct VarInfo {
+    names: Vec<String>
+    types: Vec<String>
+}
+
+module altype;
+module altypeck;
+module alvalueal;
+module allex;
+module alparse;
+module alstr;
+module alcollect;
+module alee;
+fn main() -> Result<(), String> {
+    // case 1: fib
+    let src1 = "fn fib(n: i32) -> i32 {\n    if n < 2 {\n        return n\n    }\n    return fib(n - 1) + fib(n - 2)\n}\nfn main() {\n    print(fib(10))\n}"
+    let p1 = parse_program(tokenize(src1))?
+    let c1 = c_program(p1, collect_user_types(p1), collect_variant_names(p1), collect_variant_owners(p1), collect_fn_names(p1), collect_fn_returns(p1), collect_var_names(p1), collect_var_types(p1), collect_fn_ptypes(p1), collect_enum_ty_names(p1), collect_enum_variant_lists(p1))
+    if !c1.contains("int fib(int n) {") { return Err("case1 fib sig") }
+    if !c1.contains("printf(\"%d\\n\", fib(10))") { return Err("case1 print") }
+    print("case1 fib OK")
+    // case 2: string concat
+    let src2 = "fn greet(name: String) -> String {\n    return \"hello \" + name\n}"
+    let p2 = parse_program(tokenize(src2))?
+    let c2 = c_program(p2, collect_user_types(p2), collect_variant_names(p2), collect_variant_owners(p2), collect_fn_names(p2), collect_fn_returns(p2), collect_var_names(p2), collect_var_types(p2), collect_fn_ptypes(p2), collect_enum_ty_names(p2), collect_enum_variant_lists(p2))
+    if !c2.contains("al_strcat") { return Err("case2 strcat") }
+    print("case2 strcat OK")
+    // case 3: Vec push
+    let src3 = "fn build() -> Vec<i32> {\n    var v = []\n    v.push(1)\n    return v\n}"
+    let p3 = parse_program(tokenize(src3))?
+    let c3 = c_program(p3, collect_user_types(p3), collect_variant_names(p3), collect_variant_owners(p3), collect_fn_names(p3), collect_fn_returns(p3), collect_var_names(p3), collect_var_types(p3), collect_fn_ptypes(p3), collect_enum_ty_names(p3), collect_enum_variant_lists(p3))
+    if !c3.contains("al_push(&v, sizeof(int), &(int){ 1 })") { return Err("case3 push") }
+    print("case3 vec OK")
+
+    // case 4: if-expression and slice
+    let src4 = "fn f(x: i32) -> i32 {\n    let two = if x > 0 {\n        1\n    } else {\n        2\n    }\n    return two\n}\nfn g(s: String, i: i32) -> String {\n    return s[i..i + 2]\n}"
+    let p4 = parse_program(tokenize(src4))?
+    let c4 = c_program(p4, collect_user_types(p4), collect_variant_names(p4), collect_variant_owners(p4), collect_fn_names(p4), collect_fn_returns(p4), collect_var_names(p4), collect_var_types(p4), collect_fn_ptypes(p4), collect_enum_ty_names(p4), collect_enum_variant_lists(p4))
+    if !c4.contains("(x > 0) ? 1 : 2") { return Err("case4 if-expr") }
+    var p4a = c4.contains("al_substr")
+    var p4b = c4.contains("char* g(")
+    print("PROBE4 sub=" + f"{p4a}" + " g=" + f"{p4b}")
+    if !c4.contains("al_substr(s, i, (i + 2))") { return Err("case4 slice") }
+    print("case4 if-slice OK")
+    // case 5: array iteration
+    let src5 = "fn sum(v: Vec<i32>) -> i32 {\n    var total = 0\n    for x in v {\n        total += x\n    }\n    return total\n}"
+    let p5 = parse_program(tokenize(src5))?
+    let c5 = c_program(p5, collect_user_types(p5), collect_variant_names(p5), collect_variant_owners(p5), collect_fn_names(p5), collect_fn_returns(p5), collect_var_names(p5), collect_var_types(p5), collect_fn_ptypes(p5), collect_enum_ty_names(p5), collect_enum_variant_lists(p5))
+    if !c5.contains("_i < v.len; _i++") { return Err("case5 iter-len") }
+    if !c5.contains("int x = ((int*)(v.data))[_i];") { return Err("case5 iter-elem") }
+    print("case5 iter OK")
+
+
+    let src6 = "fn f(s: String) -> i32 {
+    return s.len()
+}
+fn is_digit(c: String) -> bool {
+    c >= \"0\" && c <= \"9\"
+}"
+    let toks6 = tokenize(src6)
+    var ti6 = 0
+    while ti6 < toks6.len() {
+        print("TK6[" + f"{ti6}" + "] " + toks6[ti6].kind + " [" + toks6[ti6].text + "]")
+        ti6 += 1
+    }
+    let p6 = parse_program(toks6)?
+    match p6[1] {
+        SDef(fn2, prms, ret, bd) {
+            print("DIGIT-BODY n=" + f"{bd.len()}")
+            var bi2 = 0
+            while bi2 < bd.len() {
+                print("BD[" + f"{bi2}" + "] " + f"{bd[bi2]}")
+                bi2 += 1
+            }
+        }
+        _ { print("DIGIT-NOPE") }
+    }
+    let c6 = c_program(p6, collect_user_types(p6), collect_variant_names(p6), collect_variant_owners(p6), collect_fn_names(p6), collect_fn_returns(p6), collect_var_names(p6), collect_var_types(p6), collect_fn_ptypes(p6), collect_enum_ty_names(p6), collect_enum_variant_lists(p6))
+    print("C6LEN=" + f"{c6.len()}")
+    print(c6)
+    if !c6.contains("strlen(s)") { print("C6 NO-STRLEN") }
+    if !c6.contains("strcmp(c, \"0\") >= 0") { print("C6 NO-STRCMP") }
+    return Ok(())
+}

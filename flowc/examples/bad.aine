@@ -1,0 +1,7 @@
+// bad.aine — 故意包含词法错误
+fn main() {
+    let s = "未闭合的字符串
+    let x = 0x
+    let $ = 1
+    /* 未闭合注释
+}

@@ -1,0 +1,15 @@
+struct AEntry {
+    key: String
+    value: String
+}
+
+fn main() {
+    var f = AEntry { key: "kind" value: "fn" }
+    match f {
+        AEntry(k, v) {
+            print("K=[" + k + "] V=[" + v + "]")
+        }
+        _ { print("NOMATCH") }
+    }
+    print("entrypat done")
+}

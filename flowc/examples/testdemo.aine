@@ -1,0 +1,58 @@
+// M23 测试框架验收示例 —— 全部通过的测试集
+// 运行: aine test examples/testdemo.aine
+// 要点: @test 标记测试函数；返回 Result 且为 Err 即失败；正常返回（含 Ok）即通过。
+
+module strutil;
+module collections;
+
+fn add(a: i32, b: i32) -> i32 {
+    return a + b
+}
+
+fn fib(n: i32) -> i32 {
+    if n < 2 {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+// 断言助手：条件成立返回 Ok，否则把说明文字带进 Err
+fn expect(cond: bool, msg: String) -> Result<i32, String> {
+    if cond {
+        return Ok(0)
+    }
+    return Err(msg)
+}
+
+@test
+fn add_basics() -> Result<i32, String> {
+    return expect(add(1, 2) == 3, "add(1,2) 应该是 3")
+}
+
+@test
+fn fib_known_values() -> Result<i32, String> {
+    let a = fib(0)
+    let b = fib(10)
+    return expect(a == 0 && b == 55, "fib(0) 应为 0，fib(10) 应为 55")
+}
+
+@test
+fn string_reverse() -> Result<i32, String> {
+    let r = reverse("aine")
+    return expect(r == "enia", "reverse(\"aine\") 应该是 \"enia\"")
+}
+
+@test
+fn sort_and_sum() -> Result<i32, String> {
+    let v = [3, 1, 2]
+    let s = sort_ints(v)
+    let total = sum_ints(s)
+    return expect(total == 6 && s[0] == 1 && s[2] == 3, "排序后应为 [1,2,3] 且和为 6")
+}
+
+@test
+fn vec_max_and_contains() -> Result<i32, String> {
+    let v = range_vec(5)
+    let m = vec_max(v)
+    return expect(m == 4 && contains_int(v, 3), "range_vec(5) 最大应为 4 且包含 3")
+}

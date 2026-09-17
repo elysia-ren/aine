@@ -1,0 +1,9 @@
+// idxtest —— 索引赋值 + assert 编译路径用例（case29 输入）
+fn main() {
+    var v = [1, 2, 3]
+    v[0] = 99
+    v[1] += 1
+    assert(v[0] == 99, "v[0] 应为 99")
+    assert(v[1] == 3, "v[1] 应为 3")
+    print(v[0] + v[1] + v[2])
+}

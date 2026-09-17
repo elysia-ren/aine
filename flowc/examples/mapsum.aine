@@ -1,0 +1,19 @@
+// mapsum.aine — 方法链 iter/map/sum 测试
+struct Record {
+    desc: String
+    amount: f64
+}
+
+fn total_of(records: Vec<Record>) -> f64 {
+    records.iter().map(r => r.amount).sum()
+}
+
+fn main() {
+    let records = [
+        Record { desc: "a" amount: 1.5 }
+        Record { desc: "b" amount: 2.5 }
+    ]
+    print(total_of(records))
+    let doubled = records.iter().map(r => r.amount * 2.0).sum()
+    print(doubled)
+}

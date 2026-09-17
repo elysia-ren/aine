@@ -1,0 +1,8 @@
+// 多文件端到端：mod 读入 modtest_util.aine，import 为声明标记
+module modtest_util;
+import modtest_util
+
+fn main() {
+    print(shout("aine"))
+    print(repeat("ab", 3))
+}

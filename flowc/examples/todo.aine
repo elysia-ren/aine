@@ -1,0 +1,35 @@
+// todo.aine — 账本简化逻辑（可运行：结构体 + 数组 + map/sum + 错误传播）
+struct Record {
+    desc: String
+    amount: f64
+}
+
+fn total_of(records: Vec<Record>) -> f64 {
+    records.iter().map(r => r.amount).sum()
+}
+
+fn parse_amount(s: String) -> Result<f64, String> {
+    let v = s.to_f64()
+    if v < 0.0 {
+        return Err("金额不能为负")
+    }
+    return Ok(v)
+}
+
+fn main() -> Result<(), String> {
+    let records = [
+        Record { desc: "买菜" amount: 32.5 }
+        Record { desc: "地铁" amount: 6.0 }
+        Record { desc: "咖啡" amount: 18.0 }
+    ]
+
+    let total = total_of(records)
+    print(f"总余额: {total}")
+
+    let amount = parse_amount("25.5")?
+    print(f"新增金额: {amount}")
+
+    let bad = parse_amount("-5")?
+    print(f"不会打印: {bad}")
+    return Ok(())
+}

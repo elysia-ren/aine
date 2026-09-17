@@ -1,0 +1,1340 @@
+// altype 模块：类型工具（自举拆分验证 —— 从 transpiler.aine 移入，扁平注册）
+
+fn first_type_arg(t: String) -> String {
+    var depth = 0
+    var out = ""
+    var started = false
+    for c in t {
+        if c == "<" {
+            if depth > 0 { out = out + c }
+            depth = depth + 1
+            started = true
+        } else if c == ">" {
+            depth = depth - 1
+            if depth > 0 { out = out + c }
+            else { break }
+        } else if c == "," && depth == 1 {
+            break
+        } else if started && depth > 0 {
+            out = out + c
+        }
+    }
+    return out
+}
+
+fn second_type_arg(t: String) -> String {
+    // Result<T, E> → E；Map<K, V> → V（嵌套泛型的 <> 必须保留：Vec<Vec<i32>> → Vec<i32>）
+    var depth = 0
+    var out = ""
+    var started = false
+    for c in t {
+        if c == "<" {
+            if depth > 0 { out = out + c }
+            depth = depth + 1
+        } else if c == ">" {
+            depth = depth - 1
+            if depth == 0 { break }
+            out = out + c
+        } else if c == "," && depth == 1 {
+            started = true
+        } else if started && depth >= 1 {
+            out = out + c
+        }
+    }
+    return out
+}
+
+fn method_ret(mname: String, argc: i32) -> String {
+    if mname == "len" { return "i32" }
+    if mname == "trim" { return "String" }
+    if mname == "replace" && argc == 2 { return "String" }
+    if mname == "split" { return "Vec<String>" }
+    if mname == "to_i32" { return "i32" }
+    if mname == "to_f64" { return "f64" }
+    if mname == "starts_with" || mname == "contains" || mname == "ends_with" { return "bool" }
+    if mname == "push" { return "()" }
+    if mname == "iter" { return "Vec" }
+    if mname == "map" { return "Vec" }
+    if mname == "sum" { return "f64" }
+    if mname == "new" { return "Map" }
+    if mname == "set" || mname == "remove" { return "()" }
+    if mname == "get" { return "Option" }
+    if mname == "contains" { return "bool" }
+    if mname == "keys" { return "Vec<String>" }
+    if mname == "values" { return "Vec" }
+    return "infer"
+}
+
+fn payload_member(ty: Option<String>, user_types: Vec<String>) -> String {
+    match ty {
+        Some(t) {
+            if t == "String" { return "s" }
+            if t == "i32" { return "i" }
+            if t == "f64" { return "f" }
+            if t.starts_with("Vec<") { return "v" }
+            if t.starts_with("Map<") { return "p" }
+            if contains_str(user_types, t) { return "t_" + t }
+            return "p"
+        }
+        None { return "p" }
+    }
+}
+
+
+// Option<T>/Result<T> 泛型参数提取：第一个 <...> 参数
+
+
+// 表达式 → C 类型（闭包体返回类型推断用）
+fn expr_ctype(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, user_types: Vec<String>) -> String {
+    match e {
+        EInt(n) { return "int" }
+        EFloat(n) { return "double" }
+        EStr(s) { return "char*" }
+        EIdent(n) {
+            let vt = var_type(n, varnames, vartypes)
+            match vt {
+                Some(t) { return c_type(Some(t), user_types) }
+                None { return "int" }
+            }
+        }
+        EField(b, fname) {
+            let bt = base_type(b, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+            match bt {
+                Some(t) {
+                    let ft = struct_field_ty(t, fname, snames, sfnames, sftypes)
+                    match ft {
+                        Some(ftv) { return c_type(Some(ftv), user_types) }
+                        None { return "int" }
+                    }
+                }
+                None { return "int" }
+            }
+        }
+        ECall(callee, args) {
+            match callee {
+                EIdent(fnname) {
+                    let fr = fn_return(fnname, fnames, freturns)
+                    match fr {
+                        Some(rt) { return c_type(Some(rt), user_types) }
+                        None { return "int" }
+                    }
+                }
+                EField(ib, mname) {
+                    // 整型链求和：X.iter().map(p { int体).sum() → int（与发射器的 long 累加一致） }
+                    if mname == "sum" && args.len() == 0 {
+                        match ib {
+                            ECall(mc, margs) {
+                                match mc {
+                                    EField(inner, mm) {
+                                        if mm == "map" && margs.len() == 1 {
+                                            match margs[0] {
+                                                EClosure(ps, bbody) {
+                                                    var seeded_n: Vec<String> = []
+                                                    var seeded_t: Vec<String> = []
+                                                    for n2 in varnames { seeded_n.push(n2) }
+                                                    for t2 in vartypes { seeded_t.push(t2) }
+                                                    if ps.len() > 0 {
+                                                        seeded_n.push(ps[0].name)
+                                                        seeded_t.push("i32")
+                                                    }
+                                                    let bct = expr_ctype(bbody, seeded_n, seeded_t, fnames, freturns, snames, sfnames, sftypes, user_types)
+                                                    if bct == "double" {
+                                                        return "double"
+                                                    }
+                                                    return "int"
+                                                }
+                                                _ {}
+                                            }
+                                        }
+                                    }
+                                    _ {}
+                                }
+                            }
+                            _ {}
+                        }
+                    }
+                    c_type(Some(method_ret(mname, args.len())), user_types)
+                }
+                _ { return "int" }
+            }
+        }
+        EBin(op, l, r) {
+            if op == "+" && expr_is_string(l, r, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes) {
+                return "char*"
+            }
+            return expr_ctype(l, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, user_types)
+        }
+        EUnary(_, x) { return expr_ctype(x, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, user_types) }
+        EIndex(b, idx) {
+            // 切片 s[a..b] → String（char*）；单索引按 base 类型
+            match idx {
+                ERange(_, _) { return "char*" }
+                _ {}
+            }
+            let bt = base_type(b, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+            match bt {
+                Some(t) {
+                    if t.starts_with("Vec<") { return c_type(Some(first_type_arg(t)), user_types) }
+                    if t == "String" { return "char" }
+                    return "int"
+                }
+                None { return "int" }
+            }
+        }
+        _ { return "int" }
+    }
+}
+
+
+// Option/Result 载荷类型 -> al_opt 联合体成员名
+
+
+// Some(x)/Ok(x) 载荷表达式 -> al_opt 联合体成员名
+fn some_member(e: Expr, user_types: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>) -> String {
+    match e {
+        EStr(s) { return "s" }
+        EInt(n) { return "i" }
+        EFloat(n) { return "f" }
+        EVec(items) { return "v" }
+        // 嵌套枚举构造（EMatch/EClosure 等）→ 用户枚举载荷 t_<T>
+        EMatch(ms2, ma2) { return "t_Stmt" }
+        EClosure(ps2, b2) { return "t_Expr" }
+        EIdent(n) { return payload_member(var_type(n, varnames, vartypes), user_types) }
+        EField(base2, fname2) {
+            match base2 {
+                EIdent(bn2) {
+                    let bt = var_type(bn2, varnames, vartypes)
+                    match bt {
+                        Some(t2) {
+                            let ft2 = struct_field_ty(t2, fname2, snames, sfnames, sftypes)
+                            match ft2 {
+                                Some(ftv2) { return payload_member(Some(ftv2), user_types) }
+                                None { return "p" }
+                            }
+                        }
+                        None { return "p" }
+                    }
+                }
+                _ { return "p" }
+            }
+        }
+        _ { return "p" }
+    }
+}
+
+
+// 模式构造器名：Some(x) → [Some]；SReturn(Some(e)) → [SReturn, Some]；_ → [_]
+fn pat_ctors(pat: String) -> Vec<String> {
+    var out: Vec<String> = []
+    var cur = ""
+    var depth = 0
+    for c in pat {
+        if c == "(" {
+            if depth == 0 || depth == 1 { out.push(cur) }
+            cur = ""
+            depth += 1
+        } else if c == ")" {
+            depth -= 1
+            cur = ""
+        } else if c == "," {
+            cur = ""
+        } else if depth == 0 || depth == 1 {
+            cur = cur + c
+        }
+    }
+    if cur.len() > 0 { out.push(cur) }
+    return out
+}
+
+
+// 模式绑定名（排除构造器名与字符串字面量）
+fn pat_binds(pat: String) -> Vec<String> {
+    var out: Vec<String> = []
+    var cur = ""
+    var depth = 0
+    var in_str = false
+    for c in pat {
+        if in_str {
+            if c == "\"" { in_str = false }
+            continue
+        }
+        if c == "\"" {
+            in_str = true
+            cur = ""
+            continue
+        }
+        if c == "(" {
+            cur = ""
+            depth += 1
+            continue
+        }
+        if c == "," || c == ")" {
+            if cur.len() > 0 && is_ident(cur) && cur != "_" {
+                out.push(cur)
+            }
+            cur = ""
+            if c == ")" { depth -= 1 }
+            continue
+        }
+        if depth > 0 { cur = cur + c }
+    }
+    return out
+}
+
+
+// 绑定的索引路径："SReturn(Some(e))" 中 e → "0,0"
+fn pat_bind_path(pat: String, name: String) -> String {
+    var counters: Vec<i32> = []
+    var depth = 0
+    var cur = ""
+    var in_str = false
+    for c in pat {
+        if in_str {
+            if c == "\"" { in_str = false }
+            continue
+        }
+        if c == "\"" {
+            in_str = true
+            cur = ""
+            continue
+        }
+        if c == "(" {
+            counters.push(0)
+            depth += 1
+            cur = ""
+            continue
+        }
+        if c == "," {
+            if cur == name { return join_i32(counters, ",") }
+            let n = counters.len()
+            if n > 0 {
+                let t = counters[n - 1]
+                counters = counters[0..n - 1]
+                counters.push(t + 1)
+            }
+            cur = ""
+            continue
+        }
+        if c == ")" {
+            if cur == name { return join_i32(counters, ",") }
+            if counters.len() > 0 {
+                counters = counters[0..counters.len() - 1]
+            }
+            depth -= 1
+            cur = ""
+            continue
+        }
+        if depth > 0 { cur = cur + c }
+    }
+    return "0"
+}
+
+
+// 模式字面量载荷："Some(\"i32\")" → Some("i32")；无字面量 → None
+fn pat_literal(pat: String) -> Option<String> {
+    var in_str = false
+    var out = ""
+    for c in pat {
+        if c == "\"" {
+            if in_str { return Some(out) }
+            in_str = true
+        } else if in_str {
+            out = out + c
+        }
+    }
+    return None
+}
+
+
+fn struct_field_ty(sname: String, fname: String, snames: Vec<String>, fnames: Vec<String>, ftypes: Vec<String>) -> Option<String> {
+    var i = 0
+    for sn in snames {
+        if sn == sname && fnames[i] == fname {
+            return Some(ftypes[i])
+        }
+        i += 1
+    }
+    return None
+}
+
+
+// 变体第 idx 个字段的类型
+fn enum_field_ty(vname: String, idx: String, vfnames: Vec<String>, vftypes: Vec<String>) -> Option<String> {
+    var cur = 0
+    var i = 0
+    for vn in vfnames {
+        if vn == vname {
+            if f"{cur}" == idx { return Some(vftypes[i]) }
+            cur += 1
+        }
+        i += 1
+    }
+    return None
+}
+
+
+// 表达式元素类型推断（数组字面量用）：struct 字面量 → 类型名；数字/串 → 内建
+fn elem_expr_type(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>) -> String {
+    match e {
+        EStruct(ty, _) { return ty }
+        EInt(n) { return "i32" }
+        EFloat(n) { return "f64" }
+        EStr(s) { return "String" }
+        EIdent(n) {
+            let vt = var_type(n, varnames, vartypes)
+            match vt {
+                Some(t) { return t }
+                None { return "infer" }
+            }
+        }
+        ECall(callee, args) {
+            match callee {
+                EIdent(fnname) {
+                    let fr = fn_return(fnname, fnames, freturns)
+                    match fr {
+                        Some(rt) { return rt }
+                        None { return "infer" }
+                    }
+                }
+                EField(_, mname) { return method_ret(mname, args.len()) }
+                _ { return "infer" }
+            }
+        }
+        _ { return "infer" }
+    }
+}
+
+
+// Result<T, E> 的 Ok 载荷 → C 类型 / 联合体成员
+fn result_ok_ct(t: String, user_types: Vec<String>) -> String {
+    let ok = first_type_arg(t)
+    if ok == "i32" { return "int" }
+    if ok == "f64" { return "double" }
+    if ok == "String" { return "char*" }
+    if ok.starts_with("Vec<") { return "al_vec" }
+    if ok == "()" { return "int" }
+    if contains_str(user_types, ok) { return "struct " + ok }
+    if ok.starts_with("fn(") { fn_type_id(ok) }
+    if ok.starts_with("fn(") { fn_type_id(ok) }
+    return "void*"
+}
+
+
+fn result_ok_mem(t: String, user_types: Vec<String>) -> String {
+    return payload_member(Some(first_type_arg(t)), user_types)
+}
+
+
+// 模式绑定 → C 解构行：auto <name> = <scrut>.<access>;
+fn pat_bind_lines(pat: String, scrut_c: String, mem: String, err_mem: String, vfnames: Vec<String>, vftypes: Vec<String>, user_types: Vec<String>, scrut_ty: String, vnames3: Vec<String>, vowners3: Vec<String>) -> Vec<String> {
+    var out: Vec<String> = []
+    let ctors = pat_ctors(pat)
+    let binds = pat_binds(pat)
+
+
+    let n = binds.len()
+    if n == 0 { out }
+    let nl = ctors.len()
+    for bi in 0..n {
+        let b = binds[bi]
+        let path = pat_bind_path(pat, b)
+
+        let idxs = str_split(path, ",")
+        var access = scrut_c
+        // 迭代边界 = 该绑定的路径层数（非模式构造器层数）：
+        // 纯标识符绑定的路径短于 ctor 深度（兄弟变体也占 ctor 层）
+        for k in 0..idxs.len() {
+            let part = ctors[k]
+            if part == "Some" || part == "Ok" {
+                if k == 0 {
+                    access = access + ".data." + mem
+                    if mem.starts_with("t_") {
+                        access = "(*" + access + ")"
+                    }
+                    // p 载荷带具体类型（Map 等）→ 解引用 + 显式转型
+                    if mem == "p" && scrut_ty.starts_with("Option<") {
+                        let vt0 = first_type_arg(scrut_ty)
+                        let vct0 = c_type(Some(vt0), user_types)
+                        if vct0 == "al_map" || vct0 == "al_vec" || vct0.starts_with("struct ") {
+                            access = "*(" + vct0 + "*)(" + access + ")"
+                        }
+                    }
+                } else {
+                    let parent = ctors[k - 1]
+                    let pidx = idxs[k - 1]
+                    var pm = "p"
+                    let ft = enum_field_ty(parent, pidx, vfnames, vftypes)
+                    match ft {
+                        Some(ftv) {
+                            if ftv.starts_with("Option<") || ftv.starts_with("Result<") {
+                                pm = payload_member(Some(first_type_arg(ftv)), user_types)
+                            }
+                        }
+                        None {}
+                    }
+                    access = access + ".data." + pm
+                    if pm.starts_with("t_") {
+                        access = "(*" + access + ")"
+                    }
+                }
+            } else if part == "None" {
+                // 无载荷绑定
+            } else if part == "Err" {
+                // Err(e)：Result 的 Err 载荷绑定（用 err_mem）
+                if k == 0 {
+                    access = access + ".data." + err_mem
+                    if err_mem.starts_with("t_") {
+                        access = "*" + access
+                    }
+                } else {
+                    let parent = ctors[k - 1]
+                    let pidx = idxs[k - 1]
+                    var pm = "p"
+                    let ft = enum_field_ty(parent, pidx, vfnames, vftypes)
+                    match ft {
+                        Some(ftv) {
+                            if ftv.starts_with("Option<") || ftv.starts_with("Result<") {
+                                pm = payload_member(Some(first_type_arg(ftv)), user_types)
+                            }
+                        }
+                        None {}
+                    }
+                    access = access + ".data." + pm
+                    if pm.starts_with("t_") {
+                        access = "(*" + access + ")"
+                    }
+                }
+            } else {
+                access = access + ".data." + part + "._" + idxs[k]
+                // 自递归载荷(类型 == 被匹配枚举自身)在 union 中为指针, 须解引用
+                let ft3 = enum_field_ty(part, idxs[k], vfnames, vftypes)
+                match ft3 {
+                    Some(ftv3) {
+                        // 自递归载荷(类型 == 被匹配枚举自身)在 union 中为指针。
+                        // scrut_ty 已知时直接比较; 未知(嵌套绑定)时用构造器所属枚举判定
+                        // 存储不变量(SEnum 发射): 载荷类型 == 所属枚举自身 → 指针, 否则按值。
+                        // 一律用 owner 判定(扁平 var 表对 scrut_ty 的推断可跨函数撞名失真)
+                        var is_ptr = false
+                        let own = variant_owner(part, vnames3, vowners3)
+                        match own {
+                            Some(o) {
+                                if o == ftv3 {
+                                    is_ptr = true
+                                }
+                            }
+                            None {}
+                        }
+                        if is_ptr {
+                            access = "(*" + access + ")"
+                        }
+                    }
+                    None {}
+                }
+            }
+        }
+        // 单层 Some/Ok 载荷：p 载荷（Map 等）必须带类型（data.p 为 void*，auto 会让后续字段访问失效）；
+        // i/f/s/v 等原始载荷保持 auto（兼容既有断言与语义）
+        var decl_ty = "auto"
+        let vt = first_type_arg(scrut_ty)
+        if vt != "" && ctors.len() == 1 && idxs.len() == 1 {
+            if ctors[0] == "Some" || ctors[0] == "Ok" {
+                let vct = c_type(Some(vt), user_types)
+                if vct == "al_map" || vct == "al_vec" || vct.starts_with("struct ") {
+                    decl_ty = vct
+                }
+            }
+        }
+        out.push(decl_ty + " " + b + " = " + access + ";")
+    }
+    return out
+}
+
+
+// type mapping: Aine type -> C type
+// fn 类型 → 规范 typedef 名（非标识符字符折叠为 _）
+fn fn_type_id(ty: String) -> String {
+    // 显式字符集映射（is_ident_continue 在 C 侧收 char，字符串切片为 String 不匹配）
+    var out = "al_fn_"
+    var i = 0
+    while i < ty.len() {
+        var ch = ty[i..i + 1]
+        if ch == "(" {
+            out = out + "_"
+        } else if ch == ")" {
+            out = out + "_"
+        } else if ch == "," {
+            out = out + "_"
+        } else if ch == "-" {
+            out = out + "_"
+        } else if ch == ">" {
+            out = out + "_"
+        } else if ch == "<" {
+            out = out + "_"
+        } else {
+            out = out + ch
+        }
+        i += 1
+    }
+    return out
+}
+
+
+fn c_type(ty: Option<String>, user_types: Vec<String>) -> String {
+    match ty {
+        Some(t) {
+            if t == "i32" { return "int" }
+            if t == "i64" { return "long long" }
+            if t == "f64" { return "double" }
+            if t == "bool" { return "int" }
+            if t == "char" { return "char" }
+            if t == "String" { return "char*" }
+            if t.starts_with("Vec<") { return "al_vec" }
+            if t.starts_with("Map<") || t == "Map" { return "al_map" }
+            if t.starts_with("Option<") || t.starts_with("Result<") { return "al_opt" }
+            if contains_str(user_types, t) { return "struct " + t }
+            if t.starts_with("fn(") { fn_type_id(t) }
+    return "void*"
+        }
+        None { return "int" }
+    }
+}
+
+
+// 参数声明：普通类型 c_type(t) + name；fn 指针类型需名字嵌入 —— R (*name)(A, B)
+fn c_param_decl(ty: String, name: String, user_types: Vec<String>) -> String {
+    if ty.starts_with("fn(") {
+        var depth = 0
+        var i = 3
+        var close = 0 - 1
+        while i < ty.len() {
+            let ch = ty[i..i + 1]
+            if ch == "(" {
+                depth += 1
+            }
+            if ch == ")" {
+                if depth == 0 {
+                    close = i
+                    i = ty.len()
+                    continue
+                }
+                depth -= 1
+            }
+            i += 1
+        }
+        if close < 0 {
+            return c_type(Some(ty), user_types) + " " + name
+        }
+        let params_s = ty[3..close]
+        let rest = ty[close + 1..ty.len()]
+        var ret_c = "void"
+        if rest.starts_with("->") {
+            ret_c = c_type(Some(rest[2..rest.len()]), user_types)
+        }
+        let parts = str_split(params_s, ",")
+        var cargs: Vec<String> = []
+        for p in parts {
+            if p != "" {
+                cargs.push(c_type(Some(p), user_types))
+            }
+        }
+        return ret_c + " (*" + name + ")(" + join(cargs, ", ") + ")"
+    }
+    return c_type(Some(ty), user_types) + " " + name
+}
+
+
+fn variant_owner(name: String, vnames: Vec<String>, vowners: Vec<String>) -> Option<String> {
+    var idx = 0
+    for vn in vnames {
+        if vn == name {
+            return Some(vowners[idx])
+        }
+        idx += 1
+    }
+    return None
+}
+
+
+// 第 idx 个函数的第 ai 个参数类型
+fn fn_param_ty(idx: i32, ai: i32, fptypes: Vec<String>) -> String {
+    if idx >= fptypes.len() {
+        return ""
+    }
+    let cur = fptypes[idx]
+    let parts = str_split(cur, ",")
+    if ai < parts.len() {
+        return parts[ai]
+    }
+    return ""
+}
+
+
+fn fn_return(name: String, fnames: Vec<String>, freturns: Vec<String>) -> Option<String> {
+    var idx = 0
+    for f in fnames {
+        if f == name {
+            return Some(freturns[idx])
+        }
+        idx += 1
+    }
+    return None
+}
+
+
+// 递归收集语句块内的变量（含 if/while/for/block/match 嵌套；seed 含函数参数）
+fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Vec<String>, seed_names: Vec<String>, seed_types: Vec<String>, vfnames: Vec<String>, vftypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>) -> VarInfo {
+    var names: Vec<String> = []
+    for sn in seed_names { names.push(sn) }
+    var types: Vec<String> = []
+    for stp in seed_types { types.push(stp) }
+    for st in stmts {
+        match st {
+            SLet(vn, is_mut, ty, init) {
+                // 类型先入表，名字后入表：init 可能引用外层同名变量
+                //（`var i = i` 影子惯用法），避免查到尚未定型的待定义绑定
+                match ty {
+                    Some(t2) {
+                        types.push(t2)
+                        names.push(vn)
+                    }
+                    None {
+                        match init {
+                            ECall(callee2, args2) {
+                                // 普通调用：返回类型；方法调用：method_ret
+                                var okt = "infer"
+                                match callee2 {
+                                    EIdent(fname2) {
+                                        if fname2 == "read_file" || fname2 == "al_strdup_lit" || fname2 == "get_text" {
+                                            // 内建 read_file / al_strdup_lit → String
+                                            okt = "String"
+                                        } else {
+                                            let frt = fn_return(fname2, all_fnames, all_freturns)
+                                            match frt {
+                                                Some(ftv) { okt = ftv }
+                                                None {}
+                                            }
+                                        }
+                                    }
+                                    EField(ib, mname2) {
+                                        if mname2 == "get" {
+                                            // m.get(k) → Option<V>
+                                            let mbt = base_type(ib, names, types, all_fnames, all_freturns, snames, sfnames, sftypes)
+                                            match mbt {
+                                                Some(mt) {
+                                                    if mt.starts_with("Map<") { okt = "Option<" + second_type_arg(mt) + ">" }
+                                                }
+                                                None {}
+                                            }
+                                        } else if mname2 == "values" {
+                                            // m.values() → Vec<V>
+                                            let mbt = base_type(ib, names, types, all_fnames, all_freturns, snames, sfnames, sftypes)
+                                            match mbt {
+                                                Some(mt) {
+                                                    if mt.starts_with("Map<") { okt = "Vec<" + second_type_arg(mt) + ">" }
+                                                }
+                                                None {}
+                                            }
+                                            if okt == "infer" { okt = method_ret(mname2, args2.len()) }
+                                        } else if mname2 == "keys" {
+                                            // m.keys() → Vec<String>
+                                            let mbt = base_type(ib, names, types, all_fnames, all_freturns, snames, sfnames, sftypes)
+                                            match mbt {
+                                                Some(mt) {
+                                                    if mt.starts_with("Map<") { okt = "Vec<String>" }
+                                                }
+                                                None {}
+                                            }
+                                            if okt == "infer" { okt = method_ret(mname2, args2.len()) }
+                                        } else {
+                                            okt = method_ret(mname2, args2.len())
+                                        }
+                                    }
+                                    _ {}
+                                }
+                                types.push(okt)
+                            }
+                            ETry(inner) {
+                                // ? 解包：Result<T, E> → T
+                                var okt = "infer"
+                                match inner {
+                                    ECall(callee2, args2) {
+                                        match callee2 {
+                                            EIdent(fname2) {
+                                                let frt = fn_return(fname2, all_fnames, all_freturns)
+                                                match frt {
+                                                    Some(ftv) {
+                                                        if ftv.starts_with("Result<") || ftv.starts_with("Option<") {
+                                                            okt = first_type_arg(ftv)
+                                                        } else {
+                                                            okt = ftv
+                                                        }
+                                                    }
+                                                    None {}
+                                                }
+                                            }
+                                            _ {}
+                                        }
+                                    }
+                                    _ {}
+                                }
+                                types.push(okt)
+                            }
+                            EIndex(b2, idx2) {
+                                match idx2 {
+                                    ERange(a2, h2) { types.push("String") }
+                                    _ {
+                                        // Vec<T>[i] → T；String[i] → char
+                                        match b2 {
+                                            EIdent(bn2) {
+                                                // 内建全局 cli_args[i] → String
+                                                if bn2 == "cli_args" {
+                                                    types.push("String")
+                                                } else {
+                                                    let bt = var_type(bn2, names, types)
+                                                    match bt {
+                                                        Some(t2) {
+                                                            if t2.starts_with("Vec<") { types.push(first_type_arg(t2)) }
+                                                            else { types.push("char") }
+                                                        }
+                                                        None { types.push("char") }
+                                                    }
+                                                }
+                                            }
+                                            EField(fb, fname2) {
+                                                // v.fields[i] → 结构体 Vec 字段的元素类型；String 字段单索引 → char
+                                                let bt = base_type(fb, names, types, all_fnames, all_freturns, snames, sfnames, sftypes)
+                                                match bt {
+                                                    Some(t) {
+                                                        let ft = struct_field_ty(t, fname2, snames, sfnames, sftypes)
+                                                        match ft {
+                                                            Some(ftv) {
+                                                                if ftv.starts_with("Vec<") { types.push(first_type_arg(ftv)) }
+                                                                else { types.push("char") }
+                                                            }
+                                                            None { types.push("char") }
+                                                        }
+                                                    }
+                                                    None { types.push("char") }
+                                                }
+                                            }
+                                            _ { types.push("char") }
+                                        }
+                                    }
+                                }
+                            }
+                            EStr(s2) { types.push("String") }
+                            EVec(items) {
+                                // 数组字面量：元素类型从首项推断 → Vec<T>
+                                if items.len() > 0 {
+                                    let et = elem_expr_type(items[0], names, types, all_fnames, all_freturns, snames, sfnames, sftypes)
+                                    types.push("Vec<" + et + ">")
+                                } else {
+                                    // 空数组元素类型未知：保持 infer（push 时按实参回退）
+                                    types.push("infer")
+                                }
+                            }
+                            EStruct(ty0, _) { types.push(ty0) }
+                            EMatch(mscrut0, marms0) {
+                                // match 表达式结果：Option/Result scrut → 载荷类型
+                                let st0 = base_type(mscrut0, names, types, all_fnames, all_freturns, snames, sfnames, sftypes)
+                                match st0 {
+                                    Some(t0) {
+                                        if t0.starts_with("Option<") || t0.starts_with("Result<") {
+                                            types.push(first_type_arg(t0))
+                                        } else {
+                                            types.push("infer")
+                                        }
+                                    }
+                                    None { types.push("infer") }
+                                }
+                            }
+                            EIdent(n2) {
+                                // 内建全局 cli_args → Vec<String>（发射层已有索引特判）
+                                if n2 == "cli_args" {
+                                    types.push("Vec<String>")
+                                } else {
+                                    let vt2 = var_type(n2, names, types)
+                                    match vt2 {
+                                        Some(t2) { types.push(t2) }
+                                        None { types.push("infer") }
+                                    }
+                                }
+                            }
+                            EInt(n3) { types.push("i32") }
+                            EFloat(f3) { types.push("f64") }
+                            EBin(op2, l2, r2) {
+                                // 比较运算产生 bool（==/!=/</>/<=/>=）
+                                var is_cmp = false
+                                if op2 == "==" { is_cmp = true }
+                                if op2 == "!=" { is_cmp = true }
+                                if op2 == "<" { is_cmp = true }
+                                if op2 == ">" { is_cmp = true }
+                                if op2 == "<=" { is_cmp = true }
+                                if op2 == ">=" { is_cmp = true }
+                                if is_cmp {
+                                    types.push("bool")
+                                } else {
+                                    types.push("infer")
+                                }
+                            }
+                            _ { types.push("infer") }
+                        }
+                        names.push(vn)
+                    }
+                }
+            }
+            SFor(vn, iter, body2) {
+                names.push(vn)
+                // 循环变量类型：Vec<T> → T；String → char；EField(v.fields) → 字段类型；区间 → i32
+                var et = "char"
+                match iter {
+                    EIdent(iv) {
+                        let vt = var_type(iv, names, types)
+                        match vt {
+                            Some(t) {
+                                if t.starts_with("Vec<") {
+                                    et = first_type_arg(t)
+                                }
+                            }
+                            None {}
+                        }
+                    }
+                    EField(ib, fname) {
+                        let bt = base_type(ib, names, types, all_fnames, all_freturns, snames, sfnames, sftypes)
+                        match bt {
+                            Some(t) {
+                                let ft = struct_field_ty(t, fname, snames, sfnames, sftypes)
+                                match ft {
+                                    Some(ftv) {
+                                        if ftv.starts_with("Vec<") {
+                                            et = first_type_arg(ftv)
+                                        } else {
+                                            et = ftv
+                                        }
+                                    }
+                                    None {}
+                                }
+                            }
+                            None {}
+                        }
+                    }
+                    ERange(_, _) { et = "i32" }
+                    _ {}
+                }
+                types.push(et)
+                let sub = var_info_of_stmts(body2, all_fnames, all_freturns, names, types, vfnames, vftypes, snames, sfnames, sftypes)
+                names = sub.names
+                types = sub.types
+            }
+            SIf(_, then_s, else_s) {
+                let sub = var_info_of_stmts(then_s, all_fnames, all_freturns, names, types, vfnames, vftypes, snames, sfnames, sftypes)
+                names = sub.names
+                types = sub.types
+                let sub2 = var_info_of_stmts(else_s, all_fnames, all_freturns, names, types, vfnames, vftypes, snames, sfnames, sftypes)
+                names = sub2.names
+                types = sub2.types
+            }
+            SWhile(_, body_s) {
+                let sub = var_info_of_stmts(body_s, all_fnames, all_freturns, names, types, vfnames, vftypes, snames, sfnames, sftypes)
+                names = sub.names
+                types = sub.types
+            }
+            SBlock(stmts2) {
+                let sub = var_info_of_stmts(stmts2, all_fnames, all_freturns, names, types, vfnames, vftypes, snames, sfnames, sftypes)
+                names = sub.names
+                types = sub.types
+            }
+            SMatch(mscrut, arms) {
+                // scrut 的 Option/Result 载荷类型（Some(x) 绑定用）
+                var opt_payload = ""
+                match mscrut {
+                    EIdent(mi) {
+                        let vt = var_type(mi, names, types)
+                        match vt {
+                            Some(t) {
+                                if t.starts_with("Option<") || t.starts_with("Result<") {
+                                    opt_payload = first_type_arg(t)
+                                }
+                            }
+                            None {}
+                        }
+                    }
+                    _ {}
+                }
+                for arm in arms {
+                    // 收集模式绑定类型（按枚举变体字段表）
+                    let binds = pat_binds(arm.pat)
+                    let ctors = pat_ctors(arm.pat)
+                    let nl2 = ctors.len()
+                    for bi in 0..binds.len() {
+                        let bname = binds[bi]
+                        if nl2 > 0 {
+                            let last_ctor = ctors[nl2 - 1]
+                            if last_ctor == "Some" || last_ctor == "Ok" {
+                                if opt_payload.len() > 0 {
+                                    names.push(bname)
+                                    types.push(opt_payload)
+                                }
+                            } else {
+                                let path = pat_bind_path(arm.pat, bname)
+                                let idxs = str_split(path, ",")
+                                // 绑定位置 = 路径末段（嵌套变体模式下路径短于 ctor 深度）
+                                let last_idx = idxs[idxs.len() - 1]
+                                let ft = enum_field_ty(last_ctor, last_idx, vfnames, vftypes)
+                                match ft {
+                                    Some(ftv) {
+                                        names.push(bname)
+                                        types.push(ftv)
+                                    }
+                                    None {}
+                                }
+                            }
+                        }
+                    }
+                    let sub = var_info_of_stmts([arm.body], all_fnames, all_freturns, names, types, vfnames, vftypes, snames, sfnames, sftypes)
+                    names = sub.names
+                    types = sub.types
+                }
+            }
+            _ {}
+        }
+    }
+    return VarInfo { names: names types: types }
+}
+
+
+fn var_type(name: String, vnames: Vec<String>, vtypes: Vec<String>) -> Option<String> {
+    var idx = 0
+    for vn in vnames {
+        if vn == name {
+            return Some(vtypes[idx])
+        }
+        idx += 1
+    }
+    return None
+}
+
+
+fn is_variant_name(name: String) -> bool {
+    if name.len() == 0 {
+        return false
+    }
+    let c = name[0]
+    return c >= "A" && c <= "Z"
+}
+
+
+// block tail expr for if-expression codegen
+fn block_tail_expr(stmts: Vec<Stmt>) -> Option<Expr> {
+    if stmts.len() == 0 {
+        return None
+    }
+    let last = stmts[stmts.len() - 1]
+    match last {
+        SExpr(e) { return Some(e) }
+        SReturn(Some(e)) { return Some(e) }
+        _ { return None }
+    }
+}
+
+
+// element size for push: struct literal -> sizeof(struct T); else sizeof(int)
+fn arg_elem_size(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>) -> String {
+    match e {
+        EStruct(ty, fields) { return "sizeof(struct " + ty + ")" }
+        EField(b2, fname2) {
+            // r.stmt 等字段实参 → 按字段类型
+            let bt = base_type(b2, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+            match bt {
+                Some(t2) {
+                    let ft = struct_field_ty(t2, fname2, snames, sfnames, sftypes)
+                    match ft {
+                        Some(ftv) {
+                            if ftv == "String" { return "sizeof(char*)" }
+                            if ftv == "i32" { return "sizeof(int)" }
+                            if ftv == "f64" { return "sizeof(double)" }
+                            if contains_str(user_types, ftv) { return "sizeof(struct " + ftv + ")" }
+                            return "sizeof(int)"
+                        }
+                        None { return "sizeof(int)" }
+                    }
+                }
+                None { return "sizeof(int)" }
+            }
+        }
+        EIdent(n2) {
+            // 标识符实参 → 按变量类型
+            let bt = var_type(n2, varnames, vartypes)
+            match bt {
+                Some(t2) {
+                    if t2 == "String" { return "sizeof(char*)" }
+                    if t2 == "i32" { return "sizeof(int)" }
+                    if t2 == "f64" { return "sizeof(double)" }
+                    if t2.starts_with("Vec<") { return "sizeof(al_vec)" }
+                    if contains_str(user_types, t2) { return "sizeof(struct " + t2 + ")" }
+                    return "sizeof(int)"
+                }
+                None { return "sizeof(int)" }
+            }
+        }
+        _ { return "sizeof(int)" }
+    }
+}
+
+
+// is expression a String? (EStr literal, or EIdent with String type)
+fn expr_is_string(e: Expr, other: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>) -> bool {
+    match e {
+        EStr(s) { return true }
+        EIdent(n) {
+            let vt = var_type(n, varnames, vartypes)
+            match vt {
+                Some(t) {
+                    if t == "String" {
+                        return true
+                    }
+                    // infer 类型：仅当对方是字符串字面量时视为 String
+                    if t == "infer" {
+                        match other {
+                            EStr(s2) { return true }
+                            _ { return false }
+                        }
+                    }
+                    return false
+                }
+                None {
+                    // 类型未知（循环内 let）：若对方是字符串字面量 → 视为 String
+                    match other {
+                        EStr(s2) { return true }
+                        _ { return false }
+                    }
+                }
+            }
+        }
+        EBin(op2, l2, r2) {
+            if op2 == "+" {
+                return expr_is_string(l2, r2, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes) || expr_is_string(r2, l2, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+            }
+            return false
+        }
+        ECall(callee2, args2) {
+            match callee2 {
+                EIdent(fname2) {
+                    let fr = fn_return(fname2, fnames, freturns)
+                    match fr {
+                        Some(rt) { return rt == "String" }
+                        None { return false }
+                    }
+                }
+                _ { return false }
+            }
+        }
+        EField(b2, fname2) {
+            // base 可为 EIdent 或 EIndex（如 tokens[i].text）
+            let bt = base_type(b2, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+            match bt {
+                Some(t2) {
+                    let ft = struct_field_ty(t2, fname2, snames, sfnames, sftypes)
+                    match ft {
+                        Some(ftv) { return ftv == "String" }
+                        None { return false }
+                    }
+                }
+                None { return false }
+            }
+        }
+        EIndex(b4, idx4) {
+            // 字符串切片 s[a..b] → String；Vec<String>[i] → String（单索引）
+            match idx4 {
+                ERange(_, _) { return true }
+                _ {
+                    // 内建全局 cli_args[i] → String
+                    var is_cliargs = false
+                    match b4 {
+                        EIdent(bn4) {
+                            if bn4 == "cli_args" { is_cliargs = true }
+                        }
+                        _ {}
+                    }
+                    if is_cliargs {
+                        return true
+                    }
+                    let bt = base_type(b4, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                    match bt {
+                        Some(t) {
+                            if t.starts_with("Vec<") {
+                                return first_type_arg(t) == "String"
+                            }
+                            return false
+                        }
+                        None { return false }
+                    }
+                }
+            }
+        }
+        _ { return false }
+    }
+}
+
+
+fn variant_ident(e: Expr) -> Option<String> {
+    match e {
+        EIdent(n) {
+            if is_variant_name(n) {
+                return Some(n)
+            }
+            return None
+        }
+        _ { return None }
+    }
+}
+
+
+fn is_1char_str(e: Expr) -> bool {
+    match e {
+        EStr(s) { return s.len() == 1 }
+        _ { return false }
+    }
+}
+
+
+fn is_char_typed(e: Expr, varnames: Vec<String>, vartypes: Vec<String>) -> bool {
+    match e {
+        EIdent(n) {
+            let vt = var_type(n, varnames, vartypes)
+            match vt {
+                Some(t) {
+                    if t == "char" {
+                        return true
+                    }
+                    return false
+                }
+                None { return false }
+            }
+        }
+        // src[i]（String 单索引）→ char
+        EIndex(b, idx) {
+            match idx {
+                ERange(_, _) { return false }
+                _ {
+                    match b {
+                        EIdent(bn) {
+                            let bt = var_type(bn, varnames, vartypes)
+                            match bt {
+                                Some(t) { return t == "String" }
+                                None { return false }
+                            }
+                        }
+                        _ { return false }
+                    }
+                }
+            }
+        }
+        _ { return false }
+    }
+}
+
+
+// base variable type of an expression (EIdent -> var_type lookup)
+fn base_type(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>) -> Option<String> {
+    match e {
+        EIdent(n) { return var_type(n, varnames, vartypes) }
+        ECall(callee, args) {
+            match callee {
+                EIdent(fname) { return fn_return(fname, fnames, freturns) }
+                _ { return None }
+            }
+        }
+        EField(b2, fname2) {
+            // 结构体字段类型（snames/sfnames/sftypes 缺失时返回 None）
+            match b2 {
+                EIdent(bn2) {
+                    let bt = var_type(bn2, varnames, vartypes)
+                    match bt {
+                        Some(t2) {
+                            let ft = struct_field_ty(t2, fname2, snames, sfnames, sftypes)
+                            match ft {
+                                Some(ftv) { return Some(ftv) }
+                                None { return None }
+                            }
+                        }
+                        None { return None }
+                    }
+                }
+                _ { return None }
+            }
+        }
+        EIndex(b3, idx3) {
+            // Vec<T>[i] → T
+            let bt = base_type(b3, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+            match bt {
+                Some(t) {
+                    if t.starts_with("Vec<") {
+                        return Some(first_type_arg(t))
+                    }
+                    return None
+                }
+                None { return None }
+            }
+        }
+        _ { return None }
+    }
+}
+
+
+fn first_ident(pat: String) -> String {
+    var out = ""
+    for c in pat {
+        if c >= "a" && c <= "z" || c >= "A" && c <= "Z" || c == "_" {
+            out = out + c
+        } else {
+            break
+        }
+    }
+    return out
+}
+
+
+fn pat_bindings(pat: String) -> Vec<String> {
+    var out: Vec<String> = []
+    var cur = ""
+    var in_paren = false
+    for c in pat {
+        if c == "(" {
+            in_paren = true
+            continue
+        }
+        if c == ")" {
+            if cur.len() > 0 {
+                out.push(cur)
+                cur = ""
+            }
+            in_paren = false
+            continue
+        }
+        if in_paren {
+            if c == "," {
+                if cur.len() > 0 {
+                    out.push(cur)
+                    cur = ""
+                }
+            } else if c >= "a" && c <= "z" || c >= "A" && c <= "Z" || c >= "0" && c <= "9" || c == "_" {
+                cur = cur + c
+            }
+        }
+    }
+    return out
+}
+
+
+fn bind_index(pat: String, name: String) -> String {
+    let binds = pat_bindings(pat)
+    var idx = 0
+    for b in binds {
+        if b == name {
+            return f"{idx}"
+        }
+        idx += 1
+    }
+    return "0"
+}

@@ -1,0 +1,10 @@
+module allex;
+
+fn main() {
+    let src = "fn f() {\n    if !c13.contains(\"char* c_program(\") { return Err(\"x\") }\n}"
+    let toks = tokenize(src)
+    print(toks.len())
+    for t in toks {
+        print(t.text)
+    }
+}

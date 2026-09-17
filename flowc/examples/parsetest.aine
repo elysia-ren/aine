@@ -1,0 +1,27 @@
+enum TokKind {
+    TIdent
+    TInt
+    TFloat
+    TStr
+    TOp
+    TSemi
+    TEof
+}
+
+struct Token {
+    kind: TokKind
+    text: String
+}
+
+module allex;
+module alparse;
+
+fn main() {
+    let files = ["transpiler.aine", "altype.aine"]
+    for f in files {
+        let src = read_file("examples/" + f)
+        let toks = tokenize(src)
+        let ps = parse_program(toks)?
+        print("DONE " + f + " toks=" + f"{toks.len()}")
+    }
+}

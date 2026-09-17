@@ -1,0 +1,20 @@
+// std/time —— 时间工具（Aine 标准库 · 自举期扁平注册）
+// 内建：now()（秒级时间戳，宿主已有）
+// 本模块：纯 Aine 的格式化/差值工具（不依赖 C 日期库，MVP 精度=秒）
+
+fn now_secs() -> i32 {
+    // now() 由宿主提供，返回秒；包装以命名空间化
+    return now()
+}
+
+fn elapsed_since(start: i32) -> i32 {
+    return now() - start
+}
+
+fn fmt_duration(secs: i32) -> String {
+    // 简单格式：H:MM:SS
+    let h = secs / 3600
+    let m = (secs - h * 3600) / 60
+    let s = secs - h * 3600 - m * 60
+    return f"{h}h{m}m{s}s"
+}

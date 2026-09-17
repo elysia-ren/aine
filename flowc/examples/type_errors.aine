@@ -1,0 +1,16 @@
+// type_errors.aine — 故意包含类型错误
+fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+fn main() {
+    let x: i32 = "hello"
+    let y = 5
+    y = 10
+
+    if "not bool" {
+        print("bad")
+    }
+
+    let z = 1 + "two"
+}

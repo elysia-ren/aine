@@ -1,0 +1,19 @@
+// 闭包独立值：let 绑定 + 直接调用（非捕获、参数带注解）
+fn main() {
+    let f = (x: i32) => x * 2
+    print(f(21))
+    let g = (a: i32, b: i32) => a + b
+    print(g(1, 2))
+    let greet = (name: String) => "hi, " + name
+    print(greet("aine"))
+    let half = (n: i32) => n / 2
+    print(f"half(9)={half(9)}")
+    let flag = (n: i32) => n > 0
+    if flag(5) {
+        print("positive")
+    }
+    let tags = ["compiler", "language"]
+    print(f"n={tags.len()} first={tags[0]}")
+    let nums = [1, 2, 3]
+    print(f"sum={nums.iter().map(x => x).sum()}")
+}

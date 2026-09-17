@@ -1,0 +1,51 @@
+// awen-proto/src/escape.aine —— 轻量标记转义(核心规范 §6.8)
+// `@@[` 的显式语法字面化在行内扫描器处理(优先级最高);
+// 本模块处理 `@#` `@**` `@_` `@~~` `@-` `@>` `@\`` 与 `@数字.`。
+// 转义无条件生效(§6.8:`@#todo` 显示 `#todo`)。
+
+struct EscapeHit {
+    consumed: i32
+    text: String
+}
+
+// 字符串位置前缀匹配(字符索引模型,§5.3 D15)
+fn starts_with_at(s: String, i: i32, pat: String) -> bool {
+    if i < 0 || i + pat.len() > s.len() {
+        return false
+    }
+    return s[i..i + pat.len()] == pat
+}
+
+// 在 '@' 之后的位置调用(s[i] 必须是 '@')。返回 Some((消耗字符数, 字面文本))。
+fn escape_scan(s: String, i: i32) -> Option<EscapeHit> {
+    if starts_with_at(s, i, "@**") {
+        return Some(EscapeHit { consumed: 3, text: "**" })
+    }
+    if starts_with_at(s, i, "@~~") {
+        return Some(EscapeHit { consumed: 3, text: "~~" })
+    }
+    if starts_with_at(s, i, "@#") {
+        return Some(EscapeHit { consumed: 2, text: "#" })
+    }
+    if starts_with_at(s, i, "@_") {
+        return Some(EscapeHit { consumed: 2, text: "_" })
+    }
+    if starts_with_at(s, i, "@-") {
+        return Some(EscapeHit { consumed: 2, text: "-" })
+    }
+    if starts_with_at(s, i, "@>") {
+        return Some(EscapeHit { consumed: 2, text: ">" })
+    }
+    if starts_with_at(s, i, "@`") {
+        return Some(EscapeHit { consumed: 2, text: "`" })
+    }
+    // @数字. — 有序列表字面化;要求有点号,避免吞掉 user@12 之类文本
+    var j = i + 1
+    while j < s.len() && s[j] >= "0" && s[j] <= "9" {
+        j += 1
+    }
+    if j > i + 1 && j < s.len() && s[j] == "." {
+        return Some(EscapeHit { consumed: j - i + 1, text: s[i + 1..j + 1] })
+    }
+    return None
+}

@@ -1,0 +1,14 @@
+fn is_id(ch: String) -> bool {
+    return ch >= "a" && ch <= "z"
+}
+
+fn main() {
+    var s = "abc123"
+    var i = 0
+    let len = s.len()
+    while i < len && is_id(s[i]) {
+        i += 1
+    }
+    print(f"i={i}")
+    print("looptest2 done")
+}

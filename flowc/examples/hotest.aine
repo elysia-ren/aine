@@ -1,0 +1,13 @@
+// hotest —— 统一函数类型编译路径用例（case30 输入）
+// fn(A, B) -> R 参数发射为 C 函数指针 R (*name)(A, B)；调用点照常发射
+fn apply(f: fn(i32, i32) -> i32, a: i32, b: i32) -> i32 {
+    return f(a, b)
+}
+
+fn add(x: i32, y: i32) -> i32 {
+    return x + y
+}
+
+fn main() {
+    print(apply(add, 3, 4))
+}

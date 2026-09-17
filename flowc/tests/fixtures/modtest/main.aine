@@ -1,0 +1,9 @@
+// 文件模块测试：module strutil; → 读入 strutil.aine（扁平注册）
+module strutil;
+import strutil
+
+fn main() {
+    let s = shout("aine")
+    print(s)
+    print(repeat("ab", 3))
+}

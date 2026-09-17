@@ -1,0 +1,25 @@
+// std/io —— 文件输入输出（Aine 标准库 · 自举期扁平注册）
+// 内建：read_file（已有）；本模块新增 write_file / append_file / file_exists。
+// 实现分两层：Aine 侧语义定义；原生侧由 alee 按名字特例化为 C 内建。
+
+fn write_file(path: String, content: String) -> bool {
+    // 解释器：无宿主文件写入能力时返回 false；原生侧为真实写入
+    return false
+}
+
+fn append_file(path: String, content: String) -> bool {
+    return false
+}
+
+fn file_exists(path: String) -> bool {
+    // 用 read_file 的 fail-visible 标记探测（不区分空文件与失败的场景极少）
+    let s = read_file(path)
+    if s.len() >= 18 {
+        let head = s[0..18]
+        if head == "[read_file error:" {
+            return false
+        }
+        return true
+    }
+    return true
+}

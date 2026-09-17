@@ -1,0 +1,247 @@
+// std/json —— JSON 解析/序列化（Aine 标准库；自 B2 升级入库）
+// 覆盖：对象/数组/字符串（含转义）/数字/布尔/null；递归下降；错误传播（Result + ?）
+
+enum Json {
+    JNull
+    JBool(bool)
+    JNum(f64)
+    JStr(String)
+    JArr(Vec<Json>)
+    JObj(Map<String, Json>)
+}
+
+struct PResult {
+    value: Json
+    next: i32
+}
+
+struct SResult {
+    text: String
+    next: i32
+}
+
+fn is_digit(c: String) -> bool {
+    c >= "0" && c <= "9"
+}
+
+fn skip_ws(src: String, i: i32) -> i32 {
+    var i = i
+    while i < src.len() && (src[i] == " " || src[i] == "\t" || src[i] == "\n" || src[i] == "\r") {
+        i += 1
+    }
+    return i
+}
+
+fn parse_str_raw(src: String, i: i32) -> Result<SResult, String> {
+    var i = i + 1
+    var out = ""
+    while i < src.len() {
+        let c = src[i]
+        if c == "\"" {
+            return Ok(SResult { text: out next: i + 1 })
+        }
+        if c == "\\" && i + 1 < src.len() {
+            let e = src[i + 1]
+            if e == "n" {
+                out = out + "\n"
+            } else if e == "t" {
+                out = out + "\t"
+            } else if e == "\\" {
+                out = out + "\\"
+            } else if e == "\"" {
+                out = out + "\""
+            } else {
+                out = out + e
+            }
+            i += 2
+            continue
+        }
+        out = out + c
+        i += 1
+    }
+    return Err("字符串未闭合")
+}
+
+fn parse_num(src: String, i: i32) -> Result<PResult, String> {
+    let start = i
+    var i = i
+    if i < src.len() && src[i] == "-" {
+        i += 1
+    }
+    while i < src.len() && is_digit(src[i]) {
+        i += 1
+    }
+    if i < src.len() && src[i] == "." && i + 1 < src.len() && is_digit(src[i + 1]) {
+        i += 1
+        while i < src.len() && is_digit(src[i]) {
+            i += 1
+        }
+    }
+    if i < src.len() && (src[i] == "e" || src[i] == "E") {
+        i += 1
+        if i < src.len() && (src[i] == "+" || src[i] == "-") {
+            i += 1
+        }
+        while i < src.len() && is_digit(src[i]) {
+            i += 1
+        }
+    }
+    let text = src[start..i]
+    if text == "-" || text == "" {
+        return Err("无效数字")
+    }
+    return Ok(PResult { value: JNum(text.to_f64()) next: i })
+}
+
+fn parse_value(src: String, i: i32) -> Result<PResult, String> {
+    let i = skip_ws(src, i)
+    if i >= src.len() {
+        return Err("JSON 意外结束")
+    }
+    let c = src[i]
+    if c == "{" {
+        return parse_obj(src, i)
+    }
+    if c == "[" {
+        return parse_arr(src, i)
+    }
+    if c == "\"" {
+        let r = parse_str_raw(src, i)?
+        return Ok(PResult { value: JStr(r.text) next: r.next })
+    }
+    if i + 4 <= src.len() && src[i..i + 4] == "true" {
+        return Ok(PResult { value: JBool(true) next: i + 4 })
+    }
+    if i + 5 <= src.len() && src[i..i + 5] == "false" {
+        return Ok(PResult { value: JBool(false) next: i + 5 })
+    }
+    if i + 4 <= src.len() && src[i..i + 4] == "null" {
+        return Ok(PResult { value: JNull next: i + 4 })
+    }
+    return parse_num(src, i)
+}
+
+fn parse_arr(src: String, i: i32) -> Result<PResult, String> {
+    var items: Vec<Json> = []
+    var i = i + 1
+    i = skip_ws(src, i)
+    if i < src.len() && src[i] == "]" {
+        return Ok(PResult { value: JArr(items) next: i + 1 })
+    }
+    while true {
+        let r = parse_value(src, i)?
+        items.push(r.value)
+        i = skip_ws(src, r.next)
+        if i >= src.len() {
+            return Err("数组未闭合")
+        }
+        let c = src[i]
+        if c == "," {
+            i += 1
+            continue
+        }
+        if c == "]" {
+            return Ok(PResult { value: JArr(items) next: i + 1 })
+        }
+        return Err("数组语法错误")
+    }
+}
+
+fn parse_obj(src: String, i: i32) -> Result<PResult, String> {
+    var m: Map<String, Json> = Map.new()
+    var i = i + 1
+    i = skip_ws(src, i)
+    if i < src.len() && src[i] == "}" {
+        return Ok(PResult { value: JObj(m) next: i + 1 })
+    }
+    while true {
+        i = skip_ws(src, i)
+        if i >= src.len() {
+            return Err("对象未闭合")
+        }
+        if src[i] != "\"" {
+            return Err("键必须是字符串")
+        }
+        let r = parse_str_raw(src, i)?
+        let key = r.text
+        i = skip_ws(src, r.next)
+        if i >= src.len() || src[i] != ":" {
+            return Err("缺少冒号")
+        }
+        i += 1
+        let vr = parse_value(src, i)?
+        m.set(key, vr.value)
+        i = skip_ws(src, vr.next)
+        if i >= src.len() {
+            return Err("对象未闭合")
+        }
+        let c = src[i]
+        if c == "," {
+            i += 1
+            continue
+        }
+        if c == "}" {
+            return Ok(PResult { value: JObj(m) next: i + 1 })
+        }
+        return Err("对象语法错误")
+    }
+}
+
+fn join(items: Vec<String>, sep: String) -> String {
+    var out = ""
+    var first = true
+    for it in items {
+        if first {
+            out = out + it
+            first = false
+        } else {
+            out = out + sep + it
+        }
+    }
+    return out
+}
+
+fn escape_str(s: String) -> String {
+    var out = ""
+    for c in s {
+        if c == "\\" {
+            out = out + "\\\\"
+        } else if c == "\"" {
+            out = out + "\\\""
+        } else if c == "\n" {
+            out = out + "\\n"
+        } else {
+            out = out + c
+        }
+    }
+    return out
+}
+
+fn stringify(j: Json) -> String {
+    match j {
+        JNull { "null" }
+        JBool(b) { f"{b}" }
+        JNum(n) { f"{n}" }
+        JStr(s) { "\"" + escape_str(s) + "\"" }
+        JArr(items) {
+            var parts: Vec<String> = []
+            for it in items {
+                parts.push(stringify(it))
+            }
+            return "[" + join(parts, ", ") + "]"
+        }
+        JObj(m) {
+            var parts: Vec<String> = []
+            let keys = m.keys()
+            for k in keys {
+                let v = m.get(k)
+                let vv = match v {
+                    Some(x) { x }
+                    _ { JNull }
+                }
+                parts.push("\"" + escape_str(k) + "\": " + stringify(vv))
+            }
+            return "{" + join(parts, ", ") + "}"
+        }
+    }
+}

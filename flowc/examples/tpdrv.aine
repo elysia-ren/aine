@@ -1,0 +1,163 @@
+// alinterp.aine — Aine 写的全量解释器(全 Aine 迁移 Phase 4, 全量版)
+// 目标: 解释执行 transpiler.aine 自身, 与 aine run 输出逐行一致
+// 值系统: AVal 枚举(Int/Float/Str/Bool/Vec/Map/Struct/Variant/Option/Result/Closure/Unit)
+// 控制流: 语句返回 "ok"/"return"/"break"/"continue" + 值
+
+enum TokKind {
+    TIdent
+    TInt
+    TFloat
+    TStr
+    TOp
+    TSemi
+    TEof
+}
+
+struct Token {
+    kind: TokKind
+    text: String
+}
+
+enum Expr {
+    EInt(i32)
+    EFloat(f64)
+    EStr(String)
+    EIdent(String)
+    EBin(String, Expr, Expr)
+    EUnary(String, Expr)
+    ECall(Expr, Vec<Expr>)
+    EField(Expr, String)
+    EBlock(Vec<Stmt>)
+    EVec(Vec<Expr>)
+    EUnit
+    EStruct(String, Vec<StructField>)
+    ETry(Expr)
+    ERange(Expr, Expr)
+    EClosure(Vec<Param>, Expr)
+    EIndex(Expr, Expr)
+    EIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    EMatch(Expr, Vec<MatchArm>)
+}
+
+enum Stmt {
+    SLet(String, bool, Option<String>, Expr)
+    SIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    SWhile(Expr, Vec<Stmt>)
+    SFor(String, Expr, Vec<Stmt>)
+    SReturn(Option<Expr>)
+    SExpr(Expr)
+    SBlock(Vec<Stmt>)
+    SAssign(String, String, Expr)
+    SAssignIdx(String, Expr, String, Expr)
+    SDef(String, Vec<Param>, Option<String>, Vec<Stmt>)
+    SStruct(String, Vec<Field>)
+    SEnum(String, Vec<EVariant>)
+    SImpl(String, Vec<Stmt>)
+    SMod(String, Vec<Stmt>)
+    SImport(String)
+    SMatch(Expr, Vec<MatchArm>)
+    SGo(bool, Vec<Stmt>)
+    SUi(Vec<Stmt>)
+    SGlobalVar(String, Option<String>, Expr)
+}
+
+struct MatchArm {
+    pat: String
+    body: Stmt
+}
+
+struct Field {
+    name: String
+    ty: String
+}
+
+struct StructField {
+    name: String
+    value: Expr
+}
+
+struct EVariant {
+    name: String
+    fields: Vec<String>
+}
+
+struct Param {
+    name: String
+    ty: String
+}
+
+struct EPResult {
+    value: Expr
+    next: i32
+}
+
+struct SPResult {
+    stmt: Stmt
+    next: i32
+}
+
+struct BlockResult {
+    stmts: Vec<Stmt>
+    next: i32
+}
+
+struct TyResult {
+    ty: String
+    next: i32
+}
+
+struct FlatResult {
+    out: Vec<Stmt>
+    loaded: Vec<String>
+}
+
+struct VarInfo {
+    names: Vec<String>
+    types: Vec<String>
+}
+
+
+module allex;
+module alparse;
+module alstr;
+module alcollect;
+module altype;
+
+fn main() {
+    let src1 = "fn fib(n: i32) -> i32 {\n    if n < 2 {\n        return n\n    }\n    return fib(n - 1) + fib(n - 2)\n}\nfn main() {\n    print(fib(10))\n}"
+    let toks = tokenize(src1)
+    print("A toks=" + f"{toks.len()}")
+    for t in toks {
+        print("TOK[" + t.text + "]")
+    }
+    let psr = parse_program(toks)
+    var ps: Vec<Stmt> = []
+    match psr {
+        Ok(pok) {
+            ps = pok
+            print("B parsed=" + f"{pok.len()}")
+        }
+        Err(e2) {
+            print("B ERR: " + e2)
+        }
+    }
+    var st = SDef("f", [], None, [])
+    match st {
+        SDef(fn2, prms, ret, bd) { print("CONSTRUCTED-MATCH " + fn2) }
+        _ { print("CONSTRUCTED-NOPE") }
+    }
+    var k = 0
+    while k < 2 {
+        match ps[k] {
+            SDef(fn2, prms, ret, bd) {
+                print("STMT SDef " + fn2 + " n=" + f"{bd.len()}")
+            }
+            SExpr(e) { print("STMT SExpr") }
+            SLet(n2, m2, t2, i2) { print("STMT SLet") }
+            SIf(c2, th2, el2) { print("STMT SIf") }
+            SWhile(c2, b2) { print("STMT SWhile") }
+            _ { print("STMT other") }
+        }
+        k += 1
+    }
+}

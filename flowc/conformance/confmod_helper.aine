@@ -1,0 +1,18 @@
+// confmod_helper —— C5 模块契约的本地辅助模块（被 conf_modules.aine 以 mod 载入）
+
+struct HelperPoint {
+    x: i32,
+    y: i32,
+}
+
+fn greet(who: String) -> String {
+    return "hello " + who
+}
+
+fn helper_double(n: i32) -> i32 {
+    return n * 2
+}
+
+fn helper_sum(p: HelperPoint) -> i32 {
+    return p.x + p.y
+}

@@ -1,0 +1,522 @@
+// 自举拆分：类型工具在 altype.aine（文件模块，扁平注册）
+
+
+// parser_stmt.aine — 用 Aine 写的语句级解析器（自举 B4-M2）
+// 在 parser_expr.aine 的 Pratt 表达式核心之上，扩展：
+//   语句：let(mut/类型注解)/if-else/while/for..in/return/赋值/块/表达式语句
+//   项：fn 定义（参数、返回类型）
+// 输出完整 AST 的 stringify 回显，main 内自断言。
+
+enum TokKind {
+    TIdent
+    TInt
+    TFloat
+    TStr
+    TOp
+    TSemi
+    TEof
+}
+
+struct Token {
+    kind: TokKind
+    text: String
+}
+
+enum Expr {
+    EInt(i32)
+    EFloat(f64)
+    EStr(String)
+    EIdent(String)
+    EBin(String, Expr, Expr)
+    EUnary(String, Expr)
+    ECall(Expr, Vec<Expr>)
+    EField(Expr, String)
+    EBlock(Vec<Stmt>)
+    EVec(Vec<Expr>)
+    EUnit
+    EStruct(String, Vec<StructField>)
+    ETry(Expr)
+    ERange(Expr, Expr)
+    EClosure(Vec<Param>, Expr)
+    EIndex(Expr, Expr)
+    EIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    EMatch(Expr, Vec<MatchArm>)
+}
+
+enum Stmt {
+    SLet(String, bool, Option<String>, Expr)
+    SIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    SWhile(Expr, Vec<Stmt>)
+    SFor(String, Expr, Vec<Stmt>)
+    SReturn(Option<Expr>)
+    SExpr(Expr)
+    SBlock(Vec<Stmt>)
+    SAssign(String, String, Expr)
+    SAssignIdx(String, Expr, String, Expr)
+    SDef(String, Vec<Param>, Option<String>, Vec<Stmt>)
+    SStruct(String, Vec<Field>)
+    SEnum(String, Vec<EVariant>)
+    SImpl(String, Vec<Stmt>)
+    SMod(String, Vec<Stmt>)
+    SImport(String)
+    SMatch(Expr, Vec<MatchArm>)
+    SGo(bool, Vec<Stmt>)
+    SUi(Vec<Stmt>)
+    SGlobalVar(String, Option<String>, Expr)
+}
+
+struct MatchArm {
+    pat: String
+    body: Stmt
+}
+
+struct Field {
+    name: String
+    ty: String
+}
+
+struct StructField {
+    name: String
+    value: Expr
+}
+
+struct EVariant {
+    name: String
+    fields: Vec<String>
+}
+
+struct Param {
+    name: String
+    ty: String
+}
+
+struct EPResult {
+    value: Expr
+    next: i32
+}
+
+struct SPResult {
+    stmt: Stmt
+    next: i32
+}
+
+struct BlockResult {
+    stmts: Vec<Stmt>
+    next: i32
+}
+
+struct TyResult {
+    ty: String
+    next: i32
+}
+
+struct FlatResult {
+    out: Vec<Stmt>
+    loaded: Vec<String>
+}
+
+// var name -> type tables
+struct VarInfo {
+    names: Vec<String>
+    types: Vec<String>
+}
+
+module altype;
+module altypeck;
+module alvalueal;
+module allex;
+module alparse;
+module alstr;
+module alcollect;
+module alee;
+enum AVal {
+    AInt(i32)
+    AFloat(f64)
+    AStr(String)
+    ABool(bool)
+    AVec(Vec<AVal>)
+    AMap(Vec<AEntry>)
+    AStruct(String, Vec<AEntry>)
+    AVariant(String, String, Vec<AVal>)
+    AOption(bool, AVal)
+    AResult(bool, AVal)
+    AClosure(String, Vec<Param>, Expr, Vec<String>)
+    AUnit
+}
+
+struct AEntry {
+    key: String
+    value: AVal
+}
+
+// compiler_service.aine — Tooling Protocol 编译器服务 (Aine 实现)
+// 协议: docs/protocol/ (v1); 逐行 JSON over stdio
+// 运行: aine run examples/compiler_service.aine
+// 状态: 平行数组(发射器对 Map<AVal> 复合值支持有限, Vec<String>/i32 推断成熟)
+
+struct Docs {
+    ids: Vec<String>
+    texts: Vec<String>
+    revs: Vec<i32>
+}
+
+struct DR {
+    resp: String
+    ids: Vec<String>
+    texts: Vec<String>
+    revs: Vec<i32>
+}
+
+fn main() -> Result<(), String> {
+    var docs = Docs { ids: [] texts: [] revs: [] }
+    while true {
+        let line: String = read_line()
+        if line.len() == 0 {
+            break
+        }
+        let r = svc_handle(line, docs.ids, docs.texts, docs.revs)
+        match r {
+            Ok(rr) {
+                docs = Docs { ids: rr.ids texts: rr.texts revs: rr.revs }
+                print(rr.resp)
+            }
+            Err(e) {
+                print("{\"v\":1,\"error\":" + jq(e) + "}")
+            }
+        }
+    }
+    return Ok(())
+}
+
+fn doc_index(did: String, ids: Vec<String>) -> i32 {
+    var i = 0
+    for x in ids {
+        if x == did {
+            return i
+        }
+        i += 1
+    }
+    return -1
+}
+
+// result_json: 结果已 json_encode 的字符串(手动拼, 规避 AVal 泛型包装)
+fn ok_resp(idv: String, result_json: String) -> String {
+    return "{\"v\":1,\"id\":" + jq(idv) + ",\"result\":" + result_json + "}"
+}
+
+fn svc_handle(line: String, ids0: Vec<String>, texts0: Vec<String>, revs0: Vec<i32>) -> Result<DR, String> {
+    let req: Map<String, AVal> = json_decode(line)
+    let idv = f"{req.get(\"id\").unwrap_or("")}"
+    let method = f"{req.get(\"method\").unwrap_or("")}"
+    let params: Map<String, AVal> = req.get("params").unwrap_or(Map.new())
+    if method == "workspace/open" {
+        let path = f"{params.get(\"path\").unwrap_or("")}"
+        let files = list_dir(path)
+            var proj = Map.new()
+        proj.set("id", "p1")
+        proj.set("languages", ["aine"])
+        proj.set("files", files)
+        return Ok(DR { resp: ok_resp(idv, json_encode(proj)) ids: ids0 texts: texts0 revs: revs0  })
+    }
+    if method == "workspace/openDocument" {
+        let file = f"{params.get(\"file\").unwrap_or("")}"
+        let text = read_file(file)
+        let did = "d" + f"{ids0.len()}"
+            ids0.push(did)
+            texts0.push(text)
+        revs0.push(0)
+        var doc = Map.new()
+        doc.set("id", did)
+        doc.set("file", file)
+        doc.set("revision", 0)
+        doc.set("dirty", false)
+        doc.set("language", "aine")
+        return Ok(DR { resp: ok_resp(idv, json_encode(doc)) ids: ids0 texts: texts0 revs: revs0  })
+    }
+    if method == "workspace/edit" {
+        let did = f"{params.get(\"documentId\").unwrap_or("")}"
+        let idx = doc_index(did, ids0)
+        if idx < 0 {
+            return Err("unknown document " + did)
+        }
+        let ev = params.get("edits").unwrap_or("")
+        var new_text = texts0[idx]
+        var k = 0
+        while k < ev.len() {
+            let ed = ev[k]
+            let stp = ed.get("start").unwrap_or("")
+            let enp = ed.get("end").unwrap_or("")
+            let tx = ed.get("text").unwrap_or("")
+            let sl = ai_as_i32s(f"{stp.get(\"line\").unwrap_or("")}")
+            let sc = ai_as_i32s(f"{stp.get(\"col\").unwrap_or("")}")
+            let el = ai_as_i32s(f"{enp.get(\"line\").unwrap_or("")}")
+            let ec = ai_as_i32s(f"{enp.get(\"col\").unwrap_or("")}")
+            new_text = apply_edit(new_text, sl, sc, el, ec, f"{tx}")
+            k += 1
+        }
+        var texts1: Vec<String> = []
+        var revs1: Vec<i32> = []
+        var t = 0
+        while t < texts0.len() {
+            if t == idx {
+                texts1.push(new_text)
+                revs1.push(revs0[t] + 1)
+            } else {
+                texts1.push(texts0[t])
+                revs1.push(revs0[t])
+            }
+            t += 1
+        }
+        let rr = DR { resp: ok_resp(idv, json_encode(revs0[idx])) ids: ids0 texts: texts1 revs: revs1  }
+        return Ok(rr)
+    }
+    if method == "workspace/revision" {
+        let did = f"{params.get(\"documentId\").unwrap_or("")}"
+        let idx = doc_index(did, ids0)
+        if idx < 0 {
+            return Err("unknown document " + did)
+        }
+        return Ok(DR { resp: ok_resp(idv, json_encode(revs0[idx])) ids: ids0 texts: texts0 revs: revs0  })
+    }
+    if method == "compiler/parse" {
+        let did = f"{params.get(\"documentId\").unwrap_or("")}"
+        let idx = doc_index(did, ids0)
+        if idx < 0 {
+            return Err("unknown document " + did)
+        }
+        let toks = tokenize(texts0[idx])
+        var arr: Vec<AVal> = []
+        var i = 0
+        while i < toks.len() {
+            var tm = Map.new()
+            tm.set("text", toks[i].text)
+            tm.set("kind", f"{toks[i].kind}")
+            arr.push(tm)
+            i += 1
+        }
+        return Ok(DR { resp: ok_resp(idv, json_encode(arr)) ids: ids0 texts: texts0 revs: revs0  })
+    }
+    if method == "compiler/diagnostics" {
+        let did = f"{params.get(\"documentId\").unwrap_or("")}"
+        let idx = doc_index(did, ids0)
+        if idx < 0 {
+            return Err("unknown document " + did)
+        }
+        let ps = parse_program(tokenize(texts0[idx]))
+        var arr: Vec<AVal> = []
+        match ps {
+            Ok(_) {}
+            Err(e) {
+                var d = Map.new()
+                d.set("code", "E0001")
+                d.set("severity", "error")
+                d.set("message_key", "parse_error")
+                d.set("file", ids0[idx])
+                var argm = Map.new()
+                argm.set("message", e)
+                d.set("args", argm)
+                arr.push(d)
+            }
+        }
+        return Ok(DR { resp: ok_resp(idv, json_encode(arr)) ids: ids0 texts: texts0 revs: revs0  })
+    }
+    if method == "compiler/symbols" {
+        let did = f"{params.get(\"documentId\").unwrap_or("")}"
+        let idx = doc_index(did, ids0)
+        if idx < 0 {
+            return Err("unknown document " + did)
+        }
+        let psr = parse_program_safe(tokenize(texts0[idx]))
+        var arr: Vec<AVal> = []
+        let sym_fns = collect_fn_names(psr.stmts)
+        for f in sym_fns {
+            var sm = Map.new()
+            sm.set("language", "aine")
+            sm.set("kind", "fn")
+            sm.set("name", f)
+            arr.push(sm)
+        }
+        let sym_vars = collect_var_names(psr.stmts)
+        for v in sym_vars {
+            var sm2 = Map.new()
+            sm2.set("language", "aine")
+            sm2.set("kind", "var")
+            sm2.set("name", v)
+            arr.push(sm2)
+        }
+        return Ok(DR { resp: ok_resp(idv, json_encode(arr)) ids: ids0 texts: texts0 revs: revs0  })
+    }
+    if method == "compiler/definition" {
+        let did = f"{params.get(\"documentId\").unwrap_or("")}"
+        let idx = doc_index(did, ids0)
+        if idx < 0 {
+            return Err("unknown document " + did)
+        }
+        let name = f"{params.get(\"name\").unwrap_or("")}"
+        let ps = parse_program(tokenize(texts0[idx]))
+        var found: Vec<AVal> = []
+        match ps {
+            Ok(prog) {
+                let fns = collect_fn_names(prog)
+                for f in fns {
+                    if f == name {
+                        var sm = Map.new()
+                        sm.set("name", f)
+                        sm.set("kind", "fn")
+                        found.push(sm)
+                    }
+                }
+                if found.len() == 0 {
+                    let vs = collect_var_names(prog)
+                    for v in vs {
+                        if v == name {
+                            var sm = Map.new()
+                            sm.set("name", v)
+                            sm.set("kind", "var")
+                            found.push(sm)
+                        }
+                    }
+                }
+            }
+            Err(_) {}
+        }
+        var result_json = "null"
+        if found.len() > 0 {
+            result_json = json_encode(found[0])
+        }
+        return Ok(DR { resp: ok_resp(idv, result_json) ids: ids0 texts: texts0 revs: revs0  })
+    }
+    if method == "compiler/references" {
+        let did = f"{params.get(\"documentId\").unwrap_or("")}"
+        let idx = doc_index(did, ids0)
+        if idx < 0 {
+            return Err("unknown document " + did)
+        }
+        let name = f"{params.get(\"name\").unwrap_or("")}"
+        let toks = tokenize(texts0[idx])
+        var arr: Vec<AVal> = []
+        var i = 0
+        while i < toks.len() {
+            if toks[i].kind == TIdent && toks[i].text == name {
+                var loc = Map.new()
+                loc.set("token_index", i)
+                arr.push(loc)
+            }
+            i += 1
+        }
+        return Ok(DR { resp: ok_resp(idv, json_encode(arr)) ids: ids0 texts: texts0 revs: revs0  })
+    }
+    if method == "compiler/hover" || method == "compiler/typeAt" {
+        let did = f"{params.get(\"documentId\").unwrap_or("")}"
+        let idx = doc_index(did, ids0)
+        if idx < 0 {
+            return Err("unknown document " + did)
+        }
+        let name = f"{params.get(\"name\").unwrap_or("")}"
+        let ps = parse_program(tokenize(texts0[idx]))
+        var ty = ""
+        match ps {
+            Ok(prog) {
+                let vns = collect_var_names(prog)
+                let vts = collect_var_types(prog)
+                var i = 0
+                while i < vns.len() {
+                    if vns[i] == name {
+                        ty = vts[i]
+                    }
+                    i += 1
+                }
+            }
+            Err(_) {}
+        }
+        var hm = Map.new()
+        hm.set("name", name)
+        hm.set("type", ty)
+        return Ok(DR { resp: ok_resp(idv, json_encode(hm)) ids: ids0 texts: texts0 revs: revs0  })
+    }
+    return Err("unknown method " + method)
+}
+
+fn ai_as_i32s(s: String) -> i32 {
+    return s.to_i32()
+}
+
+// 字符串 → JSON 引号字面量(手动转义)
+fn jq(s: String) -> String {
+    var out = "\""
+    var i2 = 0
+    while i2 < s.len() {
+        let c = s[i2]
+        if c == "\"" {
+            out = out + "\\\""
+        } else {
+            out = out + c
+        }
+        i2 += 1
+    }
+    return out + "\""
+}
+
+
+fn ai_as_str(v: AVal) -> String {
+    match v {
+        AStr(s) { return s }
+        AInt(n) { return f"{n}" }
+        _ { return "" }
+    }
+}
+
+// 文本编辑应用: 行/列 0 起始(字符坐标) → 新文本
+fn apply_edit(text: String, sl: i32, sc: i32, el: i32, ec: i32, ins: String) -> String {
+    var so = 0
+    var line = 0
+    var i = 0
+    var found_s = false
+    while i < text.len() {
+        if line == sl && !found_s {
+            so = i + sc
+            found_s = true
+        }
+        if text[i] == "\n" {
+            line += 1
+        }
+        i += 1
+    }
+    if !found_s {
+        so = text.len()
+    }
+    var eo = so
+    var line2 = sl
+    var j = so
+    var found_e = false
+    while j < text.len() {
+        if line2 == el {
+            eo = j + ec - sc
+            found_e = true
+            break
+        }
+        if text[j] == "\n" {
+            line2 += 1
+        }
+        j += 1
+    }
+    if !found_e {
+        eo = text.len()
+    }
+    if eo < so {
+        eo = so
+    }
+    return text[0..so] + ins + text[eo..text.len()]
+}
+
+// 目录平铺列表(P0: 当前目录 *.aine)
+fn list_dir(dir: String) -> Vec<String> {
+    var out: Vec<String> = []
+    let names = file_list(dir)
+    for n in names {
+        if n.ends_with(".aine") {
+            out.push(dir + "/" + n)
+        }
+    }
+    return out
+}

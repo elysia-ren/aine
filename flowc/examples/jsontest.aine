@@ -1,0 +1,15 @@
+// std/json 端到端：mod 搜索路径读入 stdlib/json.aine
+module json;
+
+fn main() {
+    let q = "\""
+    let src = "{\"name\": \"Aine\", \"version\": 1.5, \"tags\": [\"a\", \"b\"]}"
+    let r = parse_value(src, 0)?
+    let text = stringify(r.value)
+    print(text)
+    let r2 = parse_value(text, 0)?
+    let text2 = stringify(r2.value)
+    if text == text2 {
+        print("json OK")
+    }
+}

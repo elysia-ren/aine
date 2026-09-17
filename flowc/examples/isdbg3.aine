@@ -1,0 +1,12 @@
+module allex;
+fn main() {
+    var src = "ab cd ef"
+    var i = 0
+    let c = src[i]
+    print("c=[" + c + "]")
+    if is_ident_start(c) {
+        print("YES-idx")
+    } else {
+        print("NO-idx")
+    }
+}

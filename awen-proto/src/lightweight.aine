@@ -1,0 +1,687 @@
+// awen-proto/src/lightweight.aine —— 轻量层分类与行内扫描
+// (核心规范 §6.2–6.7、§6.11–6.13)。移植自 Rust 版 lexer/lightweight.rs。
+//
+// 块级分类(§6.3、§6.11):标记必须顶格且后随空格;分节线允许 ≤3 前导空格。
+// 行内扫描(§6.4–6.5):边界规则 + 栈式嵌套归一;交叉/未闭合 → 整行按字面 + 诊断。
+// 词法级规则(实现期裁定,见 docs/PORT_NOTES.md):行内标记不跨物理行。
+
+// ── 行内节点 ───────────────────────────────────────────────
+
+enum Inline {
+    AwTxt(String)
+    IBold(Vec<Inline>)
+    Italic(Vec<Inline>)
+    Strike(Vec<Inline>)
+    // 显式作用域命令:@[b]…@[/b]、@[u]…@[/u]、@[cell …]…@[/cell] 等(§11.1)
+    Scoped(ExplicitCommand, Vec<Inline>)
+    // 行内代码:内容为 Raw(§6.2)
+    CodeSpan(String)
+    // 独立显式对象(image/toc/ref/label/footnote/comment…,§11)
+    Command(CommandUse)
+    // 同行闭合的 Raw 行内对象:@[m]…@[/m]、@[c py]…@[/c](§6.7)
+    RawInline(ExplicitCommand, Option<String>, String)
+}
+
+// 纯文本化(测试与纯文本导出用)
+fn inline_plain(items: Vec<Inline>) -> String {
+    var out = ""
+    for it in items {
+        match it {
+            AwTxt(s) { out = out + s }
+            IBold(c) { out = out + inline_plain(c) }
+            Italic(c) { out = out + inline_plain(c) }
+            Strike(c) { out = out + inline_plain(c) }
+            Scoped(cmd, c) { out = out + inline_plain(c) }
+            CodeSpan(s) { out = out + s }
+            Command(u) { out = out + f"@[{u.name_raw}]" }
+            RawInline(cmd, lang, content) { out = out + content }
+        }
+    }
+    return out
+}
+
+// ── 块级分类(§6.3、§6.11)────────────────────────────────
+
+enum LineClass {
+    LcBlank
+    LcDivider
+    LcHeading(i32)
+    LcQuote(i32)
+    LcListItem(bool)
+    LcCommand
+    LcText
+}
+
+fn classify(line: String) -> LineClass {
+    if line.len() == 0 {
+        return LcBlank
+    }
+    var all_ws = true
+    var qi = 0
+    while qi < line.len() {
+        if line[qi] != " " && line[qi] != "\t" {
+            all_ws = false
+        }
+        qi += 1
+    }
+    if all_ws {
+        return LcBlank
+    }
+    if line.len() >= 2 && line[0] == "@" && line[1] == "[" {
+        return LcCommand
+    }
+    // 分节线:≤3 前导空格 + 3 个以上 '-' + 到行尾(§6.3)
+    var lead = 0
+    while lead < line.len() && line[lead] == " " {
+        lead += 1
+    }
+    if lead <= 3 {
+        let rest_len = line.len() - lead
+        var only_dash = rest_len >= 3
+        var k = lead
+        while k < line.len() {
+            if line[k] != "-" {
+                only_dash = false
+            }
+            k += 1
+        }
+        if only_dash {
+            return LcDivider
+        }
+    }
+    if line[0] == "#" {
+        var n = 0
+        while n < line.len() && line[n] == "#" {
+            n += 1
+        }
+        if n <= 6 && n < line.len() && line[n] == " " {
+            return LcHeading(n)
+        }
+        return LcText // '#tag'、7 个以上 '#'
+    }
+    if line[0] == ">" {
+        var d = 0
+        while d < line.len() && line[d] == ">" {
+            d += 1
+        }
+        if d < line.len() && line[d] == " " {
+            return LcQuote(d)
+        }
+        return LcText // '>abc'
+    }
+    if line.len() >= 2 && line[0] == "-" && line[1] == " " {
+        return LcListItem(false) // '-5'、'-foo' 落到 Text
+    }
+    // 有序列表:^[0-9]+\.\s(§6.3)
+    var digits = 0
+    while digits < line.len() && line[digits] >= "0" && line[digits] <= "9" {
+        digits += 1
+    }
+    if digits > 0 && digits < line.len() && line[digits] == "." {
+        if digits + 1 < line.len() && line[digits + 1] == " " {
+            return LcListItem(true)
+        }
+    }
+    return LcText
+}
+
+// 有序列表标记长度(数字 + '.' + 空格)
+fn ordered_marker_len(line: String) -> i32 {
+    var digits = 0
+    while digits < line.len() && line[digits] >= "0" && line[digits] <= "9" {
+        digits += 1
+    }
+    return digits + 2
+}
+
+// ── 行内扫描:原子化 + 栈式归一 ──────────────────────────
+
+enum MarkerKind {
+    MkBold
+    MkItalic
+    MkStrike
+    MkExplicit(ExplicitCommand)
+}
+
+struct MarkerAtom {
+    kind: MarkerKind
+    literal: String
+    can_open: bool
+    can_close: bool
+}
+
+enum LwAtom {
+    AtText(String)
+    AtMarker(MarkerAtom)
+    AtCode(String)
+    // use, raw, opens(同行存在配对关闭标签 → 开启作用域;§11.1 双形式)
+    AtCmd(CommandUse, String, bool)
+    AtClose(ExplicitCommand, String)
+    // cmd, lang, content, raw
+    AtRawSeg(ExplicitCommand, Option<String>, String, String)
+}
+
+struct AtomOut {
+    atoms: Vec<LwAtom>
+    diags: Vec<Diagnostic>
+}
+
+struct ScanOut {
+    inline: Vec<Inline>
+    diags: Vec<Diagnostic>
+}
+
+// §6.4 边界规则:开启侧左侧、闭合侧右侧不得紧邻英文字母/数字/下划线;
+// CJK 不属于禁止集合。
+fn lw_is_word_char(c: String) -> bool {
+    if c >= "0" && c <= "9" { return true }
+    if c >= "a" && c <= "z" { return true }
+    if c >= "A" && c <= "Z" { return true }
+    if c == "_" { return true }
+    return false
+}
+
+fn lw_scan_inline(chars: String, line: i32, diags: Vec<Diagnostic>) -> ScanOut {
+    let ao = lw_atomize(chars, line, diags)
+    return lw_resolve(ao.atoms, ao.diags, line)
+}
+
+fn lw_find_char(s: String, from: i32, target: String) -> Option<i32> {
+    var i = from
+    while i < s.len() {
+        if s[i] == target {
+            return Some(i)
+        }
+        i += 1
+    }
+    return None
+}
+
+fn lw_code_lang(u: CommandUse) -> Option<String> {
+    if u.args.len() > 0 {
+        return Some(arg_plain(u.args[0]))
+    }
+    return None
+}
+
+// 行内 Raw 对象的同名关闭标签:返回 (关闭标记起点, ']' 之后位置)
+fn lw_find_inline_close(s: String, from: i32, cmd: ExplicitCommand) -> Option<CloseSpan> {
+    var i = from
+    while i + 1 < s.len() {
+        if s[i] == "@" && s[i + 1] == "[" && starts_with_at(s, i, "@[/") {
+            var j = i + 3
+            while j < s.len() && s[j] != "]" {
+                j += 1
+            }
+            if j >= s.len() {
+                return None
+            }
+            let name = s[i + 3..j]
+            if close_matches(cmd, name) {
+                return Some(CloseSpan { start: i, end: j + 1 })
+            }
+        }
+        i += 1
+    }
+    return None
+}
+
+struct CloseSpan {
+    start: i32
+    end: i32
+}
+
+// `@@[...]` 字面化:返回结束(']' 之后)位置
+fn lw_scan_literal_object(s: String, start: i32) -> Option<i32> {
+    var i = start + 3
+    var depth = 0
+    while i < s.len() {
+        if starts_with_at(s, i, "@[") {
+            depth += 1
+            i += 2
+            continue
+        }
+        if s[i] == "]" {
+            if depth == 0 {
+                return Some(i + 1)
+            }
+            depth -= 1
+        }
+        i += 1
+    }
+    return None
+}
+
+struct CloseHit {
+    cmd: ExplicitCommand
+    end: i32
+}
+
+// 关闭标签 `@[/name]`:返回 (命令, ']' 之后位置)
+fn lw_read_close_tag(s: String, start: i32) -> Option<CloseHit> {
+    var j = start + 3
+    while j < s.len() && s[j] != "]" {
+        j += 1
+    }
+    if j >= s.len() {
+        return None
+    }
+    let name = s[start + 3..j]
+    let cmd_opt = lookup(name)
+    return match cmd_opt {
+        Some(cmd) { Some(CloseHit { cmd: cmd, end: j + 1 }) }
+        None { None }
+    }
+}
+
+fn lw_atomize(chars: String, line: i32, diags: Vec<Diagnostic>) -> AtomOut {
+    var atoms: Vec<LwAtom> = []
+    var text = ""
+    var diags = diags
+    var i = 0
+    while i < chars.len() {
+        let c = chars[i]
+        if c == "@" {
+            // 1. @@[ — 显式语法字面化,优先级最高(§6.8);输出剥离一个 '@'
+            if starts_with_at(chars, i, "@@[") {
+                if text.len() > 0 {
+                    atoms = atoms.push(AtText(text))
+                    text = ""
+                }
+                let lit = lw_scan_literal_object(chars, i)
+                match lit {
+                    Some(end) {
+                        atoms = atoms.push(AtText(chars[i + 1..end]))
+                        i = end
+                    }
+                    None {
+                        diags = diags.push(diag_warning("@@[ 未闭合,按字面处理", line))
+                        text = "@"
+                        i += 1
+                    }
+                }
+                continue
+            }
+            // 2. @[/ — 关闭标签
+            if starts_with_at(chars, i, "@[/") {
+                if text.len() > 0 {
+                    atoms = atoms.push(AtText(text))
+                    text = ""
+                }
+                let hit = lw_read_close_tag(chars, i)
+                match hit {
+                    Some(h) {
+                        atoms = atoms.push(AtClose(h.cmd, chars[i..h.end]))
+                        i = h.end
+                    }
+                    None {
+                        diags = diags.push(diag_warning("关闭标签缺少 ']',按字面处理", line))
+                        atoms = atoms.push(AtText(chars[i..chars.len()]))
+                        i = chars.len()
+                    }
+                }
+                continue
+            }
+            // 3. @[ — 显式命令
+            if starts_with_at(chars, i, "@[") {
+                if text.len() > 0 {
+                    atoms = atoms.push(AtText(text))
+                    text = ""
+                }
+                let hp = parse_header(chars, i)
+                match hp {
+                    Ok(hp2) {
+                        let u = hp2.cu
+                        let consumed = hp2.consumed
+                        if u.cmd == Math || u.cmd == Code {
+                            // 行内 Raw:@[m]…@[/m] 必须同行闭合(§6.7)
+                            let close_opt = lw_find_inline_close(chars, i + consumed, u.cmd)
+                            match close_opt {
+                                Some(cs) {
+                                    atoms = atoms.push(AtRawSeg(
+                                        u.cmd,
+                                        lw_code_lang(u),
+                                        chars[i + consumed..cs.start],
+                                        chars[i..cs.end],
+                                    ))
+                                    i = cs.end
+                                }
+                                None {
+                                    diags = diags.push(diag_warning(
+                                        f"行内 {u.name_raw} 缺少关闭标签(应形如 @[m]…@[/m]),按字面处理",
+                                        line,
+                                    ))
+                                    atoms = atoms.push(AtText(chars[i..i + consumed]))
+                                    i += consumed
+                                }
+                            }
+                        } else {
+                            let close_found = match lw_find_inline_close(chars, i + consumed, u.cmd) {
+                                Some(_) { true }
+                                None { false }
+                            }
+                            let opens = (is_scoped(u.cmd) || u.cmd == Cell) && close_found
+                            atoms = atoms.push(AtCmd(u, chars[i..i + consumed], opens))
+                            i += consumed
+                        }
+                    }
+                    Err(e) {
+                        var mut_d = diag_error(e.msg, line)
+                        match e.hint {
+                            Some(h) { mut_d = diag_hint(mut_d, h) }
+                            None { }
+                        }
+                        diags = diags.push(mut_d)
+                        // 字面跳到下一个 ']',继续扫描同行其余内容
+                        var j = i + 2
+                        while j < chars.len() && chars[j] != "]" {
+                            j += 1
+                        }
+                        let end = j + 1
+                        let stop = if end > chars.len() { chars.len() } else { end }
+                        atoms = atoms.push(AtText(chars[i..stop]))
+                        i = stop
+                    }
+                }
+                continue
+            }
+            // 4. @@ — 字面 @
+            if starts_with_at(chars, i, "@@") {
+                if text.len() > 0 {
+                    atoms = atoms.push(AtText(text))
+                    text = ""
+                }
+                atoms = atoms.push(AtText("@"))
+                i += 1
+                continue
+            }
+            // 5. 轻量转义(注意:match 臂内 continue 在 Aine 解释器中未生效,
+            //    因此统一用旗标 + if 层 continue,见 docs/PORT_NOTES.md)
+            var esc_text = ""
+            var esc_len = 0
+            var esc_hit = false
+            let esc = escape_scan(chars, i)
+            match esc {
+                Some(h) {
+                    esc_text = h.text
+                    esc_len = h.consumed
+                    esc_hit = true
+                }
+                None { }
+            }
+            if esc_hit {
+                if text.len() > 0 {
+                    atoms = atoms.push(AtText(text))
+                    text = ""
+                }
+                atoms = atoms.push(AtText(esc_text))
+                i += esc_len
+                continue
+            }
+            // 6. 裸 @ 是普通字符
+            text = text + "@"
+            i += 1
+            continue
+        }
+        if c == "`" {
+            if text.len() > 0 {
+                atoms = atoms.push(AtText(text))
+                text = ""
+            }
+            let close_opt = lw_find_char(chars, i + 1, "`")
+            match close_opt {
+                Some(j) {
+                    atoms = atoms.push(AtCode(chars[i + 1..j]))
+                    i = j + 1
+                }
+                None {
+                    text = "`"
+                    i += 1
+                }
+            }
+            continue
+        }
+        if c == "*" || c == "_" || c == "~" {
+            var mlen = 0
+            var mk = MkBold
+            if c == "*" && starts_with_at(chars, i, "**") {
+                mlen = 2
+                mk = MkBold
+            } else if c == "~" && starts_with_at(chars, i, "~~") {
+                mlen = 2
+                mk = MkStrike
+            } else if c == "_" {
+                mlen = 1
+                mk = MkItalic
+            }
+            if mlen == 0 {
+                text = text + c
+                i += 1
+                continue
+            }
+            if text.len() > 0 {
+                atoms = atoms.push(AtText(text))
+                text = ""
+            }
+            let can_open = i == 0 || !lw_is_word_char(chars[i - 1])
+            let can_close = i + mlen >= chars.len() || !lw_is_word_char(chars[i + mlen])
+            atoms = atoms.push(AtMarker(MarkerAtom {
+                kind: mk,
+                literal: chars[i..i + mlen],
+                can_open: can_open,
+                can_close: can_close,
+            }))
+            i += mlen
+            continue
+        }
+        text = text + c
+        i += 1
+    }
+    if text.len() > 0 {
+        atoms = atoms.push(AtText(text))
+    }
+    return AtomOut { atoms: atoms, diags: diags }
+}
+
+// ── 栈式嵌套归一(§6.5)────────────────────────────────────
+
+struct Frame {
+    kind: Option<MarkerKind>
+    children: Vec<Inline>
+}
+
+fn lw_vec_set(v: Vec<Frame>, i: i32, f: Frame) -> Vec<Frame> {
+    var out: Vec<Frame> = []
+    var k = 0
+    while k < v.len() {
+        if k == i {
+            out = out.push(f)
+        } else {
+            out = out.push(v[k])
+        }
+        k += 1
+    }
+    return out
+}
+
+fn lw_vec_drop_last(v: Vec<Frame>) -> Vec<Frame> {
+    var out: Vec<Frame> = []
+    var k = 0
+    while k < v.len() - 1 {
+        out = out.push(v[k])
+        k += 1
+    }
+    return out
+}
+
+fn lw_atom_raw(a: LwAtom) -> String {
+    match a {
+        AtText(s) { return s }
+        AtCode(s) { return s }
+        AtMarker(m) { return m.literal }
+        AtCmd(u, raw, opens) { return raw }
+        AtClose(cmd, literal) { return literal }
+        AtRawSeg(cmd, lang, content, raw) { return raw }
+    }
+}
+
+fn lw_literalize(atoms: Vec<LwAtom>) -> Vec<Inline> {
+    var out = ""
+    for a in atoms {
+        out = out + lw_atom_raw(a)
+    }
+    return [mk_text(out)]
+}
+
+// 相邻文本节点归并(标记回退为字面时不打碎文本流)
+fn lw_merge_texts(items: Vec<Inline>) -> Vec<Inline> {
+    var merged: Vec<Inline> = []
+    for it in items {
+        match it {
+            AwTxt(s) {
+                var did = false
+                if merged.len() > 0 {
+                    let last = merged[merged.len() - 1]
+                    match last {
+                        AwTxt(ls) {
+                            merged = lw_vec_set_inline(merged, merged.len() - 1, mk_text(ls + s))
+                            did = true
+                        }
+                        _ { }
+                    }
+                }
+                if !did {
+                    merged = merged.push(AwTxt(s))
+                }
+            }
+            other { merged = merged.push(other) }
+        }
+    }
+    return merged
+}
+
+fn lw_vec_set_inline(v: Vec<Inline>, i: i32, item: Inline) -> Vec<Inline> {
+    var out: Vec<Inline> = []
+    var k = 0
+    while k < v.len() {
+        if k == i {
+            out = out.push(item)
+        } else {
+            out = out.push(v[k])
+        }
+        k += 1
+    }
+    return out
+}
+
+// IText 构造器在 lw_resolve 内部作用域返回 Nil(Aine 模块作用域 bug);
+// 通过包装函数绕过。
+fn mk_text(s: String) -> Inline {
+    return AwTxt(s)
+}
+
+fn lw_resolve(atoms: Vec<LwAtom>, diags: Vec<Diagnostic>, line: i32) -> ScanOut {
+    var frames: Vec<Frame> = [Frame { kind: None, children: [] }]
+    var diags = diags
+    var aborted = false
+    for atom in atoms {
+        if aborted {
+            continue
+        }
+        match atom {
+            AtText(s) {
+                let fi = frames.len() - 1
+                let f = frames[fi]
+                frames = lw_vec_set(frames, fi, Frame { kind: f.kind, children: f.children.push(mk_text(s)) })
+            }
+            AtCode(s) {
+                let fi = frames.len() - 1
+                let f = frames[fi]
+                frames = lw_vec_set(frames, fi, Frame { kind: f.kind, children: f.children.push(CodeSpan(s)) })
+            }
+            AtRawSeg(cmd, lang, content, raw) {
+                let fi = frames.len() - 1
+                let f = frames[fi]
+                frames = lw_vec_set(frames, fi, Frame {
+                    kind: f.kind,
+                    children: f.children.push(RawInline(cmd, lang, content)),
+                })
+            }
+            AtCmd(u, raw, opens) {
+                if opens {
+                    frames = frames.push(Frame { kind: Some(MkExplicit(u.cmd)), children: [] })
+                } else {
+                    let fi = frames.len() - 1
+                    let f = frames[fi]
+                    frames = lw_vec_set(frames, fi, Frame { kind: f.kind, children: f.children.push(Command(u)) })
+                }
+            }
+            AtClose(cmd, literal) {
+                let kind = MkExplicit(cmd)
+                let top = frames[frames.len() - 1].kind
+                if top == Some(kind) {
+                    let f = frames[frames.len() - 1]
+                    frames = lw_vec_drop_last(frames)
+                    let fi = frames.len() - 1
+                    let pf = frames[fi]
+                    frames = lw_vec_set(frames, fi, Frame {
+                        kind: pf.kind,
+                        children: pf.children.push(Scoped(cmd, f.children)),
+                    })
+                } else if lw_frames_contain(frames, kind) {
+                    diags = diags.push(diag_warning("行内标记交叉(作用域次序非法),整行按字面处理", line))
+                    aborted = true
+                } else {
+                    diags = diags.push(diag_warning(f"未匹配的关闭标签 {literal},按字面处理", line))
+                    let fi = frames.len() - 1
+                    let f = frames[fi]
+                    frames = lw_vec_set(frames, fi, Frame { kind: f.kind, children: f.children.push(mk_text(literal)) })
+                }
+            }
+            AtMarker(m) {
+                let top = frames[frames.len() - 1].kind
+                if top == Some(m.kind) && m.can_close {
+                    let f = frames[frames.len() - 1]
+                    frames = lw_vec_drop_last(frames)
+                    let fi = frames.len() - 1
+                    let pf = frames[fi]
+                    let node = match m.kind {
+                        MkBold { IBold(f.children) }
+                        MkItalic { Italic(f.children) }
+                        MkStrike { Strike(f.children) }
+                        MkExplicit(cmd) { Scoped(cmd, f.children) }
+                    }
+                    frames = lw_vec_set(frames, fi, Frame { kind: pf.kind, children: pf.children.push(node) })
+                } else if m.can_close && lw_frames_contain(frames, m.kind) {
+                    diags = diags.push(diag_warning("行内标记交叉(嵌套次序非法),整行按字面处理", line))
+                    aborted = true
+                } else if m.can_open {
+                    frames = frames.push(Frame { kind: Some(m.kind), children: [] })
+                } else {
+                    let fi = frames.len() - 1
+                    let f = frames[fi]
+                    frames = lw_vec_set(frames, fi, Frame { kind: f.kind, children: f.children.push(mk_text(m.literal)) })
+                }
+            }
+        }
+    }
+    if aborted {
+        return ScanOut { inline: lw_literalize(atoms), diags: diags }
+    }
+    if frames.len() > 1 {
+        diags = diags.push(diag_warning("行内标记未闭合,整行按字面处理", line))
+        return ScanOut { inline: lw_literalize(atoms), diags: diags }
+    }
+    return ScanOut { inline: lw_merge_texts(frames[0].children), diags: diags }
+}
+
+fn lw_frames_contain(frames: Vec<Frame>, kind: MarkerKind) -> bool {
+    var k = 0
+    while k < frames.len() {
+        if frames[k].kind == Some(kind) {
+            return true
+        }
+        k += 1
+    }
+    return false
+}

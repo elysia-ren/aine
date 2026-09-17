@@ -1,0 +1,14 @@
+// modtest_util 模块：自举期扁平注册（顶层项以原名进入全局命名空间）
+fn shout(s: String) -> String {
+    return s + "!"
+}
+
+fn repeat(s: String, n: i32) -> String {
+    var out = ""
+    var i = 0
+    while i < n {
+        out = out + s
+        i += 1
+    }
+    return out
+}

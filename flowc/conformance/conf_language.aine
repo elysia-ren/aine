@@ -1,0 +1,107 @@
+// Conformance C6 —— 用户导向语言面补全（M4 本轮新增特性契约 · 正向）
+// 覆盖：assert 内建 / v[i]=x 索引赋值 / m[k]=v / f-string 嵌套引号 /
+//       统一 fn 类型（高阶函数）/ 字符索引（中文）
+// 运行: aine test conformance/conf_language.aine
+
+@test
+fn c6_assert_pass() {
+    assert(1 + 1 == 2)
+    assert(true, "显式消息的断言")
+}
+
+@test
+fn c6_index_assign_vec() -> Result<i32, String> {
+    var v = [3, 1, 2]
+    v[0] = 99
+    v[1] += 10
+    return expect(v[0] == 99 && v[1] == 11, "v[i] = x 与 v[i] += x")
+}
+
+@test
+fn c6_index_assign_map() -> Result<i32, String> {
+    var m = Map.new()
+    m["a"] = 1
+    m["a"] += 5
+    m["b"] = 2
+    return expect(m["a"] == 6 && m["b"] == 2, "m[k] = v 与 m[k] += v 与读取")
+}
+
+@test
+fn c6_index_assign_value_semantics() -> Result<i32, String> {
+    var a = [1, 2, 3]
+    let b = a
+    a[0] = 77
+    return expect(a[0] == 77 && b[0] == 1, "副本写入不影响源（值语义）")
+}
+
+@test
+fn c6_sort_in_place() -> Result<i32, String> {
+    var v = [5, 3, 8, 1]
+    var i = 0
+    while i < v.len() {
+        var j = i + 1
+        var min = i
+        while j < v.len() {
+            if v[j] < v[min] {
+                min = j
+            }
+            j += 1
+        }
+        let t = v[i]
+        v[i] = v[min]
+        v[min] = t
+        i += 1
+    }
+    return expect(v[0] == 1 && v[3] == 8, "原地选择排序（v[i]=x 的典型用户场景）")
+}
+
+@test
+fn c6_fstring_nested_quotes() -> Result<i32, String> {
+    var m = Map.new()
+    m["name"] = "Aine"
+    let s = f"语言={m["name"]}"
+    let t = f"值是 {m["name"]}，长度 {m["name"].len()}"
+    return expect(s == "语言=Aine" && t == "值是 Aine，长度 4", "f-string 插值内嵌套引号")
+}
+
+fn apply2(f: fn(i32, i32) -> i32, a: i32, b: i32) -> i32 {
+    return f(a, b)
+}
+
+fn add(x: i32, y: i32) -> i32 {
+    return x + y
+}
+
+fn mul(x: i32, y: i32) -> i32 {
+    return x * y
+}
+
+@test
+fn c6_fn_type_named() -> Result<i32, String> {
+    return expect(apply2(add, 3, 4) == 7 && apply2(mul, 3, 4) == 12, "fn 类型参数接收具名函数")
+}
+
+@test
+fn c6_fn_type_closure() -> Result<i32, String> {
+    let sub = (x: i32, y: i32) => x - y
+    return expect(apply2(sub, 10, 4) == 6, "fn 类型参数同样接收闭包（统一类型，无需区分）")
+}
+
+@test
+fn c6_unicode_chars() -> Result<i32, String> {
+    let zh = "你好Flow"
+    var out = ""
+    var i = zh.len() - 1
+    while i >= 0 {
+        out = out + zh[i..i + 1]
+        i -= 1
+    }
+    return expect(zh.len() == 6 && zh[0] == "你" && zh[2] == "F" && out == "wolF好你", "字符索引: len/索引/切片按字符（UTF-8）")
+}
+
+fn expect(cond: bool, msg: String) -> Result<i32, String> {
+    if cond {
+        return Ok(0)
+    }
+    return Err(msg)
+}

@@ -1,0 +1,8 @@
+module alstr;
+
+fn main() {
+    let r = al_unescape_body("0")
+    print("U=[" + r + "] len=" + f"{r.len()}")
+    let r2 = al_unescape_body("9")
+    print("U2=[" + r2 + "]")
+}

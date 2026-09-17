@@ -1,0 +1,32 @@
+module altype;
+module altypeck;
+module alvalueal;
+module allex;
+module alparse;
+module alstr;
+module alcollect;
+module alee;
+
+enum TokKind {
+    TIdent
+    TInt
+    TFloat
+    TStr
+    TOp
+    TSemi
+    TEof
+}
+
+struct Token {
+    kind: TokKind
+    text: String
+}
+
+fn main() {
+    let src1 = "fn fib(n: i32) -> i32 {\n    if n < 2 {\n        return n\n    }\n    return fib(n - 1) + fib(n - 2)\n}\nfn main() {\n    print(fib(10))\n}"
+    let p1 = parse_program(tokenize(src1))?
+    print("parsed")
+    let c1 = c_program(p1, collect_user_types(p1), collect_variant_names(p1), collect_variant_owners(p1), collect_fn_names(p1), collect_fn_returns(p1), collect_var_names(p1), collect_var_types(p1), collect_fn_ptypes(p1), collect_enum_ty_names(p1), collect_enum_variant_lists(p1))
+    print("emitted len=" + f"{c1.len()}")
+    print(c1)
+}

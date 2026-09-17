@@ -1,0 +1,16 @@
+// std/io 端到端：write/append/exists/read 往返
+module io;
+
+fn main() {
+    let path = "io_test_tmp.txt"
+    let ok = write_file(path, "line1\n")
+    print(f"write={ok}")
+    let ok2 = append_file(path, "line2\n")
+    print(f"append={ok2}")
+    print(f"exists={file_exists(path)}")
+    let back = read_file(path)
+    let expect = "line1\nline2\n"
+    let same = back == expect
+    print(f"roundtrip={same}")
+    print(back)
+}

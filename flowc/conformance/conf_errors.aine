@@ -1,0 +1,99 @@
+// Conformance C4 —— 错误处理子集（Result/Option/? 契约 · 正向）
+// 依据: 设计方案 V5.8 §45-47、Reference §8 错误处理
+// 运行: aine test conformance/conf_errors.aine
+// 契约: 业务失败一律 Result；? 向外层传播；match 穷尽解构；
+// 失败路径的确定性（首次失败即返回，不继续执行）。
+
+fn expect(cond: bool, msg: String) -> Result<i32, String> {
+    if cond {
+        return Ok(0)
+    }
+    return Err(msg)
+}
+
+@test
+fn c4_ok_err_construction() -> Result<i32, String> {
+    let a = parse_digit("7")
+    let b = parse_digit("x")
+    return expect(is_ok_num(a) && !is_ok_num(b), "Ok/Err 构造与判定")
+}
+
+@test
+fn c4_match_destructure() -> Result<i32, String> {
+    let v = value_or(parse_digit("9"), -1)
+    let d = value_or(parse_digit("z"), -1)
+    return expect(v == 9 && d == -1, "match 解构 Ok/Err 载荷")
+}
+
+@test
+fn c4_question_propagation() -> Result<i32, String> {
+    let r = chain_two_safe("3")
+    let e = chain_two_safe("q")
+    return expect(r == 6 && e == -1, "? 传播: 成功链返回 3+3，失败链走 Err 兜底")
+}
+
+@test
+fn c4_fail_fast() -> Result<i32, String> {
+    return expect(!is_ok_num(first_bad_wins()), "首次失败即返回（? 处中断，不执行后续语句）")
+}
+
+@test
+fn c4_option_aine() -> Result<i32, String> {
+    let s1 = find_index([10, 20], 20)
+    let s2 = find_index([10, 20], 99)
+    return expect(s1 == 1 && s2 == -1, "索引查找: 找到/未找到两路")
+}
+
+fn parse_digit(s: String) -> Result<i32, String> {
+    if s.len() != 1 {
+        return Err("长度必须为 1")
+    }
+    if s[0..1] >= "0" && s[0..1] <= "9" {
+        let n = s.to_i32()
+        return Ok(n)
+    }
+    return Err("不是数字")
+}
+
+fn is_ok_num(r: Result<i32, String>) -> bool {
+    match r {
+        Ok(v) { return v >= 0 }
+        Err(_) { return false }
+    }
+}
+
+fn value_or(r: Result<i32, String>, fallback: i32) -> i32 {
+    match r {
+        Ok(v) { return v }
+        Err(_) { return fallback }
+    }
+}
+
+fn chain_two(s: String) -> Result<i32, String> {
+    let a = parse_digit(s)?
+    let b = parse_digit(s)?
+    return Ok(a + b)
+}
+
+fn chain_two_safe(s: String) -> i32 {
+    match chain_two(s) {
+        Ok(v) { return v }
+        Err(_) { return -1 }
+    }
+}
+
+fn first_bad_wins() -> Result<i32, String> {
+    let n = parse_digit("nope")?
+    return Ok(n)
+}
+
+fn find_index(v: Vec<i32>, target: i32) -> i32 {
+    var i = 0
+    while i < v.len() {
+        if v[i] == target {
+            return i
+        }
+        i += 1
+    }
+    return -1
+}

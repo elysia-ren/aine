@@ -1,0 +1,33 @@
+// mini31.aine — ctrl 传播回归: match 臂 break / if-continue / while-continue / for-continue
+fn main() {
+    // 1) match 臂 break: i==2 时 break 跳出循环
+    var i: i32 = 0
+    while i < 5 {
+        i = i + 1
+        match i {
+            2 { break }
+            _ { print("a" + f"{i}") }
+        }
+    }
+    print("A done at " + f"{i}")
+    // 2) if-continue(循环内普通 if): 宿主已知正确, 回归守护
+    var s: i32 = 0
+    for k in 0..4 {
+        if k == 1 {
+            continue
+        }
+        s = s + k
+    }
+    print("B sum=" + f"{s}")
+    // 3) while 内 continue
+    var j: i32 = 0
+    var acc: i32 = 0
+    while j < 4 {
+        j = j + 1
+        if j == 3 {
+            continue
+        }
+        acc = acc + j
+    }
+    print("C acc=" + f"{acc}")
+}

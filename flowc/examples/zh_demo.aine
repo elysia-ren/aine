@@ -1,0 +1,15 @@
+// 演示：中文表面 (S0.6 Language Rendering, zh-CN)
+// 与 en_demo.aine 是同一程序的两个表面; IDE 中点击 EN/中 可切换渲染
+
+函数 add(a: i32, b: i32) -> i32 {
+    让 s = a 加 b
+    返回 s
+}
+
+函数 main() -> i32 {
+    让 r = add(1, 2)
+    如果 r 大于 2 {
+        打印(r)
+    }
+    返回 0
+}

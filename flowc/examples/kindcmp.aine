@@ -1,0 +1,27 @@
+enum TokKind {
+    TIdent
+    TInt
+    TSemi
+    TEof
+}
+
+struct Token {
+    kind: TokKind
+    text: String
+}
+
+fn main() {
+    var t = Token { kind: TInt text: "i32" }
+    if t.kind == TSemi || t.kind == TEof {
+        print("is-semi-or-eof")
+    } else {
+        print("is-other")
+    }
+    var t2 = Token { kind: TSemi text: "x" }
+    if t2.kind == TSemi || t2.kind == TEof {
+        print("t2-is-semi")
+    } else {
+        print("t2-is-other")
+    }
+    print("kindcmp done")
+}

@@ -1,0 +1,25 @@
+// rtest.aine — S0.6 验收: round-trip (zh→canonical→zh) + canonical 归一输出
+module alrender;
+
+fn main() -> Result<(), String> {
+    let zh = read_file("examples/zh_demo.aine")
+    // 1) 表面 → canonical
+    let canon = surface_to_canonical_p(zh, 0)
+    write_file("zh_canon_tmp.txt", canon)
+    // 2) round-trip: canonical → 表面 应还原原文
+    let back = render_to(canon, 0)
+    write_file("zh_back_tmp.txt", back)
+    if back == zh {
+        print("roundtrip OK")
+    } else {
+        print("roundtrip FAIL")
+        print(back)
+    }
+    // 3) canonical 关键字不应残留 zh 词
+    if lang_has_kw(0, "让") {
+        print("table OK")
+    } else {
+        print("table FAIL")
+    }
+    return Ok(())
+}

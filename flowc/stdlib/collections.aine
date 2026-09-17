@@ -1,0 +1,107 @@
+// std/collections —— 集合工具（Aine 标准库 · 自举期扁平注册）
+
+fn range_vec(n: i32) -> Vec<i32> {
+    var v: Vec<i32> = []
+    var i = 0
+    while i < n {
+        v.push(i)
+        i += 1
+    }
+    return v
+}
+
+fn vec_reverse(v: Vec<i32>) -> Vec<i32> {
+    var out: Vec<i32> = []
+    var i = v.len() - 1
+    while i >= 0 {
+        out.push(v[i])
+        i -= 1
+    }
+    return out
+}
+
+// 前置条件：v 非空
+fn vec_max(v: Vec<i32>) -> i32 {
+    var best = v[0]
+    var i = 1
+    while i < v.len() {
+        if v[i] > best {
+            best = v[i]
+        }
+        i += 1
+    }
+    return best
+}
+
+fn vec_concat(a: Vec<i32>, b: Vec<i32>) -> Vec<i32> {
+    var out: Vec<i32> = []
+    for x in a {
+        out.push(x)
+    }
+    for x in b {
+        out.push(x)
+    }
+    return out
+}
+
+// ---- 扩充（M6-STD-2）----
+
+// 插入排序（稳定；小数组足够，避免依赖复杂度）
+// 选择排序(逐轮找最小,交换用重构 vec 规避 EIndex 赋值)
+fn sort_ints(v: Vec<i32>) -> Vec<i32> {
+    var out: Vec<i32> = []
+    for x in v {
+        out.push(x)
+    }
+    let n = out.len()
+    var i = 0
+    while i < n {
+        var min_i = i
+        var j = i + 1
+        while j < n {
+            if out[j] < out[min_i] {
+                min_i = j
+            }
+            j += 1
+        }
+        if min_i != i {
+            // swap out[i] <-> out[min_i]:push 重建
+            let vi = out[i]
+            let vm = out[min_i]
+            var rebuilt: Vec<i32> = []
+            var k = 0
+            while k < n {
+                if k == i {
+                    rebuilt.push(vm)
+                } else {
+                    if k == min_i {
+                        rebuilt.push(vi)
+                    } else {
+                        rebuilt.push(out[k])
+                    }
+                }
+                k += 1
+            }
+            out = rebuilt
+        }
+        i += 1
+    }
+    return out
+}
+
+fn sum_ints(v: Vec<i32>) -> i32 {
+    var s = 0
+    for x in v {
+        s += x
+    }
+    return s
+}
+
+fn contains_int(v: Vec<i32>, target: i32) -> bool {
+    for x in v {
+        if x == target {
+            return true
+        }
+    }
+    return false
+}

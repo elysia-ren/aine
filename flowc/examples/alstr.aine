@@ -1,0 +1,419 @@
+// alstr 模块：字符串工具与源码回显
+
+
+// ---------- 回显 ----------
+
+fn join(items: Vec<String>, sep: String) -> String {
+    var out = ""
+    var first = true
+    for it in items {
+        if first {
+            out = out + it
+            first = false
+        } else {
+            out = out + sep + it
+        }
+    }
+    return out
+}
+
+
+fn indent(s: String, pad: String) -> String {
+    var out = ""
+    for ch in s {
+        if ch == "\n" {
+            out = out + "\n" + pad
+        } else {
+            out = out + ch
+        }
+    }
+    return out
+}
+
+
+fn stringify(e: Expr) -> String {
+    match e {
+        EInt(n) { return f"{n}" }
+        EFloat(nf) { return f"{nf}" }
+        EStr(s) {
+            // f-string：EStr 值本身含 f"..."（tokenize 整体捕获），原样输出
+            if s.len() >= 3 && s[0..2] == "f\"" && s[s.len() - 1..s.len()] == "\"" {
+                return s
+            }
+            return "\"" + s + "\""
+        }
+        EIdent(n) { return n }
+        EUnit { return "()" }
+        ERange(a, b) { return stringify(a) + ".." + stringify(b) }
+        EClosure(params, body) { return "|" + join(params, ", ") + "| " + stringify(body) }
+        EIndex(b, idx) { return stringify(b) + "[" + stringify(idx) + "]" }
+        EIf(cond, then_s, else_s) {
+            var out = "if " + stringify(cond) + " {"
+            var tb: Vec<String> = []
+            for st in then_s { tb.push(stringify_stmt(st, "  ")) }
+            out = out + " " + join(tb, " ") + " }"
+            if else_s.len() > 0 {
+                out = out + " else {"
+                var eb: Vec<String> = []
+                for st in else_s { eb.push(stringify_stmt(st, "  ")) }
+                out = out + " " + join(eb, " ") + " }"
+            }
+            return out
+        }
+        ETry(x) { return stringify(x) + "?" }
+        EStruct(ty, fields) {
+            var parts: Vec<String> = []
+            for fd in fields {
+                parts.push(fd.name + ": " + stringify(fd.value))
+            }
+            return ty + " { " + join(parts, " ") + " }"
+        }
+        EBin(op, l, r) { return "(" + stringify(l) + " " + op + " " + stringify(r) + ")" }
+        EUnary(op, x) { return "(" + op + stringify(x) + ")" }
+        ECall(f, args) {
+            var parts: Vec<String> = []
+            for a in args {
+                parts.push(stringify(a))
+            }
+            return stringify(f) + "(" + join(parts, ", ") + ")"
+        }
+        EField(b, name) { return stringify(b) + "." + name }
+        EBlock(stmts) {
+            var parts: Vec<String> = []
+            for s in stmts {
+                parts.push(stringify_stmt(s, ""))
+            }
+            return "{\n" + indent(join(parts, "\n"), "  ") + "\n}"
+        }
+        EVec(items) {
+            var parts: Vec<String> = []
+            for it in items {
+                parts.push(stringify(it))
+            }
+            return "[" + join(parts, ", ") + "]"
+        }
+        EMatch(mscrut, marms) {
+            var mout = "match " + stringify(mscrut) + " {"
+            var mparts: Vec<String> = []
+            for marm in marms {
+                mparts.push(" " + marm.pat + " { " + arm_body_text(marm.body, "  ") + " }")
+            }
+            mout = mout + join(mparts, " ") + " }"
+            return mout
+        }
+    }
+}
+
+
+fn arm_body_text(b: Stmt, pad: String) -> String {
+    match b {
+        SBlock(stmts) {
+            var body: Vec<String> = []
+            for st in stmts {
+                body.push(stringify_stmt(st, pad + "  "))
+            }
+            return "{\n" + join(body, "\n") + "\n" + pad + "}"
+        }
+        SExpr(e) { return stringify(e) }
+        _ { return "?" }
+    }
+}
+
+
+fn stringify_stmt(s: Stmt, pad: String) -> String {
+    match s {
+        SLet(name, is_mut, ty, init) {
+            var head = "let "
+            if is_mut {
+                head = "var "
+            }
+            var t = ""
+            match ty {
+                Some(tt) { t = ": " + tt }
+                None {}
+            }
+            return pad + head + name + t + " = " + stringify(init)
+        }
+        SIf(cond, then_s, else_s) {
+            var out = pad + "if " + stringify(cond) + " {"
+            var body: Vec<String> = []
+            for st in then_s {
+                body.push(stringify_stmt(st, pad + "  "))
+            }
+            out = out + "\n" + join(body, "\n") + "\n" + pad + "}"
+            if else_s.len() > 0 {
+                out = out + " else {"
+                var ebody: Vec<String> = []
+                for st in else_s {
+                    ebody.push(stringify_stmt(st, pad + "  "))
+                }
+                out = out + "\n" + join(ebody, "\n") + "\n" + pad + "}"
+            }
+            return out
+        }
+        SWhile(cond, body_s) {
+            var out = pad + "while " + stringify(cond) + " {"
+            var body: Vec<String> = []
+            for st in body_s {
+                body.push(stringify_stmt(st, pad + "  "))
+            }
+            out = out + "\n" + join(body, "\n") + "\n" + pad + "}"
+            return out
+        }
+        SFor(v, iter, body_s) {
+            var out = pad + "for " + v + " in " + stringify(iter) + " {"
+            var body: Vec<String> = []
+            for st in body_s {
+                body.push(stringify_stmt(st, pad + "  "))
+            }
+            out = out + "\n" + join(body, "\n") + "\n" + pad + "}"
+            return out
+        }
+        SReturn(e) {
+            match e {
+                Some(x) { return pad + "return " + stringify(x) }
+                None { return pad + "return" }
+            }
+        }
+        SExpr(e) { return pad + stringify(e) }
+        SAssign(name, op, rhs) { return pad + name + " " + op + " " + stringify(rhs) }
+        SAssignIdx(bn, idxe, op, rhs) { return pad + stringify(EIdent(bn)) + "[" + stringify(idxe) + "] " + op + " " + stringify(rhs) }
+        SBlock(stmts) {
+            var body: Vec<String> = []
+            for st in stmts {
+                body.push(stringify_stmt(st, pad))
+            }
+            return join(body, "\n")
+        }
+        SStruct(name, fields) {
+            var out = pad + "struct " + name + " {"
+            var fl: Vec<String> = []
+            for fd in fields {
+                fl.push(pad + "  " + fd.name + ": " + fd.ty)
+            }
+            out = out + "\n" + join(fl, "\n") + "\n" + pad + "}"
+            return out
+        }
+        SEnum(name, variants) {
+            var out = pad + "enum " + name + " {"
+            var vs: Vec<String> = []
+            for v in variants {
+                if v.fields.len() > 0 {
+                    vs.push(pad + "  " + v.name + "(" + join(v.fields, ", ") + ")")
+                } else {
+                    vs.push(pad + "  " + v.name)
+                }
+            }
+            out = out + "\n" + join(vs, "\n") + "\n" + pad + "}"
+            return out
+        }
+        SImpl(ty, methods) {
+            var out = pad + "implement " + ty + " {"
+            var ms: Vec<String> = []
+            for m in methods {
+                ms.push(stringify_stmt(m, pad + "  "))
+            }
+            out = out + "\n" + join(ms, "\n") + "\n" + pad + "}"
+            return out
+        }
+        SMatch(scrut, arms) {
+            var out = pad + "match " + stringify(scrut) + " {"
+            var as_arms: Vec<String> = []
+            for arm in arms {
+                as_arms.push(pad + "  " + arm.pat + " { " + arm_body_text(arm.body, pad + "  ") + " }")
+            }
+            out = out + "\n" + join(as_arms, "\n") + "\n" + pad + "}"
+            return out
+        }
+        SMod(name, items) {
+            var out = pad + "mod " + name + " {"
+            var its: Vec<String> = []
+            for it in items {
+                its.push(stringify_stmt(it, pad + "  "))
+            }
+            out = out + "\n" + join(its, "\n") + "\n" + pad + "}"
+            return out
+        }
+        SImport(txt) {
+            return pad + "import " + txt
+        }
+        SDef(name, params, ret, body_s) {
+            var ps: Vec<String> = []
+            for p in params {
+                ps.push(p.name + ": " + p.ty)
+            }
+            var head = pad + "fn " + name + "(" + join(ps, ", ") + ")"
+            match ret {
+                Some(rr) { head = head + " -> " + rr }
+                None {}
+            }
+            var out = head + " {"
+            var body: Vec<String> = []
+            for st in body_s {
+                body.push(stringify_stmt(st, pad + "  "))
+            }
+            out = out + "\n" + join(body, "\n") + "\n" + pad + "}"
+            return out
+        }
+    }
+}
+
+
+fn expect_eq(got: String, want: String, label: String) -> Result<(), String> {
+    if got == want {
+        print(label + ": OK")
+        return Ok(())
+    }
+    return Err(f"{label} 断言失败\n  期望: {want}\n  实际: {got}")
+}
+
+
+// ============ Aine -> C transpiler (B5) ============
+
+fn contains_str(items: Vec<String>, s: String) -> bool {
+    for it in items {
+        if it == s {
+            return true
+        }
+    }
+    return false
+}
+
+
+fn is_ident(s: String) -> bool {
+    if s.len() == 0 { false }
+    let c0 = s[0..1]
+    return c0 >= "a" && c0 <= "z" || c0 >= "A" && c0 <= "Z" || c0 == "_"
+}
+
+
+fn join_i32(v: Vec<i32>, sep: String) -> String {
+    var out = ""
+    var first = true
+    for n in v {
+        if !first { out = out + sep }
+        out = out + f"{n}"
+        first = false
+    }
+    return out
+}
+
+
+fn str_split(s: String, sep: String) -> Vec<String> {
+    var out: Vec<String> = []
+    var cur = ""
+    for c in s {
+        if c == sep {
+            out.push(cur)
+            cur = ""
+        } else {
+            cur = cur + c
+        }
+    }
+    out.push(cur)
+    return out
+}
+
+// 值流子集内建（B5-M28）：vf 改写后的调用目标。
+// 解释器：以下 Aine 实现（语义 = 普通拼接，正确但非优化）；
+// 原生发射：alee 按名字特例化为 C 内建（realloc 原地追加，省 malloc+拷贝）。
+fn al_strdup_lit(s: String) -> String {
+    return s
+}
+
+fn al_strcat_own(a: String, b: String) -> String {
+    return a + b
+}
+
+// 字符串转义解码（与宿主 lexer decode_string 一致）：\n \t \r \0 \ \" \' \xHH；未知转义保留原样
+fn al_unescape_body(body: String) -> String {
+    var out = ""
+    var i = 0
+    let len = body.len()
+    while i < len {
+        let c = body[i..i + 1]
+        if c == "\\" && i + 1 < len {
+            let e = body[i + 1..i + 2]
+            if e == "n" {
+                out = out + "\n"
+                i += 2
+                continue
+            }
+            if e == "t" {
+                out = out + "\t"
+                i += 2
+                continue
+            }
+            if e == "r" {
+                out = out + "\r"
+                i += 2
+                continue
+            }
+            if e == "0" {
+                out = out + "\0"
+                i += 2
+                continue
+            }
+            if e == "\\" {
+                out = out + "\\"
+                i += 2
+                continue
+            }
+            if e == "\"" {
+                out = out + "\""
+                i += 2
+                continue
+            }
+            if e == "'" {
+                out = out + "'"
+                i += 2
+                continue
+            }
+            if e == "x" && i + 3 < len {
+                let hi = body[i + 2..i + 3]
+                let lo = body[i + 3..i + 4]
+                let hd = al_hex_digit(hi)
+                let ld = al_hex_digit(lo)
+                if hd >= 0 && ld >= 0 {
+                    let v = hd * 16 + ld
+                    if v >= 32 && v <= 126 {
+                        out = out + al_chr(v)
+                    } else {
+                        out = out + "\x" + hi + lo
+                    }
+                    i += 4
+                    continue
+                }
+            }
+            out = out + "\\" + e
+            i += 2
+            continue
+        }
+        out = out + c
+        i += 1
+    }
+    return out
+}
+
+// 十六进制数字 → 数值（非法返回 -1）
+fn al_hex_digit(ch: String) -> i32 {
+    if ch >= "0" && ch <= "9" {
+        return ch.to_i32()
+    }
+    if ch >= "a" && ch <= "f" {
+        return 10 + (ch.to_i32() - "a".to_i32())
+    }
+    if ch >= "A" && ch <= "F" {
+        return 10 + (ch.to_i32() - "A".to_i32())
+    }
+    return -1
+}
+
+// 码点 → 单字符（ASCII 范围）
+fn al_chr(v: i32) -> String {
+    let table = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+    if v >= 32 && v <= 126 {
+        return table[v - 32..v - 31]
+    }
+    return ""
+}

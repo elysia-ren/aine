@@ -1,0 +1,26 @@
+// B5-M25: 嵌套类型 —— Map<String, Vec<i32>> 值类型递归
+fn main() {
+    var index: Map<String, Vec<i32>> = Map.new()
+    index.set("a", [1, 2, 3])
+    index.set("b", [4, 5])
+    var total = 0
+    let hit = index.get("a")
+    match hit {
+        Some(v) {
+            for x in v {
+                total = total + x
+            }
+            print(f"a: len={v.len()} total={total} first={v[0]}")
+        }
+        None { print("a: none") }
+    }
+    let miss = index.get("zz")
+    match miss {
+        Some(v) { print(f"zz: len={v.len()}") }
+        None { print("zz: none") }
+    }
+    let ks = index.keys()
+    print(f"keys={ks.len()} first={ks[0]}")
+    let vs = index.values()
+    print(f"values={vs.len()}")
+}

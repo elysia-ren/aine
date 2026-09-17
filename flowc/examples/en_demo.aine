@@ -1,0 +1,15 @@
+// demo: English surface (S0.6 Language Rendering, en = canonical)
+// Same program as zh_demo.aine — identical canonical AST.
+
+fn add(a: i32, b: i32) -> i32 {
+    let s = a + b
+    return s
+}
+
+fn main() -> i32 {
+    let r = add(1, 2)
+    if r > 2 {
+        print(r)
+    }
+    return 0
+}

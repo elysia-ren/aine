@@ -1,0 +1,438 @@
+// alrender.aine — Language Rendering (S0.6, Language Veil)
+// 一门语义 (Canonical Aine), 多种人类语言表面。
+// Profile 为声明式数据: 新增语言 = 往 profile_get 加一张词表, 引擎零改动。
+// 约定: 逐 token 替换、不跨行、不碰字符串/注释 → 行号/列不变, 诊断坐标直通。
+
+
+struct LangProfile {
+    code: String
+    name: String
+    words: Vec<String>
+    maps: Vec<String>
+    ops_from: Vec<String>
+    ops_to: Vec<String>
+}
+
+fn profile_count() -> i32 {
+    return 6
+}
+
+// idx: 0=zh-CN 1=en(canonical 恒等) 2=ja 3=de 4=fr 5=ru
+fn profile_get(idx: i32) -> LangProfile {
+    var v: Vec<String> = []
+    var m: Vec<String> = []
+    var of: Vec<String> = []
+    var ot: Vec<String> = []
+    var code = "en"
+    var name = "English"
+    if idx == 0 {
+        code = "zh-CN"
+        name = "中文"
+        v.push("让")
+        m.push("let")
+        v.push("函数")
+        m.push("fn")
+        v.push("返回")
+        m.push("return")
+        v.push("如果")
+        m.push("if")
+        v.push("否则")
+        m.push("else")
+        v.push("循环")
+        m.push("while")
+        v.push("遍历")
+        m.push("for")
+        v.push("于")
+        m.push("in")
+        v.push("匹配")
+        m.push("match")
+        v.push("中断")
+        m.push("break")
+        v.push("继续")
+        m.push("continue")
+        v.push("结构")
+        m.push("struct")
+        v.push("枚举")
+        m.push("enum")
+        v.push("模块")
+        m.push("module")
+        v.push("导入")
+        m.push("use")
+        v.push("实现")
+        m.push("impl")
+        v.push("公开")
+        m.push("pub")
+        v.push("作为")
+        m.push("as")
+        v.push("真")
+        m.push("true")
+        v.push("假")
+        m.push("false")
+        v.push("打印")
+        m.push("print")
+        of.push("加")
+        ot.push("+")
+        of.push("减")
+        ot.push("-")
+        of.push("乘")
+        ot.push("*")
+        of.push("除")
+        ot.push("/")
+        of.push("余")
+        ot.push("%")
+        of.push("大于")
+        ot.push(">")
+        of.push("小于")
+        ot.push("<")
+        of.push("大于等于")
+        ot.push(">=")
+        of.push("小于等于")
+        ot.push("<=")
+        of.push("等于")
+        ot.push("==")
+        of.push("不等于")
+        ot.push("!=")
+        of.push("与")
+        ot.push("&&")
+        of.push("或")
+        ot.push("||")
+        of.push("非")
+        ot.push("!")
+    }
+    if idx == 2 {
+        code = "ja"
+        name = "日本語"
+        v.push("関数")
+        m.push("fn")
+        v.push("もし")
+        m.push("if")
+        v.push("それ以外")
+        m.push("else")
+        v.push("繰り返し")
+        m.push("while")
+        v.push("各")
+        m.push("for")
+        v.push("内")
+        m.push("in")
+        v.push("返す")
+        m.push("return")
+        v.push("真")
+        m.push("true")
+        v.push("偽")
+        m.push("false")
+        v.push("構造")
+        m.push("struct")
+        v.push("列挙")
+        m.push("enum")
+        v.push("使う")
+        m.push("use")
+        v.push("表示")
+        m.push("print")
+        v.push("中断")
+        m.push("break")
+        v.push("継続")
+        m.push("continue")
+        v.push("マッチ")
+        m.push("match")
+    }
+    if idx == 3 {
+        code = "de"
+        name = "Deutsch"
+        v.push("Funktion")
+        m.push("fn")
+        v.push("wenn")
+        m.push("if")
+        v.push("sonst")
+        m.push("else")
+        v.push("solange")
+        m.push("while")
+        v.push("für")
+        m.push("for")
+        v.push("in")
+        m.push("in")
+        v.push("zurück")
+        m.push("return")
+        v.push("wahr")
+        m.push("true")
+        v.push("falsch")
+        m.push("false")
+        v.push("Struktur")
+        m.push("struct")
+        v.push("Aufzählung")
+        m.push("enum")
+        v.push("benutzen")
+        m.push("use")
+        v.push("drucken")
+        m.push("print")
+        v.push("abbrechen")
+        m.push("break")
+        v.push("weiter")
+        m.push("continue")
+        v.push("muster")
+        m.push("match")
+    }
+    if idx == 4 {
+        code = "fr"
+        name = "Français"
+        v.push("fonction")
+        m.push("fn")
+        v.push("si")
+        m.push("if")
+        v.push("sinon")
+        m.push("else")
+        v.push("tantque")
+        m.push("while")
+        v.push("pour")
+        m.push("for")
+        v.push("dans")
+        m.push("in")
+        v.push("renvoyer")
+        m.push("return")
+        v.push("vrai")
+        m.push("true")
+        v.push("faux")
+        m.push("false")
+        v.push("structure")
+        m.push("struct")
+        v.push("énum")
+        m.push("enum")
+        v.push("utiliser")
+        m.push("use")
+        v.push("afficher")
+        m.push("print")
+        v.push("interrompre")
+        m.push("break")
+        v.push("poursuivre")
+        m.push("continue")
+        v.push("motif")
+        m.push("match")
+    }
+    if idx == 5 {
+        code = "ru"
+        name = "Русский"
+        v.push("функция")
+        m.push("fn")
+        v.push("если")
+        m.push("if")
+        v.push("иначе")
+        m.push("else")
+        v.push("пока")
+        m.push("while")
+        v.push("для")
+        m.push("for")
+        v.push("в")
+        m.push("in")
+        v.push("вернуть")
+        m.push("return")
+        v.push("истина")
+        m.push("true")
+        v.push("ложь")
+        m.push("false")
+        v.push("структура")
+        m.push("struct")
+        v.push("перечисление")
+        m.push("enum")
+        v.push("использовать")
+        m.push("use")
+        v.push("печать")
+        m.push("print")
+        v.push("прервать")
+        m.push("break")
+        v.push("продолжить")
+        m.push("continue")
+        v.push("образец")
+        m.push("match")
+    }
+    return LangProfile { code: code, name: name, words: v, maps: m, ops_from: of, ops_to: ot }
+}
+
+fn lang_name(idx: i32) -> String {
+    let p: LangProfile = profile_get(idx)
+    return p.name
+}
+
+fn lang_code(idx: i32) -> String {
+    let p: LangProfile = profile_get(idx)
+    return p.code
+}
+
+// 查表: w 在 from 中的下标 → to 同下标项; 未命中原样返回
+fn map_run(w: String, from: Vec<String>, to: Vec<String>) -> String {
+    let n: i32 = from.len()
+    var i: i32 = 0
+    while i < n {
+        if from[i] == w {
+            return to[i]
+        }
+        i += 1
+    }
+    return w
+}
+
+// 词元是否终止一个 run
+fn is_run_end(c: char) -> bool {
+    if c == " " || c == "\t" || c == "\r" || c == "\n" {
+        return true
+    }
+    let stops = "{}()[]<>=+-*/!&|%,:;.?\"#@"
+    for s in stops {
+        if s == c {
+            return true
+        }
+    }
+    return false
+}
+
+// 双向变换: to_canonical=true 表面→canonical; false canonical→表面
+fn prof_transform(text: String, idx: i32, to_canonical: bool) -> String {
+    let prof: LangProfile = profile_get(idx)
+    var out = ""
+    let n: i32 = text.len()
+    var i: i32 = 0
+    var mode: i32 = 0
+    while i < n {
+        let c = text[i]
+        if mode == 0 {
+            if c == "\"" {
+                mode = 1
+                out = out + c
+                i += 1
+                continue
+            }
+            if c == "/" && i + 1 < n {
+                if text[i + 1] == "/" {
+                    mode = 2
+                    out = out + "//"
+                    i += 2
+                    continue
+                }
+            }
+            if is_run_end(c) {
+                // canonical → 表面时, ASCII 运算符是终止字符不形成 run, 在此探测映射
+                if to_canonical == false {
+                    var mapped = ""
+                    var step: i32 = 0
+                    if i + 1 < n {
+                        let arrow = text[i..i + 2]
+                        if arrow == "->" {
+                            out = out + "->"
+                            i += 2
+                            continue
+                        }
+                        let two = text[i..i + 2]
+                        var k: i32 = 0
+                        let om: i32 = prof.ops_from.len()
+                        while k < om {
+                            if prof.ops_to[k] == two {
+                                mapped = prof.ops_from[k]
+                                step = 2
+                            }
+                            k += 1
+                        }
+                    }
+                    if step == 0 {
+                        let one = text[i..i + 1]
+                        var k2: i32 = 0
+                        let om2: i32 = prof.ops_from.len()
+                        while k2 < om2 {
+                            if prof.ops_to[k2] == one {
+                                mapped = prof.ops_from[k2]
+                                step = 1
+                            }
+                            k2 += 1
+                        }
+                    }
+                    if step > 0 {
+                        out = out + mapped
+                        i += step
+                        continue
+                    }
+                }
+                out = out + c
+                i += 1
+                continue
+            }
+            // 收集一个完整 run
+            var j: i32 = i
+            while j < n {
+                if is_run_end(text[j]) {
+                    break
+                }
+                j += 1
+            }
+            let run = text[i..j]
+            // 单次映射: 先查关键字表, 未命中再查运算符表
+            var mapped = run
+            if to_canonical {
+                mapped = map_run(run, prof.words, prof.maps)
+                if mapped == run {
+                    mapped = map_run(run, prof.ops_from, prof.ops_to)
+                }
+            } else {
+                mapped = map_run(run, prof.maps, prof.words)
+                if mapped == run {
+                    mapped = map_run(run, prof.ops_to, prof.ops_from)
+                }
+            }
+            out = out + mapped
+            i = j
+            continue
+        }
+        if mode == 1 {
+            if c == "\"" {
+                mode = 0
+            }
+            out = out + c
+            i += 1
+            continue
+        }
+        // mode == 2 注释
+        if c == "\n" {
+            mode = 0
+        }
+        out = out + c
+        i += 1
+    }
+    return out
+}
+
+// 表面 → canonical (源码进入编译器前调用; en 恒等)
+fn surface_to_canonical_p(text: String, idx: i32) -> String {
+    if idx == 1 {
+        return text
+    }
+    return prof_transform(text, idx, true)
+}
+
+// canonical → 表面 (切换显示语言; en 恒等)
+fn render_to(text: String, idx: i32) -> String {
+    if idx == 1 {
+        return text
+    }
+    return prof_transform(text, idx, false)
+}
+
+// 该语言是否含此关键字/运算符 (着色用)
+fn lang_has_kw(idx: i32, w: String) -> bool {
+    if idx == 1 {
+        return false
+    }
+    let p: LangProfile = profile_get(idx)
+    let n: i32 = p.words.len()
+    var i: i32 = 0
+    while i < n {
+        if p.words[i] == w {
+            return true
+        }
+        i += 1
+    }
+    let m: i32 = p.ops_from.len()
+    var j: i32 = 0
+    while j < m {
+        if p.ops_from[j] == w {
+            return true
+        }
+        j += 1
+    }
+    return false
+}

@@ -1,0 +1,18 @@
+fn main() -> Result<(), String> {
+    let r = Err("boom")
+    print("R=" + f"{r}")
+    match r {
+        AResult(ok2, msg2) {
+            print("BIND ok=" + f"{ok2}" + " msg=[" + msg2 + "]")
+        }
+        _ { print("BIND NO-MATCH") }
+    }
+    let o = Some(7)
+    match o {
+        AOption(some2, val2) {
+            print("BIND2 some=" + f"{some2}" + " val=" + f"{val2}")
+        }
+        _ { print("BIND2 NO-MATCH") }
+    }
+    return Ok(())
+}

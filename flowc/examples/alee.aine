@@ -1,0 +1,2819 @@
+// alee 模块：Aine -> C 代码发射
+
+
+// 比较操作数：char 一侧的字面量 → C 字符字面量 'x'
+// C 字符串字面量转义: 换行/回车/制表/NUL/引号/反斜杠(缺转义会切断生成的 C 代码)
+fn c_str_lit(s: String) -> String {
+    var out = "\""
+    var i = 0
+    while i < s.len() {
+        let c = s[i]
+        if c == "\"" {
+            out = out + "\\\""
+        } else if c == "\\" {
+            out = out + "\\\\"
+        } else if c == "\n" {
+            out = out + "\\n"
+        } else if c == "\r" {
+            out = out + "\\r"
+        } else if c == "\t" {
+            out = out + "\\t"
+        } else if c == "\0" {
+            out = out + "\\0"
+        } else {
+            out = out + c
+        }
+        i += 1
+    }
+    return out + "\""
+}
+
+fn c_operand(e: Expr, is_char_side: bool, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>) -> String {
+    if is_char_side {
+        match e {
+            // 字符字面量: 转义换行/回车/制表/引号/反斜杠, 否则破坏 C 语法
+            EStr(s) {
+                if s == "\n" {
+                    return "'\\n'"
+                }
+                if s == "\r" {
+                    return "'\\r'"
+                }
+                if s == "\t" {
+                    return "'\\t'"
+                }
+                if s == "\0" {
+                    return "'\\0'"
+                }
+                if s == "'" {
+                    return "'\\''"
+                }
+                if s == "\\" {
+                    return "'\\\\'"
+                }
+                return "'" + s + "'"
+            }
+            _ {}
+        }
+    }
+    return c_expr(e, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+}
+
+
+// 字符串拼接操作数：char 值 → (char[2]){c, 0}
+fn c_str_operand(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>) -> String {
+    let c = c_expr(e, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+    if is_char_typed(e, varnames, vartypes) {
+        return "al_char_to_str(" + c + ")"
+    }
+    return c
+}
+
+
+fn c_op(op: String) -> String {
+    return op
+}
+
+
+// f-string 插值片段：数值 → al_num/al_fnum；字符串 → 原样
+fn fstr_piece(val: String, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, enames: Vec<String>, elists: Vec<String>, user_types: Vec<String>, vnames2: Vec<String>, vowners2: Vec<String>, fptypes: Vec<String>) -> String {
+    // AST 路径（B5-M33）：整段可解析 → 走完整 c_expr（方法链/嵌套调用/索引/字段全支持）
+    let toks = tokenize(val)
+    let pr = parse_expr(toks, 0, 0)
+    match pr {
+        Ok(r) {
+            if r.next < toks.len() && toks[r.next].kind == TEof {
+                let c = c_expr(r.value, user_types, vnames2, vowners2, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                // bool 插值 → al_bool（expr_ctype 的 bool 映射为 int，需按 Aine 类型判别）
+                let bt2 = base_type(r.value, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                match bt2 {
+                    Some(btv) {
+                        if btv == "bool" { return "al_bool(" + c + ")" }
+                    }
+                    None {}
+                }
+                let ct = expr_ctype(r.value, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, user_types)
+                if ct == "int" { return "al_num(" + c + ")" }
+                if ct == "double" { return "al_fnum(" + c + ")" }
+                if ct == "char" { return "al_char_to_str(" + c + ")" }
+                return c
+            }
+        }
+        Err(e) {}
+    }
+    if val.contains(".") || val.contains("(") {
+        if val.ends_with(".len") {
+            return "al_num(" + val + ")"
+        }
+        if val.contains(".len(") {
+            // items.len() → items.len（前缀累积法）
+            var pre = ""
+            var done = false
+            var ci = 0
+            while ci < val.len() {
+                let c = val[ci..ci + 1]
+                if done {
+                    // 已定位，跳过剩余
+                } else if c == "(" && pre.ends_with(".len") {
+                    done = true
+                } else {
+                    pre = pre + c
+                }
+                ci += 1
+            }
+            if done && pre.ends_with(".len") && pre.len() >= 4 {
+                let base2 = pre[0..pre.len() - 4]
+                return "al_num(" + base2 + ".len)"
+            }
+            return "al_num(" + val + ")"
+        }
+        // 函数调用插值：按返回类型转 al_num/al_fnum/原样
+        var cname = ""
+        var is_call = false
+        var ci2 = 0
+        while ci2 < val.len() {
+            let c2 = val[ci2..ci2 + 1]
+            if c2 == "(" {
+                is_call = true
+                break
+            }
+            cname = cname + c2
+            ci2 += 1
+        }
+        if is_call {
+            let fr = fn_return(cname, fnames, freturns)
+            match fr {
+                Some(rt) {
+                    if rt == "bool" { return "al_bool(" + val + ")" }
+                    if rt == "i32" { return "al_num(" + val + ")" }
+                    if rt == "f64" { return "al_fnum(" + val + ")" }
+                    return val
+                }
+                None { return val }
+            }
+        }
+        // 结构体字段插值：t.line → 按字段类型 al_num/al_fnum；枚举字段 → tag 名查表
+        var dot_i = 0
+        var has_dot = false
+        var fi = 0
+        while fi < val.len() {
+            let c = val[fi..fi + 1]
+            if c == "." {
+                dot_i = fi
+                has_dot = true
+            }
+            fi += 1
+        }
+        if has_dot && dot_i + 1 < val.len() {
+            let base = val[0..dot_i]
+            let fld = val[dot_i + 1..val.len()]
+            let btv = var_type(base, varnames, vartypes)
+            match btv {
+                Some(bt) {
+                    let ft = struct_field_ty(bt, fld, snames, sfnames, sftypes)
+                    match ft {
+                        Some(ftv) {
+                            if ftv == "i32" { return "al_num(" + val + ")" }
+                            if ftv == "f64" { return "al_fnum(" + val + ")" }
+                            // 枚举字段 → 变体名查表
+                            var eidx = 0
+                            var efound = false
+                            var ei2 = 0
+                            for en in enames {
+                                if en == ftv {
+                                    eidx = ei2
+                                    efound = true
+                                }
+                                ei2 += 1
+                            }
+                            if efound && eidx < elists.len() {
+                                let vparts = str_split(elists[eidx], ",")
+                                var arr: Vec<String> = []
+                                for vp in vparts { arr.push("\"" + vp + "\"") }
+                                return "({ const char* __en[] = { " + join(arr, ", ") + " }; __en[" + val + ".tag]; })"
+                            }
+                            return val
+                        }
+                        None { return val }
+                    }
+                }
+                None { return val }
+            }
+        }
+        return val
+    }
+    // 索引插值：v[0] → 按 Vec 元素类型包 al_num/al_fnum/原样
+    var bracket_i = 0
+    var has_idx = false
+    var bi = 0
+    while bi < val.len() {
+        let c = val[bi..bi + 1]
+        if c == "[" {
+            bracket_i = bi
+            has_idx = true
+        }
+        bi += 1
+    }
+    if has_idx && val.len() > 0 {
+        let lastc = val[val.len() - 1..val.len()]
+        if lastc == "]" {
+            let base = val[0..bracket_i]
+            let idx = val[bracket_i + 1..val.len() - 1]
+            let btv = var_type(base, varnames, vartypes)
+            match btv {
+                Some(bt) {
+                    if bt.starts_with("Vec<") {
+                        let et = first_type_arg(bt)
+                        var ptr_ty = ""
+                        if et == "i32" { ptr_ty = "int*" }
+                        else if et == "f64" { ptr_ty = "double*" }
+                        else if et == "String" { ptr_ty = "char**" }
+                        else if et == "char" { ptr_ty = "char*" }
+                        if ptr_ty != "" {
+                            let cc = "((" + ptr_ty + ")(" + base + ".data))[" + idx + "]"
+                            if et == "i32" { return "al_num(" + cc + ")" }
+                            if et == "f64" { return "al_fnum(" + cc + ")" }
+                            return cc
+                        }
+                    }
+                }
+                None {}
+            }
+        }
+    }
+    let vt = var_type(val, varnames, vartypes)
+    match vt {
+        Some(t) {
+            if t == "i32" { return "al_num(" + val + ")" }
+            if t == "f64" { return "al_fnum(" + val + ")" }
+            if t == "bool" { return "al_bool(" + val + ")" }
+            if t == "infer" { return "al_num(" + val + ")" }
+            return val
+        }
+        None { return "al_num(" + val + ")" }
+    }
+}
+
+
+// f-string → C：f"a{x}b" → al_strcat(al_strcat("a", piece(x)), "b")
+fn fstr_c(s: String, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, enames: Vec<String>, elists: Vec<String>, user_types: Vec<String>, vnames2: Vec<String>, vowners2: Vec<String>, fptypes: Vec<String>) -> String {
+
+    if s.len() < 3 {
+        return "\"\""
+    }
+
+    var body = s[2..s.len() - 1]
+
+
+    var parts: Vec<String> = []
+    var cur = ""
+    var in_expr = false
+    for c in body {
+        if c == "{" {
+            if !in_expr {
+                if cur.len() > 0 { parts.push("lit:" + cur) }
+                cur = ""
+                in_expr = true
+            } else {
+                cur = cur + c
+            }
+        } else if c == "}" {
+            if in_expr {
+                parts.push("expr:" + cur)
+                cur = ""
+                in_expr = false
+            } else {
+                cur = cur + c
+            }
+        } else {
+            cur = cur + c
+        }
+    }
+    if cur.len() > 0 {
+        if in_expr { parts.push("expr:" + cur) } else { parts.push("lit:" + cur) }
+    }
+
+    var out = ""
+    var first_part = true
+    for p in parts {
+
+        let is_lit = p.len() >= 4 && p[0..4] == "lit:"
+        var piece = ""
+        if is_lit {
+            let val = if p.len() > 4 { p[4..p.len()] } else { return "" }
+            piece = "\"" + val + "\""
+        } else {
+            let val = if p.len() > 5 { p[5..p.len()] } else { return "" }
+
+            piece = fstr_piece(val, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, enames, elists, user_types, vnames2, vowners2, fptypes)
+        }
+        if first_part {
+            out = piece
+            first_part = false
+        } else {
+            out = "al_strcat(" + out + ", " + piece + ")"
+        }
+    }
+    if out == "" { return "\"\"" }
+    return out
+}
+
+
+fn is_print_call(e: Expr) -> bool {
+    match e {
+        ECall(callee, args) {
+            match callee {
+                EIdent(nn) { return nn == "print" }
+                _ { return false }
+            }
+        }
+        _ { return false }
+    }
+}
+
+
+// fn(A)->R 类型串 → 提取 R（"->" 之后）
+fn fn_ret_of_fn_type(ft: String) -> String {
+    var k = 0
+    while k + 1 < ft.len() {
+        if ft[k..k + 1] == "-" {
+            if ft[k + 1..k + 2] == ">" {
+                return ft[k + 2..ft.len()]
+            }
+        }
+        k += 1
+    }
+    return ""
+}
+
+// 表达式类型提示（语法级近似，B 家族类型表的第一切片）：
+// 返回 "i32"/"f64"/"bool"/"String"/"" —— 供 print 等选格式；"" = 未知（维持旧行为）
+fn expr_num_hint(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>) -> String {
+    match e {
+        EInt(n) { return "i32" }
+        EFloat(n) { return "f64" }
+        EIdent(nm) {
+            let vt = var_type(nm, varnames, vartypes)
+            match vt {
+                Some(t) { return t }
+                None { return "" }
+            }
+        }
+        ECall(c2, a2) {
+            match c2 {
+                EIdent(fname) {
+                    let fr = fn_return(fname, fnames, freturns)
+                    match fr {
+                        Some(t) { return t }
+                        None {
+                            // fn 类型变量调用（let op = get_op(...); op(x,y)）
+                            let vt = var_type(fname, varnames, vartypes)
+                            match vt {
+                                Some(ft) {
+                                    if ft.starts_with("fn(") {
+                                        var k = 0
+                                        while k + 1 < ft.len() {
+                                            if ft[k..k + 1] == "-" {
+                                                if ft[k + 1..k + 2] == ">" {
+                                                    return ft[k + 2..ft.len()]
+                                                }
+                                            }
+                                            k += 1
+                                        }
+                                    }
+                                    return ""
+                                }
+                                None { return "" }
+                            }
+                        }
+                    }
+                }
+                _ {
+                    // 高阶调用链: get_op(0)(...) → 被调表达式类型 fn(...)->R 取 R
+                    let ct2 = expr_num_hint(c2, varnames, vartypes, fnames, freturns)
+                    if ct2.starts_with("fn(") { fn_ret_of_fn_type(ct2) }
+                    return ""
+                }
+            }
+        }
+        EField(b2, m2) {
+            if m2 == "len" { return "i32" }
+            return ""
+        }
+        EIndex(b2, i2) {
+            let bt = base_type(b2, varnames, vartypes, fnames, freturns, [], [], [])
+            match bt {
+                Some(t) {
+                    if t.starts_with("Vec<") { return first_type_arg(t) }
+                    if t == "String" { return "String" }
+                    if t.starts_with("Map<") { return second_type_arg(t) }
+                    return ""
+                }
+                None { return "" }
+            }
+        }
+        EBin(op, l, r) {
+            if op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">=" || op == "&&" || op == "||" {
+                return "bool"
+            }
+            return expr_num_hint(l, varnames, vartypes, fnames, freturns)
+        }
+        EUnary(op, x) {
+            if op == "!" { return "bool" }
+            return expr_num_hint(x, varnames, vartypes, fnames, freturns)
+        }
+        _ { return "" }
+    }
+}
+
+
+// print(...) -> printf 语句（格式 %d/%g/%s/%zu 按实参类型）
+fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>) -> String {
+    var parts: Vec<String> = []
+    var fmts: Vec<String> = []
+    for a in args {
+        let pc = c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+        var f1 = "%s"
+        var part = pc
+        // 先按表达式类型提示选格式（覆盖 EBin/EIndex 等组合形态）
+        match a {
+            EInt(n) { f1 = "%d" }
+            EFloat(n) {
+                f1 = "%s"
+                part = "al_fnum(" + pc + ")"
+            }
+            EStr(s2) { f1 = "%s" }
+            ECall(c2, a2) {
+                match c2 {
+                    EIdent(fname) {
+                        let fr = fn_return(fname, fnames, freturns)
+                        match fr {
+                            Some("i32") { f1 = "%d" }
+                            Some("f64") {
+                                f1 = "%s"
+                                part = "al_fnum(" + pc + ")"
+                            }
+                            Some("bool") { f1 = "%d" }
+                            _ { f1 = "%s" }
+                        }
+                    }
+                    EField(_, mname) {
+                        let mr = method_ret(mname, a2.len())
+                        if mr == "i32" { f1 = "%d" }
+                        else if mr == "f64" {
+                            f1 = "%s"
+                            part = "al_fnum(" + pc + ")"
+                        }
+                        else if mr == "bool" { f1 = "%d" }
+                    }
+                    _ {}
+                }
+            }
+            EField(b2, m2) {
+                if m2 == "len" { f1 = "%zu" }
+            }
+            EIdent(nm) {
+                let vt = var_type(nm, varnames, vartypes)
+                match vt {
+                    Some("i32") { f1 = "%d" }
+                    Some("f64") {
+                        f1 = "%s"
+                        part = "al_fnum(" + pc + ")"
+                    }
+                    Some("bool") { f1 = "%d" }
+                    _ {}
+                }
+            }
+            _ {}
+        }
+        // G2.0 类型提示切片：非空 hint 覆盖形状兜底（%zu 长度形态除外）
+        let hint = expr_num_hint(a, varnames, vartypes, fnames, freturns)
+        if f1 != "%zu" {
+            if hint == "i32" || hint == "char" || hint == "bool" {
+                f1 = "%d"
+            }
+            if hint == "f64" {
+                f1 = "%s"
+                part = "al_fnum(" + pc + ")"
+            }
+        }
+        parts.push(part)
+        fmts.push(f1)
+    }
+    return pad + "printf(\"" + join(fmts, " ") + "\\n\", " + join(parts, ", ") + ");"
+}
+
+
+// expression -> C
+fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>) -> String {    match e {
+        EInt(n) { return f"{n}" }
+        EFloat(nf) { return f"{nf}" }
+        EStr(s) {
+            if s.len() >= 3 && s[0..2] == "f\"" && s[s.len() - 1] == "\"" {
+                return fstr_c(s, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, enames, elists, user_types, vnames, vowners, fptypes)
+            }
+            return c_str_lit(s)
+        }
+        EIdent(nn) {
+            if nn == "None" { return "al_none()" }
+            if nn == "true" { return "1" }
+            if nn == "false" { return "0" }
+            if is_variant_name(nn) {
+                // 无载荷变体作值：枚举构造器调用（Owner_Name()）
+                let owner = variant_owner(nn, vnames, vowners)
+                match owner {
+                    Some(o) { return o + "_" + nn + "()" }
+                    None {}
+                }
+            }
+            return nn
+        }
+        EBin(op, l, r) {
+            if op == "+" {
+                let is_str = expr_is_string(l, r, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                let r_is_str = expr_is_string(r, l, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                if is_str || r_is_str {
+                    return "al_strcat(" + c_str_operand(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ", " + c_str_operand(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                }
+            }
+            // String 比较（char*）：用 strcmp(a, b) op 0
+            let l_is_str = expr_is_string(l, r, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+            let r_is_str = expr_is_string(r, l, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+            if l_is_str && r_is_str {
+                let lc = c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                let rc = c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                let op_c = c_op(op)
+                return "(strcmp(" + lc + ", " + rc + ") " + op_c + " 0)"
+            }
+            // 字符比较：char 变量 vs 单字符字面量 → C 字符字面量 'x'；String 表达式侧取首字符
+            let l_char = is_char_typed(l, varnames, vartypes)
+            let r_char = is_char_typed(r, varnames, vartypes)
+            let l_lit_char = is_1char_str(l)
+            let r_lit_char = is_1char_str(r)
+            if l_char || r_char || l_lit_char || r_lit_char {
+                let lc: String = if l_char || l_lit_char {
+                    c_operand(l, true, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                } else {
+                    "(" + c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")[0]"
+                }
+                let rc: String = if r_char || r_lit_char {
+                    c_operand(r, true, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                } else {
+                    "(" + c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")[0]"
+                }
+                return "(" + lc + " " + c_op(op) + " " + rc + ")"
+            }
+            // enum 值与变体名比较：x.kind != TOp → x.kind.tag != TOp
+            let l_vn = variant_ident(l)
+            let r_vn = variant_ident(r)
+            match l_vn {
+                Some(lvn) {
+                    match r {
+                        EField(rb, rf) {
+                            return "(" + c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ".tag " + c_op(op) + " " + lvn + ")"
+                        }
+                        _ {}
+                    }
+                }
+                None {}
+            }
+            match r_vn {
+                Some(rvn) {
+                    match l {
+                        EField(lb, lf) {
+                            return "(" + c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ".tag " + c_op(op) + " " + rvn + ")"
+                        }
+                        _ {}
+                    }
+                }
+                None {}
+            }
+            return "(" + c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + " " + c_op(op) + " " + c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+        }
+        EUnary(op, x) { return "(" + op + c_expr(x, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")" }
+        ECall(f, args) {
+            // 内置构造：Some/None/Ok/Err → al_opt 宏
+            match f {
+                EIdent(bname) {
+                    if bname == "Some" && args.len() == 1 {
+                        return "al_some_" + some_member(args[0], user_types, varnames, vartypes, snames, sfnames, sftypes) + "(" + c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                    }
+                    if bname == "None" {
+                        return "al_none()"
+                    }
+                    if bname == "Ok" && args.len() == 1 {
+                        return "al_some_" + some_member(args[0], user_types, varnames, vartypes, snames, sfnames, sftypes) + "(" + c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                    }
+                    if bname == "Err" && args.len() == 1 {
+                        return "al_none()"
+                    }
+                    // 断言内建：统一发射为 al_assert(cond, msg)，缺省补消息
+                    if bname == "assert" {
+                        let ac = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        if args.len() >= 2 {
+                            let mc = c_expr(args[1], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                            return "al_assert(" + ac + ", " + mc + ")"
+                        }
+                        return "al_assert(" + ac + ", \"断言失败\")"
+                    }
+                }
+                _ {}
+            }
+            // 枚举变体构造：Circle(...) → Shape_Circle(...)
+            match f {
+                EIdent(vname) {
+                    if is_variant_name(vname) {
+                        let owner = variant_owner(vname, vnames, vowners)
+                        match owner {
+                            Some(o) {
+                                var parts: Vec<String> = []
+                                for a in args { parts.push(c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)) }
+                                return o + "_" + vname + "(" + join(parts, ", ") + ")"
+                            }
+                            None {}
+                        }
+                    }
+                }
+                _ {}
+            }
+            match f {
+                EField(base, mname) {
+                    // Option 后缀链: X.get(k).unwrap_or(d) → 取值或默认
+                    // (al_opt statement-expr 已是值形态, 解包为 data 成员读取)
+                    if mname == "unwrap_or" && args.len() == 1 {
+                        let def_c = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let inner = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        // 载荷成员按 get 接收者的 Map 值类型推导(默认 s=char*)
+                        var mem2 = "s"
+                        match base {
+                            ECall(EField(mb, gm), _) {
+                                if gm == "get" {
+                                    let mbt = base_type(mb, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                                    match mbt {
+                                        Some(mt) {
+                                            if mt.starts_with("Map<") {
+                                                mem2 = payload_member(Some(second_type_arg(mt)), user_types)
+                                            }
+                                        }
+                                        None {}
+                                    }
+                                }
+                            }
+                            _ {}
+                        }
+                        // s/i/f 成员按值存储; 仅 t_ 指针成员需解引用
+                        var deref2 = ""
+                        if mem2.starts_with("t_") {
+                            deref2 = "*"
+                        }
+                        return "({ al_opt __o = " + inner + "; (__o.tag ? " + deref2 + "__o.data." + mem2 + " : " + def_c + "); })"
+                    }
+                    if mname == "unwrap" && args.len() == 0 {
+                        let inner = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        return "({ al_opt __o = " + inner + "; *__o.data.s; })"
+                    }
+                    if mname == "len" && args.len() == 0 {
+                        // String.len() → strlen(s)；Vec.len() → v.len
+                        let base_c = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let bt = base_type(base, varnames, vartypes, [], [], snames, sfnames, sftypes)
+                        match bt {
+                            Some(btv) {
+                                if btv == "String" {
+                                    // D15：C 路径暂维持字节形态（与 s[i] 字节索引自洽；
+                                    // 字符级统一切换待 M6-TCK 类型表）；解释器为字符语义
+                                    return "strlen(" + base_c + ")"
+                                }
+                                if btv.starts_with("Vec<") {
+                                    return base_c + ".len"
+                                }
+                                if btv.starts_with("Map<") {
+                                    return base_c + ".keys.len"
+                                }
+                            }
+                            None {}
+                        }
+                        return base_c + ".len"
+                    }
+                    if mname == "push" && args.len() == 1 {
+                        let arg_c = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        // 元素大小：按 base Vec 的元素类型（最可靠）；未知时回退实参推断
+                        var es = "sizeof(int)"
+                        let bt = base_type(base, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                        var known_vec = false
+                        match bt {
+                            Some(t) {
+                                if t.starts_with("Vec<") {
+                                    known_vec = true
+                                    let et = first_type_arg(t)
+                                    if et == "String" { es = "sizeof(char*)" }
+                                    else if et == "i32" { es = "sizeof(int)" }
+                                    else if et == "f64" { es = "sizeof(double)" }
+                                    else if et.starts_with("Vec<") { es = "sizeof(al_vec)" }
+                                    else if contains_str(user_types, et) { es = "sizeof(struct " + et + ")" }
+                                }
+                            }
+                            None {}
+                        }
+                        if !known_vec {
+                            es = arg_elem_size(args[0], user_types, vnames, vowners, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                        }
+                        // rvalue 实参（函数调用/数字字面量）→ 复合字面量取址
+                        var addr = "&" + arg_c
+                        match args[0] {
+                            ECall(callee2, _) {
+                                match callee2 {
+                                    EIdent(fname2) {
+                                        let fr = fn_return(fname2, fnames, freturns)
+                                        match fr {
+                                            Some(rt) {
+                                                if rt == "String" { addr = "&(char*){ " + arg_c + " }" }
+                                                else if rt == "i32" { addr = "&(int){ " + arg_c + " }" }
+                                                else if rt == "f64" { addr = "&(double){ " + arg_c + " }" }
+                                                else if rt.starts_with("Vec<") { addr = "&(al_vec){ " + arg_c + " }" }
+                                                else if contains_str(user_types, rt) { addr = "&(struct " + rt + "){ " + arg_c + " }" }
+                                                else { addr = "&" + arg_c }
+                                            }
+                                            None {
+                                                // 枚举构造器（Owner_Name()）返回匿名结构体 → 按变体 owner / 元素类型复合字面量
+                                                let vown = variant_owner(fname2, vnames, vowners)
+                                                match vown {
+                                                    Some(ow2) { addr = "&(struct " + ow2 + "){ " + arg_c + " }" }
+                                                    None {
+                                                        if es.starts_with("sizeof(struct ") {
+                                                            let tn3 = es[7..es.len() - 1]
+                                                            addr = "&(" + tn3 + "){ " + arg_c + " }"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    _ {}
+                                }
+                            }
+                            EInt(n) { addr = "&(int){ " + arg_c + " }" }
+                            EFloat(n) { addr = "&(double){ " + arg_c + " }" }
+                            EStr(s2) {
+                                addr = "&(char*){ " + arg_c + " }"
+                            }
+                            EBin(_, _, _) {
+                                if expr_is_string(args[0], EStr(""), varnames, vartypes, fnames, freturns, snames, sfnames, sftypes) {
+                                    addr = "&(char*){ " + arg_c + " }"
+                                } else {
+                                    addr = "&(int){ " + arg_c + " }"
+                                }
+                            }
+                            EIndex(_, _) {
+                                // String 切片/Vec<String> 索引 → char* 复合字面量；Vec 元素是 lvalue → 直接取址
+                                if expr_is_string(args[0], EStr(""), varnames, vartypes, fnames, freturns, snames, sfnames, sftypes) {
+                                    addr = "&(char*){ " + arg_c + " }"
+                                } else {
+                                    addr = "&" + arg_c
+                                }
+                            }
+                            _ {}
+                        }
+                        return "al_push(&" + c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ", " + es + ", " + addr + ")"
+                    }
+                    if mname == "to_i32" && args.len() == 0 {
+                        return "atoi(" + c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                    }
+                    if mname == "to_f64" && args.len() == 0 {
+                        return "atof(" + c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                    }
+                    if mname == "starts_with" && args.len() == 1 {
+                        let bc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let ac = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        return "(strncmp(" + bc + ", " + ac + ", strlen(" + ac + ")) == 0)"
+                    }
+                    if mname == "contains" && args.len() == 1 {
+                        let bc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let ac = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        return "(strstr(" + bc + ", " + ac + ") != NULL)"
+                    }
+                    if mname == "ends_with" && args.len() == 1 {
+                        let bc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let ac = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        return "(strlen(" + bc + ") >= strlen(" + ac + ") && strcmp(" + bc + " + strlen(" + bc + ") - strlen(" + ac + "), " + ac + ") == 0)"
+                    }
+                    if mname == "trim" && args.len() == 0 {
+                        return "al_trim(" + c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                    }
+                    if mname == "split" && args.len() == 1 {
+                        let bc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let ac = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        return "al_split(" + bc + ", " + ac + ")"
+                    }
+                    if mname == "replace" && args.len() == 2 {
+                        let bc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let a0 = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let a1 = c_expr(args[1], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        return "al_replace(" + bc + ", " + a0 + ", " + a1 + ")"
+                    }
+                    if mname == "iter" && args.len() == 0 {
+                        // Vec.iter() → 恒等（方法链起点）
+                        return c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                    }
+                    if mname == "map" && args.len() == 1 {
+                        match args[0] {
+                            EClosure(params, body) {
+                                // X.map(p { BODY) → 循环构建新 Vec（语句表达式） }
+                                let base_c = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                                let bt = base_type(base, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                                var ect = "char"
+                                var eft = "i32"
+                                match bt {
+                                    Some(t) {
+                                        if t.starts_with("Vec<") {
+                                            eft = first_type_arg(t)
+                                            ect = c_type(Some(eft), user_types)
+                                        }
+                                    }
+                                    None {}
+                                }
+                                let p = params[0].name
+                                // 临时把闭包参数类型加入变量表（体表达式类型推断用）
+                                var vt2: Vec<String> = []
+                                for n in varnames { vt2.push(n) }
+                                vt2.push(p)
+                                var vty2: Vec<String> = []
+                                for tt in vartypes { vty2.push(tt) }
+                                vty2.push(eft)
+                                let bct = expr_ctype(body, vt2, vty2, fnames, freturns, snames, sfnames, sftypes, user_types)
+                                let body_c = c_expr(body, user_types, vnames, vowners, vt2, vty2, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                                return "({ al_vec __out = { 0, 0, NULL }; for (size_t _i = 0; _i < " + base_c + ".len; _i++) { " + ect + " " + p + " = ((" + ect + "*)(" + base_c + ".data))[_i]; " + bct + " __v = (" + body_c + "); al_push(&__out, sizeof(" + bct + "), &((" + bct + "){ __v })); } __out; })"
+                            }
+                            _ {}
+                        }
+                        return "/* map without closure */ 0"
+                    }
+                    if mname == "sum" && args.len() == 0 {
+                        let base_c = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        // 折叠链：X.iter().map(p { BODY).sum() → 单循环求和 }
+                        match base {
+                            ECall(mcallee, margs) {
+                                match mcallee {
+                                    EField(inner, mm) {
+                                        if mm == "map" && margs.len() == 1 {
+                                            match margs[0] {
+                                                EClosure(params2, body2) {
+                                                    // 显式 Expr 注解: 发射器对未注解 Expr 变量按 char* 推断, 生成非法 C
+                                                    var iter_expr: Expr = inner
+                                                    var inner_c = c_expr(inner, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                                                    // inner 可能本身是 X.iter() → 取其 base
+                                                    match inner {
+                                                        ECall(ical, iargs) {
+                                                            match ical {
+                                                                EField(ib, im) {
+                                                                    if im == "iter" && iargs.len() == 0 {
+                                                                        iter_expr = ib
+                                                                        inner_c = c_expr(ib, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                                                                    }
+                                                                }
+                                                                _ {}
+                                                            }
+                                                        }
+                                                        _ {}
+                                                    }
+                                                    let bt2 = base_type(iter_expr, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                                                    var ect2 = "char"
+                                                    var eft2 = "i32"
+                                                    match bt2 {
+                                                        Some(t2) {
+                                                            if t2.starts_with("Vec<") {
+                                                                eft2 = first_type_arg(t2)
+                                                                ect2 = c_type(Some(eft2), user_types)
+                                                            }
+                                                        }
+                                                        None {}
+                                                    }
+                                                    let p2 = params2[0].name
+                                                    // 临时把闭包参数类型加入变量表
+                                                    var vt3: Vec<String> = []
+                                                    for n in varnames { vt3.push(n) }
+                                                    vt3.push(p2)
+                                                    var vty3: Vec<String> = []
+                                                    for tt in vartypes { vty3.push(tt) }
+                                                    vty3.push(eft2)
+                                                    let bct2 = expr_ctype(body2, vt3, vty3, fnames, freturns, snames, sfnames, sftypes, user_types)
+                                                    let body_c2 = c_expr(body2, user_types, vnames, vowners, vt3, vty3, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                                                    let act2 = if bct2 == "double" { "double" } else { "long" }
+                                                    return "({ " + act2 + " __acc = 0; for (size_t _i = 0; _i < " + inner_c + ".len; _i++) { " + ect2 + " " + p2 + " = ((" + ect2 + "*)(" + inner_c + ".data))[_i]; __acc += (" + body_c2 + "); } __acc; })"
+                                                }
+                                                _ {}
+                                            }
+                                        }
+                                    }
+                                    _ {}
+                                }
+                            }
+                            _ {}
+                        }
+                        // 普通 Vec 求和
+                        let bt3 = base_type(base, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                        var act3 = "long"
+                        var ect3 = "int"
+                        match bt3 {
+                            Some(t3) {
+                                if t3.starts_with("Vec<") {
+                                    let et3 = first_type_arg(t3)
+                                    ect3 = c_type(Some(et3), user_types)
+                                    if et3 == "f64" { act3 = "double" }
+                                }
+                            }
+                            None {}
+                        }
+                        return "({ " + act3 + " __acc = 0; for (size_t _i = 0; _i < " + base_c + ".len; _i++) { __acc += ((" + ect3 + "*)(" + base_c + ".data))[_i]; } __acc; })"
+                    }
+                    if mname == "new" && args.len() == 0 {
+                        match base {
+                            EIdent(bn) {
+                                if bn == "Map" { return "((al_map){{ 0, 0, NULL }, { 0, 0, NULL }})" }
+                            }
+                            _ {}
+                        }
+                    }
+                    if mname == "set" && args.len() == 2 {
+                        let mc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let kc = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let vc = c_expr(args[1], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let mbt = base_type(base, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                        var vct = "char*"
+                        match mbt {
+                            Some(mt) {
+                                // Map<String,V> 有显式 V → 用 V 的 C 类型;
+                                // 否则(未注解/infer)默认 char*——值侧取 display 形态,
+                                // 与解释器 Map 的动态取值语义一致
+                                if mt.starts_with("Map<") { vct = c_type(Some(second_type_arg(mt)), user_types) }
+                            }
+                            None {}
+                        }
+                        if vct.starts_with("struct ") || vct == "al_vec" || vct == "al_map" || vct == "al_opt" {
+                            // 复合值（struct/Vec/Map/Option）：复合字面量 {v} 会误初始化首成员 → 用临时变量
+                            return "({ int __f = 0; for (size_t _i = 0; _i < " + mc + ".keys.len; _i++) { if (strcmp(((char**)" + mc + ".keys.data)[_i], " + kc + ") == 0) { ((" + vct + "*)" + mc + ".vals.data)[_i] = (" + vc + "); __f = 1; break; } if (!__f) { al_push(&" + mc + ".keys, sizeof(char*), &(char*){ " + kc + " }); " + vct + " __tmp = (" + vc + "); al_push(&" + mc + ".vals, sizeof(" + vct + "), &__tmp); } 0; })"
+                        }
+                        return "({ int __f = 0; for (size_t _i = 0; _i < " + mc + ".keys.len; _i++) { if (strcmp(((char**)" + mc + ".keys.data)[_i], " + kc + ") == 0) { ((" + vct + "*)" + mc + ".vals.data)[_i] = (" + vc + "); __f = 1; break; } if (!__f) { al_push(&" + mc + ".keys, sizeof(char*), &(char*){ " + kc + " }); al_push(&" + mc + ".vals, sizeof(" + vct + "), &(" + vct + "){ " + vc + " }); } 0; })"
+                    }
+                    if mname == "get" && args.len() == 1 {
+                        let mc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let kc = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let mbt = base_type(base, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                        // 未知类型默认 char*/s: 与 json_decode 运行时存储(值均为 char*)一致
+                        var vct = "char*"
+                        var mem = "s"
+                        match mbt {
+                            Some(mt) {
+                                if mt.starts_with("Map<") {
+                                    let vt = second_type_arg(mt)
+                                    vct = c_type(Some(vt), user_types)
+                                    mem = payload_member(Some(vt), user_types)
+                                }
+                            }
+                            None {}
+                        }
+                        var some_m = "al_some_i"
+                        if mem == "f" { some_m = "al_some_f" }
+                        else if mem == "s" { some_m = "al_some_s" }
+                        else if mem == "v" { some_m = "al_some_v" }
+                        else if mem == "p" { some_m = "al_some_p" }
+                        else if mem.starts_with("t_") { some_m = "al_some_" + mem }
+                        // p 载荷（Map 等）：存元素地址；i/f/s/v 载荷：按值
+                        var argpre = ""
+                        if mem == "p" {
+                            argpre = "&"
+                        }
+                        return "({ al_opt __r = al_none(); for (size_t _i = 0; _i < " + mc + ".keys.len; _i++) { if (strcmp(((char**)" + mc + ".keys.data)[_i], " + kc + ") == 0) { __r = " + some_m + "(" + argpre + "((" + vct + "*)" + mc + ".vals.data)[_i]); break; } } __r; })"
+                    }
+                    if mname == "contains" && args.len() == 1 {
+                        let mc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let kc = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        return "({ int __f = 0; for (size_t _i = 0; _i < " + mc + ".keys.len; _i++) { if (strcmp(((char**)" + mc + ".keys.data)[_i], " + kc + ") == 0) { __f = 1; break; } __f; })"
+                    }
+                    if mname == "keys" && args.len() == 0 {
+                        return c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ".keys"
+                    }
+                    if mname == "values" && args.len() == 0 {
+                        return c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ".vals"
+                    }
+                    // impl 方法兜底：base 是用户类型 → Type_method(self, args)
+                    let ibt = base_type(base, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                    match ibt {
+                        Some(it) {
+                            if contains_str(user_types, it) {
+                                var iparts: Vec<String> = []
+                                iparts.push(c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists))
+                                for a in args {
+                                    iparts.push(c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists))
+                                }
+                                return it + "_" + mname + "(" + join(iparts, ", ") + ")"
+                            }
+                        }
+                        None {}
+                    }
+                }
+                _ {}
+            }
+            var parts: Vec<String> = []
+            // 定位函数在 fnames 的索引（形参类型转换用）
+            var fn_idx = 0
+            var found_fn = false
+            var fi2 = 0
+            for fnm in fnames {
+                match f {
+                    EIdent(fname) {
+                        if fnm == fname {
+                            fn_idx = fi2
+                            found_fn = true
+                        }
+                    }
+                    _ {}
+                }
+                fi2 += 1
+            }
+            for ai in 0..args.len() {
+                let a = args[ai]
+                let ac = c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                // char 实参 → String 形参：al_char_to_str 转换
+                var conv = ac
+                if found_fn {
+                    let pty = fn_param_ty(fn_idx, ai, fptypes)
+                    if pty == "String" && is_char_typed(a, varnames, vartypes) {
+                        conv = "al_char_to_str(" + ac + ")"
+                    }
+                } else {
+                    // 值流内建：两参均为 String；char 实参自动转换
+                    var is_own = false
+                    match f {
+                        EIdent(nm) {
+                            if nm == "al_strcat_own" { is_own = true }
+                        }
+                        _ {}
+                    }
+                    if is_own {
+                        if is_char_typed(a, varnames, vartypes) {
+                            conv = "al_char_to_str(" + ac + ")"
+                        }
+                    }
+                }
+                parts.push(conv)
+            }
+            return c_expr(f, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + "(" + join(parts, ", ") + ")"
+        }
+        EField(b, name) {
+            // String 的 .len 字段 → strlen（Vec 才是真字段 .len）
+            if name == "len" {
+                let bt = base_type(b, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                // None/"infer"(推断失败占位) 按字符串处理(对 char* 正确;
+                // Vec 变量几乎总有显式类型注解可查到)
+                match bt {
+                    Some(btv) {
+                        if btv == "String" || btv == "infer" {
+                            return "strlen(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                        }
+                    }
+                    None {
+                        return "strlen(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                    }
+                }
+            }
+            return c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + "." + name
+        }
+        EUnit { return "0" }
+        EVec(items) {
+            if items.len() == 0 {
+                return "((al_vec){ 0, 0, NULL })"
+            }
+            // 元素类型：首元素为用户类型 → struct T[]
+            var etag = "(int[])"
+            var esz = "int"
+            if items.len() > 0 {
+                let et0 = base_type(items[0], varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                match et0 {
+                    Some(t0) {
+                        if contains_str(user_types, t0) {
+                            etag = "(struct " + t0 + "[])"
+                            esz = "struct " + t0
+                        }
+                        else if t0 == "String" {
+                            // Vec<String> 字面量：char*[] + 指针大小（字面量静态存储）
+                            etag = "(char*[])"
+                            esz = "char*"
+                        }
+                        else if t0 == "f64" {
+                            etag = "(double[])"
+                            esz = "double"
+                        }
+                    }
+                    None {}
+                }
+                match items[0] {
+                    EStr(_) {
+                        // 字符串字面量元素 → char*[]（字面量静态存储）
+                        etag = "(char*[])"
+                        esz = "char*"
+                    }
+                    EStruct(t0, _) {
+                        etag = "(struct " + t0 + "[])"
+                        esz = "struct " + t0
+                    }
+                    _ {}
+                }
+            }
+            var parts: Vec<String> = []
+            for it in items {
+                parts.push(c_expr(it, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists))
+            }
+            return "((al_vec){ " + f"{items.len()}" + ", sizeof(" + esz + "), " + etag + "{ " + join(parts, ", ") + " } })"
+        }
+        EStruct(ty, fields) {
+            var parts: Vec<String> = []
+            for fd in fields {
+                var vc = c_expr(fd.value, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                // char 值入 String 字段 → al_char_to_str(c)
+                if is_char_typed(fd.value, varnames, vartypes) {
+                    vc = "al_char_to_str(" + vc + ")"
+                } else {
+                    // 变体名值 → ((struct Owner){ .tag = Variant })
+                    let vn = variant_ident(fd.value)
+                    match vn {
+                        Some(vnv) {
+                            let owner = variant_owner(vnv, vnames, vowners)
+                            match owner {
+                                Some(ov) { vc = "((struct " + ov + "){ .tag = " + vnv + " })" }
+                                None {}
+                            }
+                        }
+                        None {}
+                    }
+                }
+                parts.push("." + fd.name + " = " + vc)
+            }
+            return "((struct " + ty + "){" + join(parts, ", ") + "})"
+        }
+        ETry(x) { return c_expr(x, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) }
+        ERange(a, b) { return c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ".." + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) }
+        EClosure(params, body) { return "/* closure */ 0" }
+        EIndex(b, idx) {
+            match idx {
+                ERange(a, hi) {
+                    // Vec 切片 → al_slice；String 切片 → al_substr
+                    let bt = base_type(b, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                    var is_vec = false
+                    match bt {
+                        Some(t) {
+                            if t.starts_with("Vec<") { is_vec = true }
+                        }
+                        None {}
+                    }
+                    if is_vec {
+                        return "al_slice(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ", " + c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ", " + c_expr(hi, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                    }
+                    return "al_substr(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ", " + c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ", " + c_expr(hi, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                }
+                _ {}
+            }
+            // 全局 args（宿主注入的命令行实参，char* 元组）
+            match b {
+                EIdent(bn4) {
+                    if bn4 == "cli_args" {
+                        return "((char**)(al_cli_args.data))[" + c_expr(idx, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + "]"
+                    }
+                }
+                _ {}
+            }
+            // Vec<T> 索引 → ((T*)base.data)[i]
+            // 注：String 单索引 s[i] 的 C 路径暂维持字节形态（既有代码依赖 char 语义）；
+            // 与解释器字符语义的完全对齐需 Index 表达式类型表（M6-TCK 前置），见 D15
+            let bt = base_type(b, varnames, vartypes, [], [], snames, sfnames, sftypes)
+            match bt {
+                Some(t) {
+                    if t.starts_with("Vec<") {
+                        let et = first_type_arg(t)
+                        var ect = "int"
+                        if et == "String" { ect = "char*" }
+                        else if et == "f64" { ect = "double" }
+                        else if contains_str(user_types, et) { ect = "struct " + et }
+                        return "((" + ect + "*)(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ".data))[" + c_expr(idx, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + "]"
+                    }
+                    if t.starts_with("Map<") {
+                        let vt = second_type_arg(t)
+                        var suf = ""
+                        if vt == "f64" { suf = "f" }
+                        if vt == "String" { suf = "s" }
+                        if suf == "" { suf = "i" }
+                        return "al_map_get_" + suf + "(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ", " + c_expr(idx, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                    }
+                }
+                None {}
+            }
+            return c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + "[" + c_expr(idx, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + "]"
+        }
+        EIf(cond, then_s, else_s) {
+            let t_val = block_tail_expr(then_s)
+            let e_val = block_tail_expr(else_s)
+            match t_val {
+                Some(tv) {
+                    match e_val {
+                        Some(ev) { return "(" + c_expr(cond, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + " ? " + c_expr(tv, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + " : " + c_expr(ev, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")" }
+                        None {}
+                    }
+                }
+                None {}
+            }
+            return "/* if-expr */ 0"
+        }
+        EMatch(mscrut, marms) {
+            // match 表达式 → 嵌套三元（Some(x) 臂在语句表达式内声明绑定）
+            let mscrut_c = c_expr(mscrut, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+            let st0 = base_type(mscrut, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+            var mscrut_ty = ""
+            match st0 {
+                Some(t0) { mscrut_ty = t0 }
+                None {}
+            }
+            var mbase = "0"
+            if mscrut_ty.starts_with("Option<") || mscrut_ty.starts_with("Result<") {
+                let bct = c_type(Some(first_type_arg(mscrut_ty)), user_types)
+                if bct.starts_with("struct ") || bct == "al_vec" || bct == "al_opt" || bct == "char*" {
+                    mbase = "((" + bct + "){ 0 })"
+                }
+            }
+            var mtail = mbase
+            // 逆序嵌套：先检查的臂在外层（_ 兜底臂放最内）
+            for mi in 0..marms.len() {
+                let marm = marms[marms.len() - 1 - mi]
+                let mpat = first_ident(marm.pat)
+                var mcond = ""
+                if mpat == "_" { mcond = "1" }
+                else if mpat == "Some" || mpat == "Ok" { mcond = mscrut_c + ".tag == 1" }
+                else if mpat == "None" || mpat == "Err" { mcond = mscrut_c + ".tag == 0" }
+                else { mcond = mscrut_c + ".tag == " + mpat }
+                var mbody = "0"
+                match marm.body {
+                    SExpr(mbe) { mbody = c_expr(mbe, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) }
+                    SReturn(Some(mx)) { mbody = c_expr(mx, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) }
+                    _ {}
+                }
+                // Some(x)/Ok(x) 绑定 → 语句表达式 ({ T x = 载荷; BODY; })
+                var mpre = ""
+                if (mpat == "Some" || mpat == "Ok") && mscrut_ty.starts_with("Option<") {
+                    let binds = pat_binds(marm.pat)
+                    if binds.len() > 0 {
+                        let b0 = binds[0]
+                        let vt = first_type_arg(mscrut_ty)
+                        let vct = c_type(Some(vt), user_types)
+                        let mem = payload_member(Some(vt), user_types)
+                        var access = mscrut_c + ".data." + mem
+                        if mem.starts_with("t_") { access = "*" + access }
+                        mpre = "({ " + vct + " " + b0 + " = " + access + "; "
+                        mbody = mbody + "; })"
+                    }
+                }
+                mtail = "(" + mcond + " ? " + mpre + mbody + " : " + mtail + ")"
+            }
+            return mtail
+        }
+        _ { return "/* unsupported */ 0" }
+    }
+}
+
+
+// ui{} 整数坐标实参：字符串表达式(变量/调用)才 atoi；整数字面量直接透传
+fn ui_int_arg(e: Expr, c: String) -> String {
+    match e {
+        EStr(_) { return "atoi(" + c + ")" }
+        _ { return c }
+    }
+}
+
+// ui{} 组件语句 → 过程式原语行(非组件返回空; S1a)
+fn ui_comp_lines(st: Stmt, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>) -> Vec<String> {
+    var out: Vec<String> = []
+    match st {
+        SExpr(e2) {
+            match e2 {
+                ECall(callee2, ca) {
+                    let ce2 = ui_args(ca, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                    match callee2 {
+                        EIdent(cn) {
+                            if cn == "Window" && ca.len() >= 3 {
+                                out.push("__al_win = rt_window(" + ce2[0] + ", " + ui_int_arg(ca[1], ce2[1]) + ", " + ui_int_arg(ca[2], ce2[2]) + ");")
+                            }
+                            if cn == "Panel" && ca.len() >= 4 {
+                                var bg2 = "panel2"
+                                if ca.len() >= 5 {
+                                    match ca[4] {
+                                        EStr(sv) { bg2 = sv }
+                                        _ {}
+                                    }
+                                }
+                                out.push("rt_comp(AL_PANEL, " + ui_int_arg(ca[0], ce2[0]) + ", " + ui_int_arg(ca[1], ce2[1]) + ", " + ui_int_arg(ca[2], ce2[2]) + ", " + ui_int_arg(ca[3], ce2[3]) + ", \"\", \"" + bg2 + "\", \"\", NULL);")
+                            }
+                            if cn == "Text" && ca.len() >= 5 {
+                                var fg2 = "ink"
+                                if ca.len() >= 6 {
+                                    match ca[5] {
+                                        EStr(sv) { fg2 = sv }
+                                        _ {}
+                                    }
+                                }
+                                var bind2 = ""
+                                if ca.len() >= 7 {
+                                    match ca[6] {
+                                        EStr(bv) { bind2 = bv }
+                                        _ {}
+                                    }
+                                }
+                                var ln2 = "rt_comp(AL_LABEL, " + ui_int_arg(ca[0], ce2[0]) + ", " + ui_int_arg(ca[1], ce2[1]) + ", " + ui_int_arg(ca[2], ce2[2]) + ", " + ui_int_arg(ca[3], ce2[3]) + ", " + ce2[4] + ", \"paper\", \"" + fg2 + "\", NULL);"
+                                if bind2 != "" {
+                                    ln2 = bind2 + " = " + ln2
+                                }
+                                out.push(ln2)
+                            }
+                            if cn == "Button" && ca.len() >= 5 {
+                                var cb2 = "NULL"
+                                if ca.len() >= 6 {
+                                    match ca[5] {
+                                        EStr(fn2) { cb2 = fn2 }
+                                        _ {}
+                                    }
+                                }
+                                out.push("{ int __al_b = rt_comp(AL_BUTTON, " + ui_int_arg(ca[0], ce2[0]) + ", " + ui_int_arg(ca[1], ce2[1]) + ", " + ui_int_arg(ca[2], ce2[2]) + ", " + ui_int_arg(ca[3], ce2[3]) + ", " + ce2[4] + ", \"panel2\", \"green\", " + cb2 + "); }")
+                            }
+                            if cn == "List" && ca.len() >= 4 {
+                                var bind3 = ""
+                                if ca.len() >= 5 {
+                                    match ca[4] {
+                                        EStr(bv) { bind3 = bv }
+                                        _ {}
+                                    }
+                                }
+                                var ln3 = "rt_comp(AL_LIST, " + ui_int_arg(ca[0], ce2[0]) + ", " + ui_int_arg(ca[1], ce2[1]) + ", " + ui_int_arg(ca[2], ce2[2]) + ", " + ui_int_arg(ca[3], ce2[3]) + ", \"\", \"panel2\", \"ink\", NULL);"
+                                if bind3 != "" {
+                                    ln3 = bind3 + " = " + ln3
+                                }
+                                out.push(ln3)
+                            }
+                        }
+                        _ {}
+                    }
+                }
+                _ {}
+            }
+        }
+        SBlock(bs2) {
+            for st2 in bs2 {
+                let sub = ui_comp_lines(st2, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                for l in sub { out.push(l) }
+            }
+        }
+        _ {}
+    }
+    return out
+}
+
+fn ui_args(ca: Vec<Expr>, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>) -> Vec<String> {
+    var out: Vec<String> = []
+    for a in ca {
+        out.push(c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists))
+    }
+    return out
+}
+
+// statement -> C
+fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, cur: String, vfnames: Vec<String>, vftypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fn_names_all: Vec<String>, fn_var_infos: Vec<VarInfo>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>, tail: bool) -> String {
+    match s {
+        SLet(name, is_mut, ty, init) {
+            var ct = c_type(ty, user_types)
+            match ty {
+                None {
+                    match init {
+                        ECall(callee, args) {
+                            match callee {
+                                EIdent(vname) {
+                                    // 枚举变体构造 → struct <枚举名>
+                                    let owner = variant_owner(vname, vnames, vowners)
+                                    match owner {
+                                        Some(o) { ct = "struct " + o }
+                                        None {}
+                                    }
+                                    if vname == "read_file" || vname == "read_line" || vname == "env" || vname == "json_encode" || vname == "get_text" || vname == "listbox_get" || vname == "sci_get_text" || vname == "sci_get_line" {
+                                        ct = "char*"
+                                    }
+                                    if vname == "json_decode" {
+                                        ct = "al_map"
+                                    }
+                                    if vname == "file_list" {
+                                        // 目录列举 → Vec<String>（al_vec）
+                                        ct = "al_vec"
+                                    }
+                                    if vname == "al_strdup_lit" {
+                                        // 值流内建：返回 String（char*）
+                                        ct = "char*"
+                                    }
+                                    let fr = fn_return(vname, fnames, freturns)
+                                    match fr {
+                                        Some(rt) {
+                                            if rt.starts_with("fn(") { ct = fn_type_id(rt) }
+                                            else if rt.starts_with("Vec<") { ct = "al_vec" }
+                                            else if rt.starts_with("Option<") || rt.starts_with("Result<") { ct = "al_opt" }
+                                            else if rt == "String" { ct = "char*" }
+                                            else if rt == "i32" { ct = "int" }
+                                            else if rt == "f64" { ct = "double" }
+                                            else if rt == "bool" { ct = "int" }
+                                            else if contains_str(user_types, rt) { ct = "struct " + rt }
+                                        }
+                                        None {}
+                                    }
+                                }
+                                EField(ib, mname) {
+                                    // 方法调用返回类型
+                                    let mrt = method_ret(mname, args.len())
+                                    if mrt.starts_with("Vec<") { ct = "al_vec" }
+                                    else if mrt == "String" { ct = "char*" }
+                                    else if mrt == "i32" { ct = "int" }
+                                    else if mrt == "f64" { ct = "double" }
+                                    else if mrt == "bool" { ct = "int" }
+                                    else if mrt == "Map" || mrt.starts_with("Map<") { ct = "al_map" }
+                                    else if mname == "values" || mname == "keys" {
+                                        // m.values()/m.keys() → Vec<...>（al_vec）
+                                        let mbt = base_type(ib, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                                        match mbt {
+                                            Some(mt) {
+                                                if mt.starts_with("Map<") { ct = "al_vec" }
+                                            }
+                                            None {}
+                                        }
+                                    }
+                                    else if mname == "get" {
+                                        // m.get(k) → Option<V>
+                                        let mbt = base_type(ib, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                                        match mbt {
+                                            Some(mt) {
+                                                if mt.starts_with("Map<") { ct = "al_opt" }
+                                            }
+                                            None {}
+                                        }
+                                    }
+                                }
+                                _ {}
+                            }
+                        }
+                        EStr(s2) { ct = "char*" }
+                        EVec(items) { ct = "al_vec" }
+                        EInt(n) { ct = "int" }
+                        EFloat(n) { ct = "double" }
+                        EMatch(mscrut0, marms0) {
+                            // match 表达式结果：Option/Result scrut → 载荷类型
+                            let st0 = base_type(mscrut0, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                            match st0 {
+                                Some(t0) {
+                                    if t0.starts_with("Option<") || t0.starts_with("Result<") {
+                                        ct = c_type(Some(first_type_arg(t0)), user_types)
+                                    }
+                                }
+                                None {}
+                            }
+                        }
+                        EIdent(n) {
+                            // 标识符初始化：按变量类型
+                            let bt = var_type(n, varnames, vartypes)
+                            match bt {
+                                Some(t) {
+                                    if t == "String" { ct = "char*" }
+                                    else if t == "i32" { ct = "int" }
+                                    else if t == "f64" { ct = "double" }
+                                    else if t == "char" { ct = "char" }
+                                    else if t.starts_with("Vec<") { ct = "al_vec" }
+                                    else if contains_str(user_types, t) { ct = "struct " + t }
+                                }
+                                None {}
+                            }
+                        }
+                        EIndex(b, idx) {
+                            // 切片 src[a..b] → char*；单字符索引按 base 类型
+                            match idx {
+                                ERange(a, hi) { ct = "char*" }
+                                _ {
+                                    var is_cliargs = false
+                                    match b {
+                                        EIdent(bn) {
+                                            if bn == "cli_args" { is_cliargs = true }
+                                        }
+                                        _ {}
+                                    }
+                                    if is_cliargs {
+                                        ct = "char*"
+                                    } else {
+                                        let bt = base_type(b, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                                        match bt {
+                                            Some(t) {
+                                                if t.starts_with("Vec<") {
+                                                    let et = first_type_arg(t)
+                                                    if et == "String" { ct = "char*" }
+                                                    else if et == "i32" { ct = "int" }
+                                                    else if et == "f64" { ct = "double" }
+                                                    else if contains_str(user_types, et) { ct = "struct " + et }
+                                                    else { ct = "char" }
+                                                } else {
+                                                    ct = "char"
+                                                }
+                                            }
+                                            None { ct = "char" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        EStruct(ty0, _) {
+                            // 结构体字面量初始化 → struct T
+                            if contains_str(user_types, ty0) {
+                                ct = "struct " + ty0
+                            }
+                        }
+                        EField(b, fname2) {
+                            // 字段访问初始化：base 结构体查字段类型
+                            let bt = base_type(b, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                            var fty2 = "char*"
+                            match bt {
+                                Some(t) {
+                                    let ft = struct_field_ty(t, fname2, snames, sfnames, sftypes)
+                                    match ft {
+                                        Some(ftv) { fty2 = ftv }
+                                        None {}
+                                    }
+                                }
+                                None {}
+                            }
+                            if fty2 == "String" { ct = "char*" }
+                            else if fty2 == "i32" { ct = "int" }
+                            else if fty2 == "f64" { ct = "double" }
+                            else if fty2.starts_with("Vec<") { ct = "al_vec" }
+                            else if fty2.starts_with("Option<") || fty2.starts_with("Result<") { ct = "al_opt" }
+                            else if contains_str(user_types, fty2) { ct = "struct " + fty2 }
+                            else { ct = "char*" }
+                        }
+                        EIf(cond, then_s, else_s) {
+                            // if 表达式的 then/else 块尾是切片/字符串 → char*
+                            let tv = block_tail_expr(then_s)
+                            match tv {
+                                Some(te) {
+                                    match te {
+                                        EIndex(b, idx) {
+                                            match idx {
+                                                ERange(a, hi) { ct = "char*" }
+                                                _ {}
+                                            }
+                                        }
+                                        EStr(s2) { ct = "char*" }
+                                        _ {}
+                                    }
+                                }
+                                None {}
+                            }
+                        }
+                        EBin(op3, l3, r3) {
+                            // 字符串拼接初始化 → char*
+                            if op3 == "+" {
+                                if expr_is_string(l3, r3, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes) || expr_is_string(r3, l3, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes) {
+                                    ct = "char*"
+                                }
+                            }
+                        }
+                        _ {}
+                    }
+                }
+                Some(_) {}
+            }
+            var kv = "let "
+            if is_mut { kv = "var " }
+            // 无初始化器声明：let x: T → T x;
+            match init {
+                EIdent(nn) {
+                    if nn == "__noinit__" {
+                        return pad + ct + " " + name + "; // " + kv + name
+                    }
+                }
+                _ {}
+            }
+            // ? 解包：let x = call()? → al_opt 检查 + 载荷提取
+            match init {
+                ETry(inner) {
+                    let res_c = c_expr(inner, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                    var okt = "()"
+                    match inner {
+                        ECall(callee2, args2) {
+                            match callee2 {
+                                EIdent(fname2) {
+                                    let fr2 = fn_return(fname2, fnames, freturns)
+                                    match fr2 {
+                                        Some(rt2) { okt = rt2 }
+                                        None {}
+                                    }
+                                }
+                                _ {}
+                            }
+                        }
+                        _ {}
+                    }
+                    let ct2 = result_ok_ct(okt, user_types)
+                    let mem2 = result_ok_mem(okt, user_types)
+                    var out2 = pad + "al_opt _r_" + name + " = " + res_c + ";\n"
+                    if cur == "main" {
+                        out2 = out2 + pad + "if (_r_" + name + ".tag == 0) { return 1; }\n"
+                    } else {
+                        out2 = out2 + pad + "if (_r_" + name + ".tag == 0) { return _r_" + name + "; }\n"
+                    }
+                    var unwrap_c = "_r_" + name + ".data." + mem2
+                    if mem2.starts_with("t_") {
+                        unwrap_c = "*" + unwrap_c
+                    }
+                    out2 = out2 + pad + ct2 + " " + name + " = " + unwrap_c + "; // " + kv + name
+                    return out2
+                }
+                _ {}
+            }
+            let init_c = c_expr(init, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+            // 遮蔽检测：同名已存在（参数/更早局部）→ 先用临时变量捕获初始值
+            // （C 中 int i = i; 自引用未初始化，需先算外层值）
+            var shadow_count = 0
+            for vn in varnames {
+                if vn == name {
+                    shadow_count = shadow_count + 1
+                }
+            }
+            if shadow_count >= 2 {
+                return pad + ct + " __s_" + name + " = " + init_c + ";\n" + pad + ct + " " + name + " = __s_" + name + "; // " + kv + name
+            }
+            return pad + ct + " " + name + " = " + init_c + "; // " + kv + name
+        }
+        SIf(cond, then_s, else_s) {
+            var out = pad + "if (" + c_expr(cond, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ") {"
+            var body: Vec<String> = []
+            for st in then_s { body.push(c_stmt(st, pad + "  ", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, cur, vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false)) }
+            out = out + "\n" + join(body, "\n") + "\n" + pad + "}"
+            if else_s.len() > 0 {
+                out = out + " else {"
+                var ebody: Vec<String> = []
+                for st in else_s { ebody.push(c_stmt(st, pad + "  ", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, cur, vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false)) }
+                out = out + "\n" + join(ebody, "\n") + "\n" + pad + "}"
+            }
+            return out
+        }
+        SWhile(cond, body_s) {
+            var out = pad + "while (" + c_expr(cond, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ") {"
+            var body: Vec<String> = []
+            for st in body_s { body.push(c_stmt(st, pad + "  ", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, cur, vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false)) }
+            out = out + "\n" + join(body, "\n") + "\n" + pad + "}"
+            return out
+        }
+        SFor(vv, iter, body_s) {
+            // 范围迭代：for i in 0..n → for (int i = a; i < b; i++)
+            match iter {
+                ERange(r_a, r_b) {
+                    var rout = pad + "for (int " + vv + " = " + c_expr(r_a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + "; " + vv + " < " + c_expr(r_b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + "; " + vv + "++) {"
+                    var rbody: Vec<String> = []
+                    for rst in body_s { rbody.push(c_stmt(rst, pad + "  ", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, cur, vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false)) }
+                    rout = rout + "\n" + join(rbody, "\n") + "\n" + pad + "}"
+                    return rout
+                }
+                _ {}
+            }
+            let iter_c = c_expr(iter, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+            // 迭代元素类型：Vec<T> → T；String → char
+            var elem = "char"
+            var len_expr = "strlen(" + iter_c + ")"
+            var acc_expr = iter_c + "[_i]"
+            let itt = base_type(iter, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+            match itt {
+                Some(t) {
+                    if t.starts_with("Vec<") {
+                        let et = first_type_arg(t)
+                        var ect = "int"
+                        if et == "String" { ect = "char*" }
+                        else if et == "f64" { ect = "double" }
+                        else if et == "bool" { ect = "int" }
+                        else if et.starts_with("Vec<") { ect = "al_vec" }
+                        else if contains_str(user_types, et) { ect = "struct " + et }
+                        elem = ect
+                        len_expr = iter_c + ".len"
+                        acc_expr = "((" + ect + "*)(" + iter_c + ".data))[_i]"
+                    }
+                }
+                None {}
+            }
+            var out = pad + "for (size_t _i = 0; _i < " + len_expr + "; _i++) {"
+            out = out + "\n" + pad + "  " + elem + " " + vv + " = " + acc_expr + ";"
+            var body: Vec<String> = []
+            for st in body_s { body.push(c_stmt(st, pad + "  ", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, cur, vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false)) }
+            out = out + "\n" + join(body, "\n") + "\n" + pad + "}"
+            return out
+        }
+        SBlock(stmts) {
+            var body: Vec<String> = []
+            for st in stmts { body.push(c_stmt(st, pad + "  ", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, cur, vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false)) }
+            return pad + "{\n" + join(body, "\n") + "\n" + pad + "}"
+        }
+        SGo(is_detached, stmts) {
+            // 结构化/分离任务: 转译器层同步执行块(真实并发为运行时实现细节)
+            var body: Vec<String> = []
+            for st in stmts { body.push(c_stmt(st, pad + "  ", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, cur, vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false)) }
+            return pad + "{\n" + join(body, "\n") + "\n" + pad + "}"
+        }
+        SUi(stmts) {
+            // UI 声明式块 → 过程式原语 + 发射期布局(S1a; 组件映射见 ui_comp_lines)
+            var body: Vec<String> = []
+            body.push(pad + "  int __al_win = -1;")
+            body.push(pad + "  int __al_y = 20;")
+            for st in stmts {
+                let lines = ui_comp_lines(st, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                if lines.len() > 0 {
+                    for l in lines { body.push(pad + "  " + l) }
+                } else {
+                    body.push(c_stmt(st, pad + "  ", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, cur, vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false))
+                }
+            }
+            // ui{} 语义 = 渲染 + 进入消息循环(块尾自动 ui_run)
+            body.push(pad + "  ui_run();")
+            return pad + "{\n" + join(body, "\n") + "\n" + pad + "}"
+        }
+        SReturn(eo) {
+            match eo {
+                Some(x) {
+                    // main 的 Ok/Err 返回 → 0/1
+                    if cur == "main" {
+                        match x {
+                            ECall(callee_m, args_m) {
+                                match callee_m {
+                                    EIdent(cn_m) {
+                                        if cn_m == "Ok" { return pad + "return 0;" }
+                                        if cn_m == "Err" { return pad + "return 1;" }
+                                    }
+                                    _ {}
+                                }
+                            }
+                            _ {}
+                        }
+                    }
+                    // Some/Ok 构造：按当前函数返回类型解析载荷成员
+                    match x {
+                        ECall(callee_r, args_r) {
+                            match callee_r {
+                                EIdent(cn_r) {
+                                    if cn_r == "Some" || cn_r == "Ok" {
+                                        let frt = fn_return(cur, fnames, freturns)
+                                        match frt {
+                                            Some(ft) {
+                                                if ft.starts_with("Option<") || ft.starts_with("Result<") {
+                                                    let m_r = payload_member(Some(first_type_arg(ft)), user_types)
+                                                    if args_r.len() == 1 {
+                                                        return pad + "return al_some_" + m_r + "(" + c_expr(args_r[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ");"
+                                                    }
+                                                }
+                                            }
+                                            None {}
+                                        }
+                                    }
+                                }
+                                _ {}
+                            }
+                        }
+                        _ {}
+                    }
+                    return pad + "return " + c_expr(x, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";"
+                }
+                None { return pad + "return;" }
+            }
+        }
+        SExpr(e) {
+            match e {
+                ETry(inner) {
+                    let res_c = c_expr(inner, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                    if cur == "main" {
+                        return pad + "al_opt _r_e = " + res_c + ";\n" + pad + "if (_r_e.tag == 0) { return 1; }"
+                    }
+                    return pad + "al_opt _r_e = " + res_c + ";\n" + pad + "if (_r_e.tag == 0) { return _r_e; }"
+                }
+                ECall(callee, args) {
+                    match callee {
+                        EIdent(name) {
+                            if name == "print" {
+                                return c_print_stmt(args, pad, user_types, vnames, vowners, fnames, freturns, varnames, vartypes, snames, sfnames, sftypes, fptypes, enames, elists)
+                            }
+                            if name == "button_onclick" && args.len() == 2 {
+                                // 第二参为回调函数名字符串 → 直接发射函数标识符(函数指针)
+                                let fnid = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                                var fname2 = ""
+                                match args[1] {
+                                    EStr(sv) { fname2 = sv }
+                                    _ {}
+                                }
+                                return pad + "button_onclick(" + fnid + ", " + fname2 + ");"
+                            }
+                            return pad + c_expr(e, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";"
+                        }
+                        _ { return pad + c_expr(e, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";" }
+                    }
+                }
+                _ { return pad + c_expr(e, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";" }
+            }
+        }
+        SAssignIdx(bn, idxe, op, rhs) {
+            // v[i] = x → ((ELEM*)v.data)[i] OP x;（值语义下的原地写入）
+            let vt = var_type(bn, varnames, vartypes)
+            match vt {
+                Some(t) {
+                    if t.starts_with("Vec<") {
+                        let elem = first_type_arg(t)
+                        let elem_c = c_type(Some(elem), user_types)
+                        let idx_c = c_expr(idxe, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let rhs_c = c_expr(rhs, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let slot = "((" + elem_c + "*)" + bn + ".data)[" + idx_c + "]"
+                        return pad + slot + " " + op + " " + rhs_c + ";"
+                    }
+                    if t.starts_with("Map<") {
+                        let vt = second_type_arg(t)
+                        var suf = ""
+                        if vt == "f64" { suf = "f" }
+                        if vt == "String" { suf = "s" }
+                        if suf == "" { suf = "i" }
+                        let idx_c = c_expr(idxe, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let rhs_c = c_expr(rhs, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        if op == "=" {
+                            return pad + "al_map_set_" + suf + "(&" + bn + ", " + idx_c + ", " + rhs_c + ");"
+                        }
+                        let opch = op[0..1]
+                        return pad + "al_map_set_" + suf + "(&" + bn + ", " + idx_c + ", al_map_get_" + suf + "(" + bn + ", " + idx_c + ") " + opch + " " + rhs_c + ");"
+                    }
+                    if t == "Map" {
+                        return pad + "#error Aine: Map 索引赋值需要显式值类型注解，如 var m: Map<String, i32> = Map.new()\n"
+                    }
+                    return pad + "#error Aine: 索引赋值目前仅支持 Vec/Map（" + bn + " 的类型是 " + t + ")\n"
+                }
+                None {
+                    return pad + "#error Aine: 索引赋值目标 '" + bn + "' 类型未知\n"
+                }
+            }
+        }
+        SAssign(name, op, rhs) {
+            if op == "=" {
+                match rhs {
+                    ECall(callee_a, args_a) {
+                        match callee_a {
+                            EIdent(cn_a) {
+                                if cn_a == "Some" || cn_a == "Ok" {
+                                    let vt_a = var_type(name, varnames, vartypes)
+                                    var m_a = "s"
+                                    match vt_a {
+                                        Some(t_a) {
+                                            if t_a.starts_with("Option<") || t_a.starts_with("Result<") {
+                                                m_a = payload_member(Some(first_type_arg(t_a)), user_types)
+                                            }
+                                        }
+                                        None {}
+                                    }
+                                    if args_a.len() == 1 {
+                                        return pad + name + " = al_some_" + m_a + "(" + c_expr(args_a[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ");"
+                                    }
+                                }
+                            }
+                            _ {}
+                        }
+                    }
+                    _ {}
+                }
+            }
+            return pad + name + " " + op + " " + c_expr(rhs, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";"
+        }
+        SDef(name, params, ret, body_s) {
+            // 函数作用域变量表（消除跨函数名字冲突）
+            var my_names: Vec<String> = []
+            var my_types: Vec<String> = []
+            var fi = 0
+            for fnm in fn_names_all {
+                if fnm == name {
+                    let vi = fn_var_infos[fi]
+                    my_names = vi.names
+                    my_types = vi.types
+                }
+                fi += 1
+            }
+            var ps: Vec<String> = []
+            for p in params { ps.push(c_param_decl(p.ty, p.name, user_types)) }
+            var ct = "void"
+            match ret {
+                Some(rr) { ct = c_type(Some(rr), user_types) }
+                None {
+                    if name == "main" { ct = "int" } else { ct = "void" }
+                }
+            }
+            if name == "main" { ct = "int" }
+            var sig_ps = ps
+            if name == "main" {
+                sig_ps = ["int _argc", "char** _argv"]
+            }
+            var out = pad + ct + " " + name + "(" + join(sig_ps, ", ") + ") {"
+            if name == "main" {
+                out = out + "\n" + pad + "  al_cli_args = (al_vec){ 0, sizeof(char*), NULL };"
+                out = out + "\n" + pad + "  for (int _ai = 1; _ai < _argc; _ai++) { char* _av = _argv[_ai]; al_push(&al_cli_args, sizeof(char*), (void*)&_av); }"
+            }
+            var body: Vec<String> = []
+            let last_idx = body_s.len() - 1
+            var i2 = 0
+            for st in body_s {
+                if i2 == last_idx {
+                    match st {
+                        SExpr(e) {
+                            if name != "main" {
+                                body.push(pad + "  return " + c_expr(e, user_types, vnames, vowners, my_names, my_types, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";")
+                            } else {
+                                body.push(c_stmt(st, pad + "  ", user_types, vnames, vowners, fnames, freturns, my_names, my_types, name, vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false))
+                            }
+                        }
+                        _ {
+                            // 尾 match：函数体最后一条为 SMatch 且非 main → 臂体块尾值发射为 return
+                            var tail_flag = false
+                            if name != "main" {
+                                match st {
+                                    SMatch(_, _) { tail_flag = true }
+                                    _ {}
+                                }
+                            }
+                            body.push(c_stmt(st, pad + "  ", user_types, vnames, vowners, fnames, freturns, my_names, my_types, name, vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, tail_flag))
+                        }
+                    }
+                } else {
+                    body.push(c_stmt(st, pad + "  ", user_types, vnames, vowners, fnames, freturns, my_names, my_types, name, vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false))
+                }
+                i2 += 1
+            }
+            out = out + "\n" + pad + "  {\n" + join(body, "\n") + "\n" + pad + "  }"
+            if name == "main" { out = out + "\n" + pad + "  return 0;" }
+            out = out + "\n" + pad + "}"
+            return out
+        }
+        SStruct(name, fields) {
+            var out = pad + "struct " + name + " {"
+            var fl: Vec<String> = []
+            for fd in fields { fl.push(pad + "  " + c_type(Some(fd.ty), user_types) + " " + fd.name + ";") }
+            out = out + "\n" + join(fl, "\n") + "\n" + pad + "};"
+            return out
+        }
+        SEnum(name, variants) {
+            var out = pad + "enum " + name + "_tag {"
+            var tags: Vec<String> = []
+            for v in variants { tags.push(pad + "  " + v.name) }
+            out = out + "\n" + join(tags, ",\n") + "\n" + pad + "};"
+            out = out + "\n" + pad + "struct " + name + " {"
+            out = out + "\n" + pad + "  enum " + name + "_tag tag;"
+            out = out + "\n" + pad + "  union {"
+            var un: Vec<String> = []
+            for v in variants {
+                if v.fields.len() > 0 {
+                    var fs: Vec<String> = []
+                    for i2 in 0..v.fields.len() {
+                        let ft2 = v.fields[i2]
+                        var fty = c_type(Some(ft2), user_types)
+                        if ft2 == name { fty = "struct " + name + "*" }
+                        fs.push(fty + " _" + f"{i2}")
+                    }
+                    un.push(pad + "    struct { " + join(fs, "; ") + "; } " + v.name + ";")
+                }
+            }
+            out = out + "\n" + join(un, "\n") + "\n" + pad + "  } data;"
+            out = out + "\n" + pad + "};"
+            // variant constructor helpers: Shape_Circle(double _0)；递归字段堆复制
+            for v in variants {
+                if v.fields.len() > 0 {
+                    var ps: Vec<String> = []
+                    var inits: Vec<String> = []
+                    var recs: Vec<String> = []
+                    for i2 in 0..v.fields.len() {
+                        let ft2 = v.fields[i2]
+                        ps.push(c_type(Some(ft2), user_types) + " _" + f"{i2}")
+                        if ft2 == name {
+                            inits.push("NULL")
+                            recs.push(f"{i2}")
+                        } else {
+                            inits.push("_" + f"{i2}")
+                        }
+                    }
+                    out = out + "\n" + pad + "static struct " + name + " " + name + "_" + v.name + "(" + join(ps, ", ") + ") {"
+                    out = out + "\n" + pad + "  struct " + name + " r = { .tag = " + v.name + ", .data." + v.name + " = { " + join(inits, ", ") + " } };"
+                    for ri in recs {
+                        out = out + "\n" + pad + "  r.data." + v.name + "._" + ri + " = (struct " + name + "*)malloc(sizeof(struct " + name + "));"
+                        out = out + "\n" + pad + "  *(r.data." + v.name + "._" + ri + ") = _" + ri + ";"
+                    }
+                    out = out + "\n" + pad + "  return r;"
+                    out = out + "\n" + pad + "}"
+                } else {
+                    out = out + "\n" + pad + "static struct " + name + " " + name + "_" + v.name + "(void) {"
+                    out = out + "\n" + pad + "  struct " + name + " r = { .tag = " + v.name + " };"
+                    out = out + "\n" + pad + "  return r;"
+                    out = out + "\n" + pad + "}"
+                }
+            }
+            return out
+        }
+        SMatch(scrut, arms) {
+            let scrut_c = c_expr(scrut, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+            // Option/Result scrut → 载荷成员（默认 "s"：String 载荷最常见）
+            var mem = "s"
+            var err_mem = "s"
+            let st = base_type(scrut, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+            match st {
+                Some(t) {
+                    if t.starts_with("Option<") || t.starts_with("Result<") {
+                        mem = payload_member(Some(first_type_arg(t)), user_types)
+                        if t.starts_with("Result<") {
+                            err_mem = payload_member(Some(second_type_arg(t)), user_types)
+                        }
+                    }
+                }
+                None {}
+            }
+            var parts: Vec<String> = []
+            var arm_idx = 0
+            // scrut 静态类型（递归字段解引用用）
+            var scrut_ty = ""
+            let st2 = base_type(scrut, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+            match st2 {
+                Some(t2) { scrut_ty = t2 }
+                None {}
+            }
+            for arm in arms {
+
+                let pat_name = first_ident(arm.pat)
+                // 条件：tag 比较 + 字面量载荷守卫
+                var cond = ""
+                // 整数字面量模式（0/1/-1 等）→ 值比较；其余 → 枚举 tag 比较
+                var pat_digit = true
+                if arm.pat.len() > 0 {
+                    let p0 = arm.pat[0]
+                    if p0 != "-" && !(p0 >= "0" && p0 <= "9") { pat_digit = false }
+                } else {
+                    pat_digit = false
+                }
+                if pat_digit {
+                    cond = scrut_c + " == " + arm.pat
+                }
+                else if pat_name == "_" { cond = "1" }
+                else if pat_name == "Some" || pat_name == "Ok" { cond = scrut_c + ".tag == 1" }
+                else if pat_name == "None" || pat_name == "Err" { cond = scrut_c + ".tag == 0" }
+                else { cond = scrut_c + ".tag == " + pat_name }
+                let lit = pat_literal(arm.pat)
+                match lit {
+                    Some(lv) {
+                        cond = cond + " && (strcmp(" + scrut_c + ".data." + mem + ", \"" + lv + "\") == 0)"
+                    }
+                    None {}
+                }
+                // 臂体：绑定解构 + 语句/返回值
+                var ab: Vec<String> = []
+
+                let blines = pat_bind_lines(arm.pat, scrut_c, mem, err_mem, vfnames, vftypes, user_types, scrut_ty, vnames, vowners)
+
+                for bl in blines { ab.push(pad + "  " + bl) }
+                match arm.body {
+                    SExpr(be) {
+                        var is_ctrl = false
+                        match be {
+                            EIdent(beid) {
+                                if beid == "break" {
+                                    ab.push(pad + "  break;")
+                                    is_ctrl = true
+                                } else if beid == "continue" {
+                                    ab.push(pad + "  continue;")
+                                    is_ctrl = true
+                                }
+                            }
+                            _ {}
+                        }
+                        if !is_ctrl {
+                            if is_print_call(be) {
+                                match be {
+                                    ECall(c3, a3) {
+                                        ab.push(c_print_stmt(a3, pad + "  ", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, snames, sfnames, sftypes, fptypes, enames, elists))
+                                    }
+                                    _ {}
+                                }
+                            } else {
+                                var is_method = false
+                                match be {
+                                    ECall(mc, ma) {
+                                        match mc {
+                                            EField(_, _) { is_method = true }
+                                            _ {}
+                                        }
+                                    }
+                                    _ {}
+                                }
+                                if is_method {
+                                    // 方法调用语句（如 v.push(x)）→ 非返回值
+                                    ab.push(pad + "  " + c_expr(be, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";")
+                                } else {
+                                    ab.push(pad + "  return " + c_expr(be, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";")
+                                }
+                            }
+                        }
+                    }
+                    _ {
+                        // 尾 match：臂体 SBlock 块尾为值表达式 → 块前段正常发射 + 尾值 return
+                        //（B5-M33：match 尾构造调用此前被当语句发射，丢返回值）
+                        var bd = c_stmt(arm.body, pad + "  ", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, cur, vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false)
+                        if tail {
+                            match arm.body {
+                                SBlock(stmts2) {
+                                    if stmts2.len() > 0 {
+                                        let last2 = stmts2[stmts2.len() - 1]
+                                        match last2 {
+                                            SExpr(be2) {
+                                                var is_ctrl2 = false
+                                                match be2 {
+                                                    EIdent(beid2) {
+                                                        if beid2 == "break" || beid2 == "continue" { is_ctrl2 = true }
+                                                    }
+                                                    _ {}
+                                                }
+                                                var is_print2 = is_print_call(be2)
+                                                var is_meth2 = false
+                                                match be2 {
+                                                    ECall(mc2, ma2) {
+                                                        match mc2 {
+                                                            EField(_, _) { is_meth2 = true }
+                                                            _ {}
+                                                        }
+                                                    }
+                                                    _ {}
+                                                }
+                                                if !is_ctrl2 && !is_print2 && !is_meth2 {
+                                                    // 前段语句正常发射（非尾）
+                                                    var pre: Vec<String> = []
+                                                    var pi = 0
+                                                    while pi < stmts2.len() - 1 {
+                                                        pre.push(c_stmt(stmts2[pi], pad + "  ", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, cur, vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false))
+                                                        pi += 1
+                                                    }
+                                                    var bd2 = ""
+                                                    for pl in pre { bd2 = bd2 + pl + "\n" }
+                                                    bd = bd2 + pad + "  return " + c_expr(be2, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";"
+                                                }
+                                            }
+                                            _ {}
+                                        }
+                                    }
+                                }
+                                _ {}
+                            }
+                        }
+                        ab.push(bd)
+                    }
+                }
+                if arm_idx == 0 {
+                    parts.push(pad + "if (" + cond + ") {")
+                } else {
+                    parts.push(pad + "else if (" + cond + ") {")
+                }
+                for l in ab { parts.push(l) }
+                parts.push(pad + "}")
+                arm_idx += 1
+            }
+            return join(parts, "\n")
+        }
+        _ { return pad + "/* unsupported stmt */" }
+    }
+}
+
+
+// program -> C
+fn c_program(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>) -> String {
+    // 模块打平入口：mod name; -> 读入 name.aine（根目录固定 examples/，自举期限制）
+    let flr = flatten_stmts(program, "examples/", [])
+    match flr {
+        Err(e) {
+            return "/* module flatten error: " + e + " */"
+        }
+        Ok(r) {
+            // 独立闭包脱糖：let f = (x: T) => body → 顶层 fn f(...)
+            let dprog = desugar_closures(r.out)
+            // 值语义（B5-M29）：var-from-var 的 move/clone
+            let sem2 = value_semantics(dprog)
+            let vf2 = valueal_lite(sem2.program)
+            return c_program_flat(vf2.program, collect_user_types(vf2.program), collect_variant_names(vf2.program), collect_variant_owners(vf2.program), collect_fn_names(vf2.program), collect_fn_returns(vf2.program), collect_var_names(vf2.program), collect_var_types(vf2.program), collect_fn_ptypes(vf2.program), collect_enum_ty_names(vf2.program), collect_enum_variant_lists(vf2.program))
+        }
+    }
+}
+
+
+fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>) -> String {
+
+    var out = "#include <stdio.h>\n#include <stdint.h>\n#include <string.h>\n#include <stdlib.h>\n"
+    out = out + "static long al_alloc_count = 0;\n"
+    out = out + "static void* (*al_real_malloc)(size_t) = malloc;\n"
+    out = out + "static void* al_counted_malloc(size_t n) { al_alloc_count++; return al_real_malloc(n); }\n"
+    out = out + "#define malloc al_counted_malloc\n"
+    out = out + "static void* (*al_real_realloc)(void*, size_t) = realloc;\n"
+    out = out + "static void* al_counted_realloc(void* p, size_t n) { al_alloc_count++; return al_real_realloc(p, n); }\n"
+    out = out + "#define realloc al_counted_realloc\n"
+    out = out + "static void al_alloc_report(void) { const char* e = getenv(\"AINE_ALLOC_STATS\"); if (e) { fprintf(stderr, \"[aine] heap allocations: %ld\\n\", al_alloc_count); } }\n"
+    out = out + "__attribute__((constructor)) static void al_alloc_setup(void) { atexit(al_alloc_report); }\n"
+    out = out + "typedef struct { size_t len; size_t elem_size; void* data; } al_vec;\n"
+    out = out + "al_vec al_cli_args = { 0, sizeof(char*), NULL };\n"
+    out = out + "#define cli_args al_cli_args\n"
+    out = out + "typedef struct { al_vec keys; al_vec vals; } al_map;\n"
+    // fn 类型返回值：签名中出现的 fn(A)->R 生成 typedef（A5）
+    for s in program {
+        match s {
+            SDef(name, params, ret, body_s) {
+                match ret {
+                    Some(rr) {
+                        if rr.starts_with("fn(") {
+                            var depth = 0
+                            var i = 3
+                            var close = 0 - 1
+                            while i < rr.len() {
+                                let ch = rr[i..i + 1]
+                                if ch == "(" { depth += 1 }
+                                if ch == ")" {
+                                    if depth == 0 {
+                                        close = i
+                                        i = rr.len()
+                                        continue
+                                    }
+                                    depth -= 1
+                                }
+                                i += 1
+                            }
+                            if close > 0 {
+                                let params_s = rr[3..close]
+                                let rest = rr[close + 1..rr.len()]
+                                var ret_c = "void"
+                                if rest.starts_with("->") { ret_c = c_type(Some(rest[2..rest.len()]), user_types) }
+                                let parts = str_split(params_s, ",")
+                                var cargs: Vec<String> = []
+                                for p3 in parts {
+                                    if p3 != "" { cargs.push(c_type(Some(p3), user_types)) }
+                                }
+                                out = out + "typedef " + ret_c + " (*" + fn_type_id(rr) + ")(" + join(cargs, ", ") + ");\n"
+                            }
+                        }
+                    }
+                    None {}
+                }
+            }
+            _ {}
+        }
+    }
+    out = out + "void al_push(al_vec* v, size_t es, void* elem) {\n"
+    out = out + "  if (v->elem_size == 0) v->elem_size = es;\n"
+    out = out + "  v->data = realloc(v->data, (v->len + 1) * v->elem_size);\n"
+    out = out + "  if (v->data && elem) memcpy((char*)v->data + v->len * v->elem_size, elem, v->elem_size);\n"
+    out = out + "  v->len++;\n"
+    out = out + "}\n"
+    out = out + "int al_chars_len(const char* s) { int n = 0; for (; *s; s++) { if ((*s & 0xC0) != 0x80) n++; } return n; }\n"
+    out = out + "const char* al_char_off(const char* s, long i) { while (i > 0 && *s) { s++; while ((*s & 0xC0) == 0x80) s++; i--; } return s; }\n"
+    out = out + "char* al_char_at(const char* s, long i) { const char* p = al_char_off(s, i); long n = 1; while ((p[n] & 0xC0) == 0x80) n++; char* r = (char*)malloc(n + 1); memcpy(r, p, n); r[n] = 0; return r; }\n"
+    out = out + "char* al_substr_ch(const char* s, long a, long b) { if (a < 0) a = 0; const char* p = al_char_off(s, a); const char* q = al_char_off(p, b - a); long n = q - p; char* r = (char*)malloc(n + 1); memcpy(r, p, n); r[n] = 0; return r; }\n"
+    out = out + "char* al_substr(const char* s, size_t a, size_t b) {\n"
+    out = out + "  size_t la = strlen(s);\n"
+    out = out + "  if (a > la) a = la;\n"
+    out = out + "  if (b > la) b = la;\n"
+    out = out + "  if (b < a) b = a;\n"
+    out = out + "  char* r = (char*)malloc(b - a + 1);\n"
+    out = out + "  memcpy(r, s + a, b - a);\n"
+    out = out + "  r[b - a] = 0;\n"
+    out = out + "  return r;\n"
+    out = out + "}\n"
+    out = out + "char* al_strcat(const char* a, const char* b) {\n"
+    out = out + "  size_t la = strlen(a), lb = strlen(b);\n"
+    out = out + "  char* r = (char*)malloc(la + lb + 1);\n"
+    out = out + "  if (!r) return NULL;\n"
+    out = out + "  memcpy(r, a, la);\n"
+    out = out + "  memcpy(r + la, b, lb + 1);\n"
+    out = out + "  return r;\n"
+    out = out + "}\n"
+    out = out + "char* al_strdup_lit(char* s) { size_t n = strlen(s) + 1; char* r = (char*)malloc(n); memcpy(r, s, n); return r; }\n"
+    out = out + "char* al_strcat_own(char* a, char* b) { size_t la = strlen(a), lb = strlen(b); size_t cap = la + lb + 1; if (cap < la * 2) { cap = la * 2; } char* r = (char*)realloc(a, cap); if (!r) { r = (char*)malloc(cap); memcpy(r, a, la); } memcpy(r + la, b, lb + 1); return r; }\n"
+    out = out + "al_vec al_vec_clone(al_vec v) { al_vec r = { v.len, v.elem_size, NULL }; if (v.len > 0 && v.data) { r.data = malloc(v.len * v.elem_size); memcpy(r.data, v.data, v.len * v.elem_size); } return r; }\n"
+    out = out + "al_vec al_zero_vec() { return (al_vec){ 0, 0, NULL }; }\n"
+    out = out + "al_map al_map_clone(al_map m) { al_map r; r.keys = al_vec_clone(m.keys); r.vals = al_vec_clone(m.vals); return r; }\n"
+    out = out + "al_map al_zero_map() { return (al_map){ { 0, 0, NULL }, { 0, 0, NULL } }; }\n"
+    out = out + "int write_file(char* path, char* content) { FILE* f = fopen(path, \"wb\"); if (!f) return 0; size_t n = fwrite(content, 1, strlen(content), f); fclose(f); return n > 0 || strlen(content) == 0; }\n"
+    out = out + "int append_file(char* path, char* content) { FILE* f = fopen(path, \"ab\"); if (!f) return 0; size_t n = fwrite(content, 1, strlen(content), f); fclose(f); return 1; }\n"
+    out = out + "int file_exists(char* path) { FILE* f = fopen(path, \"rb\"); if (f) { fclose(f); return 1; } return 0; }\n"
+    out = out + "long al_map_find(al_map* m, const char* k) { for (size_t i = 0; i < m->keys.len; i++) { char* kk = ((char**)m->keys.data)[i]; if (strcmp(kk, k) == 0) return (long)i; } return -1; }\n"
+    out = out + "void al_map_set_i(al_map* m, const char* k, int v) { long i = al_map_find(m, k); if (i >= 0) { ((long*)m->vals.data)[i] = v; return; } al_push(&m->keys, sizeof(char*), (void*)&k); al_push(&m->vals, sizeof(long), (void*)&v); }\n"
+    out = out + "void al_map_set_f(al_map* m, const char* k, double v) { long i = al_map_find(m, k); if (i >= 0) { ((double*)m->vals.data)[i] = v; return; } al_push(&m->keys, sizeof(char*), (void*)&k); al_push(&m->vals, sizeof(double), (void*)&v); }\n"
+    out = out + "void al_map_set_s(al_map* m, const char* k, char* v) { long i = al_map_find(m, k); if (i >= 0) { ((char**)m->vals.data)[i] = al_strdup_lit(v); return; } al_push(&m->keys, sizeof(char*), (void*)&k); al_push(&m->vals, sizeof(char*), (void*)&v); }\n"
+    out = out + "int al_map_get_i(al_map m, const char* k) { long i = al_map_find(&m, k); if (i < 0) { fprintf(stderr, \"Map 中不存在键: %s\\n\", k); abort(); } return ((long*)m.vals.data)[i]; }\n"
+    out = out + "double al_map_get_f(al_map m, const char* k) { long i = al_map_find(&m, k); if (i < 0) { fprintf(stderr, \"Map 中不存在键: %s\\n\", k); abort(); } return ((double*)m.vals.data)[i]; }\n"
+    out = out + "char* al_map_get_s(al_map m, const char* k) { long i = al_map_find(&m, k); if (i < 0) { fprintf(stderr, \"Map 中不存在键: %s\\n\", k); abort(); } return ((char**)m.vals.data)[i]; }\n"
+    out = out + "void al_assert(int cond, char* msg) { if (!cond) { fprintf(stderr, \"断言失败: %s\\n\", msg); abort(); } }\n"
+    out = out + "char* read_file(char* path) {\n"
+    out = out + "  FILE* f = fopen(path, \"rb\");\n"
+    out = out + "  if (!f) return \"[read_file error: cannot open]\";\n"
+    out = out + "  fseek(f, 0, SEEK_END);\n"
+    out = out + "  long n = ftell(f);\n"
+    out = out + "  fseek(f, 0, SEEK_SET);\n"
+    out = out + "  char* buf = (char*)malloc((size_t)n + 1);\n"
+    out = out + "  if (n > 0 && buf) fread(buf, 1, (size_t)n, f);\n"
+    out = out + "  if (buf) buf[n] = 0;\n"
+    out = out + "  fclose(f);\n"
+    out = out + "  return buf ? buf : \"\";\n"
+    out = out + "}\n"
+    out = out + "char* al_json_str(char* s, size_t* pos) {\n"
+    out = out + "  size_t i = *pos; while (s[i] == 32 || s[i] == 10 || s[i] == 9 || s[i] == 13) i++;\n"
+    out = out + "  if (s[i] != 0x22) return al_strdup_lit(\"\");\n"
+    out = out + "  i++;\n"
+    out = out + "  size_t cap = 64; char* r = (char*)malloc(cap); size_t n = 0;\n"
+    out = out + "  while (s[i] && s[i] != 0x22) {\n"
+    out = out + "    if (s[i] == 0x5c) {\n"
+    out = out + "      i++;\n"
+    out = out + "      char c = s[i];\n"
+    out = out + "      if (c == 110) c = 10; else if (c == 116) c = 9; else if (c == 114) c = 13;\n"
+    out = out + "      if (n + 2 > cap) { cap *= 2; r = (char*)realloc(r, cap); }\n"
+    out = out + "      r[n++] = c; i++;\n"
+    out = out + "    } else {\n"
+    out = out + "      if (n + 2 > cap) { cap *= 2; r = (char*)realloc(r, cap); }\n"
+    out = out + "      r[n++] = s[i]; i++;\n"
+    out = out + "    }\n"
+    out = out + "  }\n"
+    out = out + "  if (s[i] == 0x22) i++;\n"
+    out = out + "  r[n] = 0; *pos = i; return r;\n"
+    out = out + "}\n"
+    out = out + "al_map json_decode(char* s) {\n"
+    out = out + "  al_map m = ((al_map){{ 0, 0, NULL }, { 0, 0, NULL }});\n"
+    out = out + "  size_t i = 0;\n"
+    out = out + "  while (s[i] == 32 || s[i] == 10 || s[i] == 9 || s[i] == 13) i++;\n"
+    out = out + "  if (s[i] != 0x7b) return m;\n"
+    out = out + "  i++;\n"
+    out = out + "  for (;;) {\n"
+    out = out + "    while (s[i] == 32 || s[i] == 10 || s[i] == 9 || s[i] == 13 || s[i] == 0x2c) i++;\n"
+    out = out + "    if (s[i] == 0x7d || !s[i]) break;\n"
+    out = out + "    if (s[i] != 0x22) break;\n"
+    out = out + "    char* k = al_json_str(s, &i);\n"
+    out = out + "    while (s[i] == 32 || s[i] == 10 || s[i] == 9) i++;\n"
+    out = out + "    if (s[i] == 0x3a) i++;\n"
+    out = out + "    while (s[i] == 32 || s[i] == 10 || s[i] == 9) i++;\n"
+    out = out + "    char* v;\n"
+    out = out + "    if (s[i] == 0x22) { v = al_json_str(s, &i); }\n"
+    out = out + "    else if (s[i] == 0x7b || s[i] == 0x5b) {\n"
+    out = out + "      char op = s[i]; char cl = (op == 0x7b) ? 0x7d : 0x5d;\n"
+    out = out + "      int depth = 0; size_t st = i;\n"
+    out = out + "      while (s[i]) { if (s[i] == op) depth++; else if (s[i] == cl) { depth--; if (!depth) { i++; break; } } i++; }\n"
+    out = out + "      size_t n = i - st; v = (char*)malloc(n + 1); memcpy(v, s + st, n); v[n] = 0;\n"
+    out = out + "    }\n"
+    out = out + "    else { size_t st = i; while (s[i] && s[i] != 0x2c && s[i] != 0x7d) i++; size_t n = i - st; v = (char*)malloc(n + 1); memcpy(v, s + st, n); v[n] = 0; }\n"
+    out = out + "    al_push(&m.keys, sizeof(char*), &k);\n"
+    out = out + "    al_push(&m.vals, sizeof(char*), &v);\n"
+    out = out + "  }\n"
+    out = out + "  return m;\n"
+    out = out + "}\n"
+    out = out + "char* read_line(void) {\n"
+    out = out + "  size_t cap = 256; char* buf = (char*)malloc(cap); size_t n = 0;\n"
+    out = out + "  int c;\n"
+    out = out + "  while ((c = fgetc(stdin)) != EOF) {\n"
+    out = out + "    if (c == 10) break;\n"
+    out = out + "    if (c == 13) continue;\n"
+    out = out + "    if (n + 2 > cap) { cap *= 2; buf = (char*)realloc(buf, cap); }\n"
+    out = out + "    buf[n++] = (char)c;\n"
+    out = out + "  }\n"
+    out = out + "  buf[n] = 0;\n"
+    out = out + "  return buf;\n"
+    out = out + "}\n"
+    out = out + "static char* al_json_esc(char* s) {\n"
+    out = out + "  size_t n = strlen(s); char* r = (char*)malloc(n*6+3); char* w = r;\n"
+    out = out + "  *w++ = 0x22;\n"
+    out = out + "  for (size_t i=0;i<n;i++) { unsigned char c=(unsigned char)s[i];\n"
+    out = out + "    if (c==0x22){*w++=0x5c;*w++=0x22;}\n"
+    out = out + "    else if (c==0x5c){*w++=0x5c;*w++=0x5c;}\n"
+    out = out + "    else if (c==10){*w++=0x5c;*w++=110;}\n"
+    out = out + "    else if (c==13){*w++=0x5c;*w++=114;}\n"
+    out = out + "    else if (c==9){*w++=0x5c;*w++=116;}\n"
+    out = out + "    else {*w++=(char)c;}\n"
+    out = out + "  }\n"
+    out = out + "  *w++=0x22; *w=0; return r;\n"
+    out = out + "}\n"
+    out = out + "char* json_encode(al_map m) {\n"
+    out = out + "  char* r = (char*)malloc(m.keys.len*64+16); char* w = r;\n"
+    out = out + "  *w++ = 0x7b;\n"
+    out = out + "  for (size_t i=0;i<m.keys.len;i++) {\n"
+    out = out + "    if (i) *w++ = 0x2c;\n"
+    out = out + "    char* k = ((char**)m.keys.data)[i];\n"
+    out = out + "    char* v = ((char**)m.vals.data)[i];\n"
+    out = out + "    char* ek = al_json_esc(k); size_t kl = strlen(ek); memcpy(w, ek, kl); w += kl;\n"
+    out = out + "    *w++ = 0x3a;\n"
+    out = out + "    if (v && ((unsigned char)v[0]==0x7b || (unsigned char)v[0]==0x5b || strncmp(v,\"true\",4)==0 || strncmp(v,\"false\",5)==0 || strncmp(v,\"null\",4)==0)) { size_t vl=strlen(v); memcpy(w,v,vl); w+=vl; }\n"
+    out = out + "    else if (v && strspn(v,\"-0123456789.eE+\")==strlen(v) && strlen(v)>0) { size_t vl=strlen(v); memcpy(w,v,vl); w+=vl; }\n"
+    out = out + "    else { char* ev = al_json_esc(v?v:\"\"); size_t vl=strlen(ev); memcpy(w,ev,vl); w+=vl; }\n"
+    out = out + "  }\n"
+    out = out + "  *w++ = 0x7d; *w=0; return r;\n"
+    out = out + "}\n"
+    out = out + "char* env(char* name) { char* v = getenv(name); return al_strdup_lit(v ? v : \"\"); }\n"
+    out = out + "#include <windows.h>\n"
+    out = out + "\n"
+    out = out + "static HWND al_ui_h[64]; static void (*al_ui_cb[64])(void); static int al_ui_n = 0; static int al_ui_cls = 0; static HINSTANCE al_ui_inst = NULL;\n"
+    out = out + "static wchar_t* al_utf16(const char* s) { int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, NULL, 0); wchar_t* w = (wchar_t*)malloc(n * 2); MultiByteToWideChar(CP_UTF8, 0, s, -1, w, n); return w; }\n"
+    out = out + "static LRESULT CALLBACK al_ui_proc(HWND h, UINT m, WPARAM w, LPARAM l) {\n"
+    out = out + "  if (m == WM_COMMAND && HIWORD(w) == BN_CLICKED) { int id = LOWORD(w); if (id >= 0 && id < 64 && al_ui_cb[id]) al_ui_cb[id](); return 0; }\n"
+    out = out + "  if (m == WM_DESTROY) { PostQuitMessage(0); return 0; }\n"
+    out = out + "  return DefWindowProcW(h, m, w, l);\n"
+    out = out + "}\n"
+    out = out + "static int window_new(char* title, int wd, int ht) {\n"
+    out = out + "  if (!al_ui_cls) { WNDCLASSW wc; memset(&wc, 0, sizeof(wc)); wc.lpfnWndProc = al_ui_proc; wc.hInstance = GetModuleHandle(NULL); wc.lpszClassName = L\"AineWin\"; wc.hCursor = LoadCursor(NULL, IDC_ARROW); RegisterClassW(&wc); al_ui_cls = 1; al_ui_inst = GetModuleHandle(NULL); }\n"
+    out = out + "  HWND h = CreateWindowExW(0, L\"AineWin\", al_utf16(title), WS_OVERLAPPEDWINDOW, 100, 100, wd, ht, NULL, NULL, al_ui_inst, NULL);\n"
+    out = out + "  al_ui_h[al_ui_n] = h; al_ui_n++; return al_ui_n - 1;\n"
+    out = out + "}\n"
+    out = out + "static int al_ui_child(HWND parent, wchar_t* cls, char* text, int x, int y, int w2, int h2, int id) {\n"
+    out = out + "  HWND h = CreateWindowExW(0, cls, al_utf16(text), WS_CHILD | WS_VISIBLE, x, y, w2, h2, parent, (HMENU)(INT_PTR)id, al_ui_inst, NULL);\n"
+    out = out + "  al_ui_h[id] = h; if (id >= al_ui_n) al_ui_n = id + 1; return id;\n"
+    out = out + "}\n"
+    out = out + "#include <d2d1.h>\n"
+    out = out + "#include <dwrite.h>\n"
+    out = out + "static ID2D1Factory* g_d2d = NULL;\n"
+    out = out + "static ID2D1HwndRenderTarget* g_rt = NULL;\n"
+    out = out + "static IDWriteFactory* g_dw = NULL;\n"
+    out = out + "static IDWriteTextFormat* g_tf_ui = NULL;\n"
+    out = out + "static IDWriteTextFormat* g_tf_code = NULL;\n"
+    out = out + "static const IID al_IID_IDWriteFactory = {0xb859ee5a,0xd838,0x4b5b,{0xa2,0xe8,0x1a,0xdc,0x7d,0x93,0xdb,0x48}};\n"
+    out = out + "enum { AL_PANEL, AL_LABEL, AL_BUTTON, AL_LIST, AL_SRECT, AL_HLINE };\n"
+    out = out + "#define AL_MAXC 2048\n"
+    out = out + "typedef struct { int type; float x, y, w, h; float rad; float size; int mono; char text[256]; D2D1_COLOR_F bg; D2D1_COLOR_F fg; void (*cb)(void); } al_comp;\n"
+    out = out + "static al_comp g_comps[AL_MAXC]; static int g_n = 0; static int g_pressed = -1;\n"
+    out = out + "typedef struct { float x, y, w, h; int id; } al_clk;\n"
+    out = out + "static al_clk g_clicks[256]; static int g_nc = 0; static int g_last_click = -1; static int g_click_flag = 0; static int g_resize_flag = 0;\n"
+    out = out + "static IDWriteTextFormat* al_tfs[40]; static float al_tfs_sz[40]; static int al_tfs_mo[40]; static int al_tfs_n = 0;\n"
+    out = out + "typedef struct { NMHDR hdr; int position; } AlSciPos;\n"
+    out = out + "static void (*g_style_cb)(int) = NULL;\n"
+    out = out + "static D2D1_COLOR_F al_col(int r, int g, int b) { D2D1_COLOR_F c; c.r = r / 255.0f; c.g = g / 255.0f; c.b = b / 255.0f; c.a = 1.0f; return c; }\n"
+    out = out + "static D2D1_COLOR_F al_theme(const char* n) {\n"
+    out = out + "  if (n[0] == 0) return al_col(251, 250, 247);\n"
+    out = out + "  if (n[0] == 112 && n[1] == 97) return al_col(246, 244, 239);\n"
+    out = out + "  if (n[0] == 108) return al_col(223, 221, 213);\n"
+    out = out + "  if (n[0] == 103 && n[1] == 114) return al_col(66, 101, 91);\n"
+    out = out + "  if (n[0] == 103 && n[1] == 50) return al_col(230, 236, 233);\n"
+    out = out + "  if (n[0] == 105) return al_col(37, 37, 31);\n"
+    out = out + "  if (n[0] == 115) return al_col(119, 118, 111);\n"
+    out = out + "  if (n[0] == 116) return al_col(242, 239, 233);\n"
+    out = out + "  return al_col(251, 250, 247);\n"
+    out = out + "}\n"
+    out = out + "static D2D1_COLOR_F al_rgb(int v) { D2D1_COLOR_F c; c.r = ((v >> 16) & 255) / 255.0f; c.g = ((v >> 8) & 255) / 255.0f; c.b = (v & 255) / 255.0f; c.a = 1.0f; return c; }\n"
+    out = out + "static IDWriteTextFormat* al_tf(float sz, int mono) {\n"
+    out = out + "  for (int i = 0; i < al_tfs_n; i++) { if (al_tfs_sz[i] == sz && al_tfs_mo[i] == mono && al_tfs[i]) return al_tfs[i]; }\n"
+    out = out + "  IDWriteTextFormat* tf = NULL;\n"
+    out = out + "  g_dw->lpVtbl->CreateTextFormat(g_dw, mono ? L\"Consolas\" : L\"Segoe UI\", NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, sz, L\"\", &tf);\n"
+    out = out + "  if (al_tfs_n < 40) { al_tfs[al_tfs_n] = tf; al_tfs_sz[al_tfs_n] = sz; al_tfs_mo[al_tfs_n] = mono; al_tfs_n++; }\n"
+    out = out + "  return tf;\n"
+    out = out + "}\n"
+    out = out + "static wchar_t al_w[512];\n"
+    out = out + "static LRESULT CALLBACK al_rt_proc(HWND h, UINT m, WPARAM w, LPARAM l) {\n"
+    out = out + "  if (m == WM_PAINT && g_rt) { PAINTSTRUCT ps; BeginPaint(h, &ps);\n"
+    out = out + "    ID2D1HwndRenderTarget_BeginDraw(g_rt);\n"
+    out = out + "    D2D1_COLOR_F paper = al_theme(\"paper\");\n"
+    out = out + "    ID2D1HwndRenderTarget_Clear(g_rt, &paper);\n"
+    out = out + "    for (int i = 0; i < g_n; i++) {\n"
+    out = out + "      al_comp* cp = &g_comps[i];\n"
+    out = out + "      D2D1_RECT_F r; r.left = cp->x; r.top = cp->y; r.right = cp->x + cp->w; r.bottom = cp->y + cp->h;\n"
+    out = out + "      if (cp->type == AL_PANEL) {\n"
+    out = out + "        ID2D1SolidColorBrush* b = NULL;\n"
+    out = out + "        ID2D1HwndRenderTarget_CreateSolidColorBrush(g_rt, &cp->bg, NULL, &b);\n"
+    out = out + "        if (b) { D2D1_ROUNDED_RECT rr; rr.rect = r; rr.radiusX = cp->rad; rr.radiusY = cp->rad; ID2D1RenderTarget_FillRoundedRectangle((ID2D1RenderTarget*)g_rt, &rr, (ID2D1Brush*)b); ID2D1SolidColorBrush_Release(b); }\n"
+    out = out + "      } else if (cp->type == AL_HLINE) {\n"
+    out = out + "        ID2D1SolidColorBrush* b = NULL;\n"
+    out = out + "        ID2D1HwndRenderTarget_CreateSolidColorBrush(g_rt, &cp->bg, NULL, &b);\n"
+    out = out + "        if (b) { D2D1_POINT_2F p0, p1; p0.x = cp->x; p0.y = cp->y; p1.x = cp->x + cp->w; p1.y = cp->y; ID2D1RenderTarget_DrawLine((ID2D1RenderTarget*)g_rt, p0, p1, (ID2D1Brush*)b, 1.0f, NULL); ID2D1SolidColorBrush_Release(b); }\n"
+    out = out + "      } else if (cp->type == AL_SRECT) {\n"
+    out = out + "        ID2D1SolidColorBrush* b = NULL;\n"
+    out = out + "        ID2D1HwndRenderTarget_CreateSolidColorBrush(g_rt, &cp->bg, NULL, &b);\n"
+    out = out + "        if (b) { D2D1_ROUNDED_RECT rr; rr.rect = r; rr.radiusX = cp->rad; rr.radiusY = cp->rad; ID2D1RenderTarget_DrawRoundedRectangle((ID2D1RenderTarget*)g_rt, &rr, (ID2D1Brush*)b, 1.0f, NULL); ID2D1SolidColorBrush_Release(b); }\n"
+    out = out + "      } else if (cp->type == AL_BUTTON) {\n"
+    out = out + "        D2D1_COLOR_F bg2 = (g_pressed == i) ? al_theme(\"green2\") : al_theme(\"panel2\");\n"
+    out = out + "        ID2D1SolidColorBrush* b = NULL;\n"
+    out = out + "        ID2D1HwndRenderTarget_CreateSolidColorBrush(g_rt, &bg2, NULL, &b);\n"
+    out = out + "        if (b) { D2D1_ROUNDED_RECT rr; rr.rect = r; rr.radiusX = cp->rad; rr.radiusY = cp->rad; ID2D1RenderTarget_FillRoundedRectangle((ID2D1RenderTarget*)g_rt, &rr, (ID2D1Brush*)b); ID2D1SolidColorBrush_Release(b); }\n"
+    out = out + "        b = NULL;\n"
+    out = out + "        ID2D1HwndRenderTarget_CreateSolidColorBrush(g_rt, &cp->bg, NULL, &b);\n"
+    out = out + "        if (b) { ID2D1RenderTarget_DrawRectangle((ID2D1RenderTarget*)g_rt, &r, (ID2D1Brush*)b, 1.0f, NULL); ID2D1SolidColorBrush_Release(b); }\n"
+    out = out + "        UINT32 ln = 0; wchar_t* wv = al_utf16(cp->text); while (wv[ln]) ln++;\n"
+    out = out + "        b = NULL;\n"
+    out = out + "        D2D1_COLOR_F grn = al_theme(\"green\");\n"
+    out = out + "        ID2D1HwndRenderTarget_CreateSolidColorBrush(g_rt, &grn, NULL, &b);\n"
+    out = out + "        if (b) { ID2D1RenderTarget_DrawText((ID2D1RenderTarget*)g_rt, wv, ln, g_tf_ui, &r, (ID2D1Brush*)b, D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL); ID2D1SolidColorBrush_Release(b); }\n"
+    out = out + "      } else if (cp->type == AL_LIST) {\n"
+    out = out + "        ID2D1SolidColorBrush* b = NULL;\n"
+    out = out + "        ID2D1HwndRenderTarget_CreateSolidColorBrush(g_rt, &cp->bg, NULL, &b);\n"
+    out = out + "        if (b) { D2D1_ROUNDED_RECT rr; rr.rect = r; rr.radiusX = cp->rad; rr.radiusY = cp->rad; ID2D1RenderTarget_FillRoundedRectangle((ID2D1RenderTarget*)g_rt, &rr, (ID2D1Brush*)b); ID2D1SolidColorBrush_Release(b); }\n"
+    out = out + "      } else if (cp->type == AL_LABEL) {\n"
+    out = out + "        UINT32 ln = 0; wchar_t* wv = al_utf16(cp->text); while (wv[ln]) ln++;\n"
+    out = out + "        IDWriteTextFormat* tfv = (cp->size > 0) ? al_tf(cp->size, cp->mono) : g_tf_ui;\n"
+    out = out + "        if (tfv) { ID2D1SolidColorBrush* b = NULL;\n"
+    out = out + "        ID2D1HwndRenderTarget_CreateSolidColorBrush(g_rt, &cp->fg, NULL, &b);\n"
+    out = out + "        if (b) { ID2D1RenderTarget_DrawText((ID2D1RenderTarget*)g_rt, wv, ln, tfv, &r, (ID2D1Brush*)b, D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL); ID2D1SolidColorBrush_Release(b); } }\n"
+    out = out + "      }\n"
+    out = out + "    }\n"
+    out = out + "    ID2D1HwndRenderTarget_EndDraw(g_rt, NULL, NULL);\n"
+    out = out + "    EndPaint(h, &ps); return 0; }\n"
+    out = out + "  if (m == WM_SIZE && g_rt) { D2D1_SIZE_U sz2; sz2.width = (UINT32)LOWORD(l); sz2.height = (UINT32)HIWORD(l); ID2D1HwndRenderTarget_Resize(g_rt, &sz2); g_resize_flag = 1; InvalidateRect(h, NULL, FALSE); return 0; }\n"
+    out = out + "  if (m == WM_KEYDOWN || m == WM_SYSKEYDOWN) {\n"
+    out = out + "    int vk = (int)w;\n"
+    out = out + "    if (vk == 116) { g_last_click = 205; g_click_flag = 1; return 0; }\n"  // F5 → Run
+    out = out + "    if (vk == 117) { g_last_click = 220; g_click_flag = 1; return 0; }\n"  // F6 → Test
+    out = out + "    if (vk == 118) { g_last_click = 230; g_click_flag = 1; return 0; }\n"  // F7 → Docs
+    out = out + "    if (vk == 119) { g_last_click = 200; g_click_flag = 1; return 0; }\n"  // F8 → Language
+    out = out + "  }\n"
+    out = out + "  if (m == WM_LBUTTONDOWN) { float mx = (float)(short)LOWORD(l), my = (float)(short)HIWORD(l);\n"
+    out = out + "    for (int i = 0; i < g_n; i++) { al_comp* cp = &g_comps[i];\n"
+    out = out + "      if (cp->type == AL_BUTTON && mx >= cp->x && mx <= cp->x + cp->w && my >= cp->y && my <= cp->y + cp->h) { g_pressed = i; if (cp->cb) cp->cb(); InvalidateRect(h, NULL, FALSE); return 0; } }\n"
+    out = out + "    for (int i = 0; i < g_nc; i++) { if (mx >= g_clicks[i].x && mx <= g_clicks[i].x + g_clicks[i].w && my >= g_clicks[i].y && my <= g_clicks[i].y + g_clicks[i].h) { g_last_click = g_clicks[i].id; g_click_flag = 1; return 0; } }\n"
+    out = out + "    return 0; }\n"
+    out = out + "  if (m == WM_LBUTTONUP) { g_pressed = -1; InvalidateRect(h, NULL, FALSE); return 0; }\n"
+    out = out + "  if (m == WM_NOTIFY) {\n"
+    out = out + "    typedef struct { NMHDR hdr; int position; int ch; int modifiers; } AlSciKey;\n"
+    out = out + "    AlSciKey* sk = (AlSciKey*)l;\n"
+    out = out + "    if (sk && sk->hdr.code == 2000 && g_style_cb) { g_style_cb(sk->position); return 0; }\n"
+    out = out + "    if (sk && sk->hdr.code == 2005) {\n"
+    out = out + "      int ch = sk->ch;\n"
+    out = out + "      if (ch == 116) { g_last_click = 205; g_click_flag = 1; return 0; }\n"  // F5 → Run
+    out = out + "      if (ch == 117) { g_last_click = 220; g_click_flag = 1; return 0; }\n"  // F6 → Test
+    out = out + "      if (ch == 118) { g_last_click = 230; g_click_flag = 1; return 0; }\n"  // F7 → Docs
+    out = out + "      if (ch == 119) { g_last_click = 200; g_click_flag = 1; return 0; }\n"  // F8 → Language
+    out = out + "    }\n"
+    out = out + "  }\n"
+    out = out + "  if (m == 0x0084) { return 1; }\n"
+    out = out + "  if (m == WM_DESTROY) { PostQuitMessage(0); return 0; }\n"
+    out = out + "  return DefWindowProcW(h, m, w, l); }\n"
+    out = out + "static int rt_window(char* title, int wd, int ht) {\n"
+    out = out + "  D2D1_FACTORY_OPTIONS fo; memset(&fo, 0, sizeof(fo));\n"
+    out = out + "  if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, &fo, (void**)&g_d2d))) return -1;\n"
+    out = out + "  if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &al_IID_IDWriteFactory, (IUnknown**)&g_dw))) return -1;\n"
+    out = out + "  g_dw->lpVtbl->CreateTextFormat(g_dw, L\"Segoe UI\", NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 12.0f, L\"\", &g_tf_ui);\n"
+    out = out + "  g_dw->lpVtbl->CreateTextFormat(g_dw, L\"Consolas\", NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13.0f, L\"\", &g_tf_code);\n"
+    out = out + "  WNDCLASSW wc; memset(&wc, 0, sizeof(wc)); wc.lpfnWndProc = al_rt_proc; wc.hInstance = GetModuleHandle(NULL); wc.lpszClassName = L\"AineRT\"; wc.hCursor = LoadCursor(NULL, IDC_ARROW); RegisterClassW(&wc);\n"
+    out = out + "  HWND h = CreateWindowExW(0, L\"AineRT\", al_utf16(title), WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, 60, 60, wd, ht, NULL, NULL, GetModuleHandle(NULL), NULL);\n"
+    out = out + "  RECT rc2; GetClientRect(h, &rc2);\n"
+    out = out + "  D2D1_SIZE_U sz2; sz2.width = (UINT32)(rc2.right - rc2.left); sz2.height = (UINT32)(rc2.bottom - rc2.top);\n"
+    out = out + "  D2D1_RENDER_TARGET_PROPERTIES rtp; memset(&rtp, 0, sizeof(rtp)); rtp.type = D2D1_RENDER_TARGET_TYPE_DEFAULT; rtp.pixelFormat.format = DXGI_FORMAT_UNKNOWN; rtp.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;\n"
+    out = out + "  D2D1_HWND_RENDER_TARGET_PROPERTIES hp; hp.hwnd = h; hp.pixelSize = sz2; hp.presentOptions = D2D1_PRESENT_OPTIONS_NONE;\n"
+    out = out + "  if (FAILED(ID2D1Factory_CreateHwndRenderTarget(g_d2d, &rtp, &hp, &g_rt))) return -1;\n"
+    out = out + "  ShowWindow(h, SW_SHOW);\n"
+    out = out + "  return 0;\n"
+    out = out + "}\n"
+    out = out + "static int rt_comp(int type, float x, float y, float w2, float h2, const char* text, const char* bgname, const char* fgname, void (*cb)(void)) {\n"
+    out = out + "  if (g_n >= AL_MAXC) return -1;\n"
+    out = out + "  al_comp* cp = &g_comps[g_n]; cp->type = type; cp->x = x; cp->y = y; cp->w = w2; cp->h = h2; cp->rad = (type == AL_PANEL) ? 10 : 8; cp->size = 0; cp->mono = 0;\n"
+    out = out + "  size_t tl = strlen(text); if (tl > 255) tl = 255; memcpy(cp->text, text, tl); cp->text[tl] = 0;\n"
+    out = out + "  cp->bg = al_theme(bgname); cp->fg = al_theme(fgname); cp->cb = cb; g_n++; return g_n - 1;\n"
+    out = out + "}\n"
+    out = out + "static void rt_set_comp_text(int id, const char* text) { if (id >= 0 && id < g_n) { size_t tl = strlen(text); if (tl > 255) tl = 255; memcpy(g_comps[id].text, text, tl); g_comps[id].text[tl] = 0; } }\n"
+    out = out + "static int rt_put(int type, float x, float y, float w2, float h2, float rad, const char* text, int rgb, int mono, float sz) {\n"
+    out = out + "  if (g_n >= AL_MAXC) return -1;\n"
+    out = out + "  al_comp* cp = &g_comps[g_n]; cp->type = type; cp->x = x; cp->y = y; cp->w = w2; cp->h = h2; cp->rad = rad; cp->size = sz; cp->mono = mono;\n"
+    out = out + "  size_t tl = strlen(text); if (tl > 255) tl = 255; memcpy(cp->text, text, tl); cp->text[tl] = 0;\n"
+    out = out + "  cp->fg = al_rgb(rgb); cp->bg = al_rgb(rgb); cp->cb = NULL; g_n++; return g_n - 1;\n"
+    out = out + "}\n"
+    out = out + "static void rt_begin(void) { g_n = 0; g_nc = 0; g_click_flag = 0; }\n"
+    out = out + "static int rt_fill(float x, float y, float w2, float h2, int rgb) { return rt_put(AL_PANEL, x, y, w2, h2, 0, \"\", rgb, 0, 0); }\n"
+    out = out + "static int rt_rrect(float x, float y, float w2, float h2, float rad, int rgb) { return rt_put(AL_PANEL, x, y, w2, h2, rad, \"\", rgb, 0, 0); }\n"
+    out = out + "static int rt_srect(float x, float y, float w2, float h2, float rad, int rgb) { return rt_put(AL_SRECT, x, y, w2, h2, rad, \"\", rgb, 0, 0); }\n"
+    out = out + "static int rt_hline(float x0, float x1, float y, int rgb) { return rt_put(AL_HLINE, x0, y, x1 - x0, 0, 0, \"\", rgb, 0, 0); }\n"
+    out = out + "static int rt_text(float x, float y, const char* s, int rgb, int mono, float sz) { return rt_put(AL_LABEL, x, y, 2000, 60, 0, s, rgb, mono, sz); }\n"
+    out = out + "static int rt_click(float x, float y, float w2, float h2, int id) { if (g_nc >= 256) return -1; g_clicks[g_nc].x = x; g_clicks[g_nc].y = y; g_clicks[g_nc].w = w2; g_clicks[g_nc].h = h2; g_clicks[g_nc].id = id; g_nc++; return g_nc - 1; }\n"
+    out = out + "static int rt_wait_click(void) { MSG msg; g_click_flag = 0; while (GetMessage(&msg, NULL, 0, 0) > 0) { TranslateMessage(&msg); DispatchMessage(&msg); if (g_click_flag) { g_click_flag = 0; return g_last_click; } } return -2; }\n"
+    out = out + "static HWND al_rt_hwnd(void) { return g_rt ? (HWND)ID2D1HwndRenderTarget_GetHwnd(g_rt) : NULL; }\n"
+    out = out + "static int rt_w(void) { RECT rc; HWND h = al_rt_hwnd(); if (!h) return 1200; GetClientRect(h, &rc); return rc.right - rc.left; }\n"
+    out = out + "static int rt_h(void) { RECT rc; HWND h = al_rt_hwnd(); if (!h) return 760; GetClientRect(h, &rc); return rc.bottom - rc.top; }\n"
+    out = out + "static int rt_wait_event(void) { MSG msg; g_click_flag = 0; while (GetMessage(&msg, NULL, 0, 0) > 0) { TranslateMessage(&msg); DispatchMessage(&msg); if (g_click_flag) { g_click_flag = 0; return g_last_click; } if (g_resize_flag) { g_resize_flag = 0; return -1; } } return -2; }\n"
+    out = out + "static void rt_invalidate(void) { HWND h = g_rt ? (HWND)ID2D1HwndRenderTarget_GetHwnd(g_rt) : NULL; if (h) InvalidateRect(h, NULL, FALSE); }\n"
+    out = out + "static void rt_run(void) { HWND h = g_rt ? (HWND)ID2D1HwndRenderTarget_GetHwnd(g_rt) : NULL; if (h) ShowWindow(h, SW_SHOW); MSG msg; while (GetMessage(&msg, NULL, 0, 0) > 0) { TranslateMessage(&msg); DispatchMessage(&msg); } }\n"
+    out = out + "static int label_new(int win, char* text, int x, int y) { return al_ui_child(al_ui_h[win], L\"STATIC\", text, x, y, 220, 26, al_ui_n); }\n"
+    out = out + "static int button_new(int win, char* text, int x, int y) { return al_ui_child(al_ui_h[win], L\"BUTTON\", text, x, y, 96, 30, al_ui_n); }\n"
+    out = out + "static int input_new(int win, char* text, int x, int y) { return al_ui_child(al_ui_h[win], L\"EDIT\", text, x, y, 220, 26, al_ui_n); }\n"
+    out = out + "static int listbox_new(int win, int x, int y, int w2, int h2) { HWND h = CreateWindowExW(0, L\"LISTBOX\", L\"\", WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY, x, y, w2, h2, al_ui_h[win], (HMENU)(INT_PTR)al_ui_n, al_ui_inst, NULL); al_ui_h[al_ui_n] = h; al_ui_n++; return al_ui_n - 1; }\n"
+    out = out + "static void listbox_add(int id, char* text) { if (id >= 0 && id < 64 && al_ui_h[id]) SendMessageW(al_ui_h[id], LB_ADDSTRING, 0, (LPARAM)al_utf16(text)); }\n"
+    out = out + "static void listbox_clear(int id) { if (id >= 0 && id < 64 && al_ui_h[id]) SendMessageW(al_ui_h[id], LB_RESETCONTENT, 0, 0); }\n"
+    out = out + "static int listbox_selected(int id) { if (id >= 0 && id < 64 && al_ui_h[id]) return (int)SendMessageW(al_ui_h[id], LB_GETCURSEL, 0, 0); return -1; }\n"
+    out = out + "static void ui_run(void) { for (int i = 0; i < al_ui_n; i++) ShowWindow(al_ui_h[i], SW_SHOW); MSG msg; while (GetMessage(&msg, NULL, 0, 0) > 0) { TranslateMessage(&msg); DispatchMessage(&msg); } }\n"
+    out = out + "static void set_text(int id, char* text) { if (id >= 0 && id < 64 && al_ui_h[id]) SetWindowTextW(al_ui_h[id], al_utf16(text)); }\n"
+    out = out + "static char* get_text(int id) { wchar_t w[512]; if (id >= 0 && id < 64 && al_ui_h[id]) GetWindowTextW(al_ui_h[id], w, 512); else w[0] = 0; int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL); char* r = (char*)malloc(n); WideCharToMultiByte(CP_UTF8, 0, w, -1, r, n, NULL, NULL); return r; }\n"
+    out = out + "static void button_onclick(int id, void (*fn)(void)) { if (id >= 0 && id < 64) al_ui_cb[id] = fn; }\n"
+    out = out + "static int edit_new(int win, char* text, int x, int y, int w2, int h2) { HWND h = CreateWindowExW(0, L\"EDIT\", al_utf16(text), WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_AUTOHSCROLL | WS_BORDER, x, y, w2, h2, al_ui_h[win], (HMENU)(INT_PTR)al_ui_n, GetModuleHandle(NULL), NULL); al_ui_h[al_ui_n] = h; al_ui_n++; return al_ui_n - 1; }\n"
+    out = out + "static void listbox_ondblclick(int id, void (*fn)(void)) { if (id >= 0 && id < 64) al_ui_cb[id] = fn; }\n"
+    out = out + "static char* listbox_get(int id, int idx) { wchar_t w[512]; if (id >= 0 && id < 64 && al_ui_h[id]) SendMessageW(al_ui_h[id], LB_GETTEXT, (WPARAM)idx, (LPARAM)w); else w[0] = 0; int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL); char* r = (char*)malloc(n); WideCharToMultiByte(CP_UTF8, 0, w, -1, r, n, NULL, NULL); return r; }\n"
+    out = out + "static HMODULE g_sci_dll = NULL; static HWND g_sci = NULL;\n"
+    out = out + "static int sci_init(void) {\n"
+    out = out + "  HMODULE sc = LoadLibraryA(\"bin/Scintilla.dll\"); if (!sc) sc = LoadLibraryA(\"Scintilla.dll\");\n"
+    out = out + "  if (!sc) return -1;\n"
+    out = out + "  int (*reg)(void*) = (int (*)(void*))GetProcAddress(sc, \"Scintilla_RegisterClasses\");\n"
+    out = out + "  if (reg) reg(GetModuleHandle(NULL));\n"
+    out = out + "  return 0;\n"
+    out = out + "}\n"
+    out = out + "static int sci_new(int x, int y, int w2, int h2) {\n"
+    out = out + "  HWND parent = al_rt_hwnd(); if (!parent) return -1;\n"
+    out = out + "  g_sci = CreateWindowExW(0, L\"Scintilla\", L\"\", WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL, x, y, w2, h2, parent, NULL, GetModuleHandle(NULL), NULL);\n"
+    out = out + "  if (!g_sci) return -1;\n"
+    out = out + "  SendMessageW(g_sci, 4003, 0, (LPARAM)0);\n"
+    out = out + "  return 0;\n"
+    out = out + "}\n"
+    out = out + "static int sci_msg(unsigned int msg, unsigned int wp, int lp) { if (!g_sci) return 0; return (int)SendMessageW(g_sci, msg, (WPARAM)wp, (LPARAM)(intptr_t)lp); }\n"
+    out = out + "static int sci_msgp(unsigned int msg, unsigned int wp, const char* lp) { if (!g_sci) return 0; return (int)SendMessageW(g_sci, msg, (WPARAM)wp, (LPARAM)lp); }\n"
+    out = out + "static void rt_on_style(void (*fn)(int)) { g_style_cb = fn; }\n"
+    out = out + "static char* sci_get_line(int line) { if (!g_sci) return al_strdup_lit(\"\"); int n = (int)SendMessageW(g_sci, 2350, (WPARAM)line, 0); char* buf = (char*)malloc(n + 2); if (!buf) return al_strdup_lit(\"\"); SendMessageW(g_sci, 2153, (WPARAM)line, (LPARAM)buf); buf[n] = 0; return buf; }\n"
+    out = out + "static void sci_set_text(char* s) { if (!g_sci || !s) return; SendMessageW(g_sci, 2004, 0, 0); int n = 0; while (s[n]) n++; SendMessageW(g_sci, 2001, (WPARAM)n, (LPARAM)s); }\n"
+    out = out + "static char* sci_get_text(void) { if (!g_sci) return al_strdup_lit(\"\"); int n = (int)SendMessageW(g_sci, 2006, 0, 0); char* buf = (char*)malloc(n + 1); if (!buf) return al_strdup_lit(\"\"); SendMessageW(g_sci, 2182, (WPARAM)n + 1, (LPARAM)buf); buf[n] = 0; char* r2 = buf; char* w2 = buf; while (*r2) { if (*r2 == '\\r') { if (r2[1] == '\\n') r2++; *w2++ = '\\n'; r2++; } else { *w2++ = *r2++; } } *w2 = 0; return buf; }\n"
+    out = out + "static void sci_fit(int x, int y, int w2, int h2) { if (g_sci) MoveWindow(g_sci, x, y, w2, h2, TRUE); }\n"
+    out = out + "static int sys_exec(char* cmd) { STARTUPINFOA si; PROCESS_INFORMATION pi; memset(&si, 0, sizeof(si)); si.cb = sizeof(si); si.dwFlags = STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE; if (!CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0x08000000, NULL, NULL, &si, &pi)) return -1; WaitForSingleObject(pi.hProcess, 600000); DWORD code = 1; GetExitCodeProcess(pi.hProcess, &code); CloseHandle(pi.hThread); CloseHandle(pi.hProcess); return (int)code; }\n"
+    out = out + "static int sys_open(char* path) { HINSTANCE r = ShellExecuteA(NULL, \"open\", path, NULL, NULL, SW_SHOWNORMAL); return ((INT_PTR)r) > 32 ? 0 : -1; }\n"
+    out = out + "static al_vec file_list(char* path) {\n"
+    out = out + "  al_vec outv = { 0, sizeof(char*), NULL };\n"
+    out = out + "  char pat[1024]; snprintf(pat, sizeof(pat), \"%s/*\", path);\n"
+    out = out + "  wchar_t* wpat = al_utf16(pat);\n"
+    out = out + "  WIN32_FIND_DATAW fd; HANDLE fh = FindFirstFileW(wpat, &fd);\n"
+    out = out + "  if (fh != INVALID_HANDLE_VALUE) {\n"
+    out = out + "    do {\n"
+    out = out + "      if (wcscmp(fd.cFileName, L\".\") == 0 || wcscmp(fd.cFileName, L\"..\") == 0) continue;\n"
+    out = out + "      int wn = WideCharToMultiByte(CP_UTF8, 0, fd.cFileName, -1, NULL, 0, NULL, NULL);\n"
+    out = out + "      char* s = (char*)malloc(wn); WideCharToMultiByte(CP_UTF8, 0, fd.cFileName, -1, s, wn, NULL, NULL);\n"
+    out = out + "      al_push(&outv, sizeof(char*), (void*)&s);\n"
+    out = out + "    } while (FindNextFileW(fh, &fd));\n"
+    out = out + "    FindClose(fh);\n"
+    out = out + "  }\n"
+    out = out + "  for (int i = 0; i + 1 < (int)outv.len; i++) { for (int j = i + 1; j < (int)outv.len; j++) {\n"
+    out = out + "    char* a = ((char**)outv.data)[i]; char* b = ((char**)outv.data)[j];\n"
+    out = out + "    if (strcmp(a, b) > 0) { ((char**)outv.data)[i] = b; ((char**)outv.data)[j] = a; }\n"
+    out = out + "  } }\n"
+    out = out + "  return outv;\n"
+    out = out + "}\n"
+    out = out + "static void* al_dup(const void* p, size_t n) {\n"
+    out = out + "  void* r = malloc(n);\n"
+    out = out + "  if (r && p) memcpy(r, p, n);\n"
+    out = out + "  return r;\n"
+    out = out + "}\n"
+    out = out + "static char* al_char_to_str(char c) { char* r = (char*)malloc(2); r[0] = c; r[1] = 0; return r; }\n"
+    out = out + "static char* al_num(long v) { char* r = (char*)malloc(32); snprintf(r, 32, \"%ld\", v); return r; }\n"
+    out = out + "static char* al_fnum(double v) { char* r = (char*)malloc(32); if (v == (long long)v && v >= -1e15 && v <= 1e15) { snprintf(r, 32, \"%.1f\", v); } else { snprintf(r, 32, \"%g\", v); } return r; }\n"
+    out = out + "static char* al_bool(int b) { return b ? \"true\" : \"false\"; }\n"
+    out = out + "static char* al_trim(char* s) { char* r = (char*)malloc(strlen(s) + 1); strcpy(r, s); char* st = r; while (*st == ' ' || *st == '\\t' || *st == '\\r' || *st == '\\n') st++; char* en = st + strlen(st); while (en > st && (en[-1] == ' ' || en[-1] == '\\t' || en[-1] == '\\r' || en[-1] == '\\n')) en--; *en = 0; if (st != r) memmove(r, st, strlen(st) + 1); return r; }\n"
+    out = out + "static al_vec al_split(char* s, char* sep) { al_vec r = { 0, 0, NULL }; size_t sl = strlen(sep); if (sl == 0) { for (size_t i = 0; i < strlen(s); i++) { char* p = (char*)malloc(2); p[0] = s[i]; p[1] = 0; al_push(&r, sizeof(char*), &p); } } else { char* cur = s; while (1) { char* hit = strstr(cur, sep); if (!hit) { al_push(&r, sizeof(char*), &(char*){ cur }); break; } size_t n = (size_t)(hit - cur); char* p = (char*)malloc(n + 1); memcpy(p, cur, n); p[n] = 0; al_push(&r, sizeof(char*), &p); cur = hit + sl; } return r; } }\n"
+    out = out + "static char* al_replace(char* s, char* from, char* to) { size_t fl = strlen(from), tl = strlen(to), sl = strlen(s); if (fl == 0) return s; size_t cnt = 0; char* q = s; while ((q = strstr(q, from)) != NULL) { cnt++; q += fl; } char* r = (char*)malloc(sl + cnt * (tl - fl) + 1); char* o = r; char* p = s; while (1) { char* hit = strstr(p, from); if (!hit) { strcpy(o, p); break; } size_t pre = (size_t)(hit - p); memcpy(o, p, pre); o += pre; memcpy(o, to, tl); o += tl; p = hit + fl; } return r; }\n"
+    out = out + "static al_vec al_slice(al_vec v, size_t a, size_t b) {\n"
+    out = out + "  if (b > v.len) b = v.len;\n"
+    out = out + "  if (a > b) a = b;\n"
+    out = out + "  size_t n = b - a;\n"
+    out = out + "  al_vec r = { n, v.elem_size, NULL };\n"
+    out = out + "  if (n > 0) {\n"
+    out = out + "    r.data = malloc(n * v.elem_size);\n"
+    out = out + "    if (v.data) memcpy(r.data, (char*)v.data + a * v.elem_size, n * v.elem_size);\n"
+    out = out + "  }\n"
+    out = out + "  return r;\n"
+    out = out + "}\n"
+    // al_opt 先于用户类型：用户类型载荷为前向声明指针
+    var mems = "int i; double f; char* s; al_vec v; void* p;"
+    for t in user_types {
+        mems = mems + "struct " + t + "* t_" + t + ";"
+    }
+    out = out + "typedef struct { int tag; union { " + mems + " } data; } al_opt;\n"
+    out = out + "#define al_some_i(x) ((al_opt){ .tag = 1, .data.i = (x) })\n"
+    out = out + "#define al_some_f(x) ((al_opt){ .tag = 1, .data.f = (x) })\n"
+    out = out + "#define al_some_s(x) ((al_opt){ .tag = 1, .data.s = (x) })\n"
+    out = out + "#define al_some_v(x) ((al_opt){ .tag = 1, .data.v = (x) })\n"
+    out = out + "#define al_some_p(x) ((al_opt){ .tag = 1, .data.p = (void*)(x) })\n"
+    for t in user_types {
+        out = out + "#define al_some_t_" + t + "(x) ((al_opt){ .tag = 1, .data.t_" + t + " = al_dup(&(x), sizeof(x)) })\n"
+    }
+    out = out + "#define al_none() ((al_opt){ .tag = 0 })\n"
+    // 枚举变体字段表（嵌套模式解析用）
+    let vfnames = collect_enum_variant_names(program)
+    let vftypes = collect_enum_variant_ftypes(program)
+    // 结构体字段表（EField 推断用）
+    let snames = collect_struct_snames(program)
+    let sfnames = collect_struct_fnames(program)
+    let sftypes = collect_struct_ftypes(program)
+    // 函数作用域变量表
+    let fn_names_all = collect_fn_names(program)
+    let fn_var_infos = collect_fn_var_infos(program)
+    let fptypes = collect_fn_ptypes(program)
+    let enames = collect_enum_ty_names(program)
+    let elists = collect_enum_variant_lists(program)
+    // 用户类型定义
+
+    // 全局变量(S1c): 类型定义后、函数前发射 C 文件作用域变量
+    for s in program {
+        match s {
+            SGlobalVar(name, ty, init) {
+                let ct = c_type(ty, user_types)
+                let ic = c_expr(init, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                out = out + ct + " " + name + " = " + ic + ";\n"
+            }
+            _ {}
+        }
+    }
+    for s in program {
+        match s {
+            SStruct(n, f) { out = out + c_stmt(s, "", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, "", vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false) + "\n" }
+            SEnum(n, v) { out = out + c_stmt(s, "", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, "", vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false) + "\n" }
+            _ {}
+        }
+    }
+
+    // 函数前向声明（互递归）
+    for s in program {
+        match s {
+            SDef(fname, params, ret, body_s) {
+                var ps: Vec<String> = []
+                for p in params { ps.push(c_param_decl(p.ty, p.name, user_types)) }
+                var ct = "void"
+                match ret {
+                    Some(rr) { ct = c_type(Some(rr), user_types) }
+                    None {
+                        if fname == "main" { ct = "int" } else { ct = "void" }
+                    }
+                }
+                if fname == "main" { ct = "int" }
+                if fname == "main" {
+                    out = out + "int main(int _argc, char** _argv);\n"
+                } else {
+                    out = out + ct + " " + fname + "(" + join(ps, ", ") + ");\n"
+                }
+            }
+            SImpl(ty, methods) {
+                // impl 方法前向声明：Type_method(struct Type self, ...)
+                for m in methods {
+                    match m {
+                        SDef(fname, params, ret, _) {
+                            var ps: Vec<String> = []
+                            for p in params {
+                                if p.ty == "self" {
+                                    ps.push(c_param_decl(ty, p.name, user_types))
+                                } else {
+                                    ps.push(c_param_decl(p.ty, p.name, user_types))
+                                }
+                            }
+                            var mct = "void"
+                            match ret {
+                                Some(rr) { mct = c_type(Some(rr), user_types) }
+                                None {}
+                            }
+                            out = out + mct + " " + ty + "_" + fname + "(" + join(ps, ", ") + ");\n"
+                        }
+                        _ {}
+                    }
+                }
+            }
+            _ {}
+        }
+    }
+    // 函数定义（struct/enum 已在前面输出）
+
+    for s in program {
+        match s {
+            SStruct(n, f) {}
+            SEnum(n, v) {}
+            SDef(bn, _, _, _) {
+                // 值流内建：header 已有 C 内建实现，跳过 Aine 体
+                if bn != "al_strcat_own" && bn != "al_strdup_lit" && bn != "write_file" && bn != "append_file" && bn != "file_exists" {
+                    var def_has_body = false
+                    match s {
+                        SDef(_, _, _, body_s) {
+                            if body_s.len() > 0 { def_has_body = true }
+                        }
+                        _ {}
+                    }
+                    // extern 声明（空体）→ 仅保留前向声明，不发射函数体（符号由外部 C 提供）
+                    if def_has_body {
+                        out = out + c_stmt(s, "", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, "", vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false) + "\n"
+                    }
+                }
+            }
+            SImpl(ty, methods) {
+                // impl 方法发射：Type_method(struct Type self, ...) —— self 形参替换为 impl 类型
+                for m in methods {
+                    match m {
+                        SDef(name, params, ret, body_s) {
+                            var ps2: Vec<Param> = []
+                            for p in params {
+                                if p.ty == "self" {
+                                    ps2.push(Param { name: p.name ty: ty })
+                                } else {
+                                    ps2.push(p)
+                                }
+                            }
+                            let s2 = SDef(ty + "_" + name, ps2, ret, body_s)
+                            out = out + c_stmt(s2, "", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, "", vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false) + "\n"
+                        }
+                        _ {}
+                    }
+                }
+            }
+            SExpr(unit_e) {
+                // interface 声明等占位节点（EUnit）→ 不发射
+                match unit_e {
+                    EUnit {}
+                    _ { out = out + c_stmt(s, "", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, "", vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false) + "\n" }
+                }
+            }
+            _ { out = out + c_stmt(s, "", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, "", vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false) + "\n" }
+        }
+    }
+
+    return out
+}

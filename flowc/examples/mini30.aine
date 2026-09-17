@@ -1,0 +1,23 @@
+// mini30.aine — 复现: match 臂内 continue 是否向上传播(跳过循环剩余)
+// 期望输出:
+//   body 1 / tail 1
+//   tail 2        ← i==2 时 continue 跳过 body/tail, 但 tail 不该打? continue 跳过的是循环剩余(含 tail)
+//   body 3 / tail 3
+// 精确语义: i==2 时 continue → 跳过 match 之后的 "tail" 行, 进入下一轮
+// 期望序列: body 1, tail 1, tail 2, body 3, tail 3
+fn main() {
+    var i: i32 = 0
+    while i < 3 {
+        i = i + 1
+        match i {
+            _ {
+                if i == 2 {
+                    continue
+                }
+                print("body " + f"{i}")
+            }
+        }
+        print("tail " + f"{i}")
+    }
+    print("done")
+}

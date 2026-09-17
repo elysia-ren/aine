@@ -1,0 +1,161 @@
+// lexer.aine — 用 Aine 语言写的词法分析器（自举第一步 B1）
+// 输入：Aine 源码字符串；输出：Token 结构体列表
+// 覆盖：标识符、整数、浮点、字符串、单/多字符运算符、空白、// 与 /* */ 注释
+
+struct Token {
+    kind: String
+    text: String
+    line: i32
+}
+
+fn is_digit(c: String) -> bool {
+    c >= "0" && c <= "9"
+}
+
+fn is_ident_start(c: String) -> bool {
+    (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c == "_"
+}
+
+fn is_ident_continue(c: String) -> bool {
+    is_ident_start(c) || is_digit(c)
+}
+
+fn is_space(c: String) -> bool {
+    c == " " || c == "\t" || c == "\r"
+}
+
+fn is_op_char(c: String) -> bool {
+    let ops = "+-*/%=<>!&|^~?:.,;(){}[]@#"
+    for o in ops {
+        if o == c {
+            return true
+        }
+    }
+    return false
+}
+
+// 读一个多字符运算符（最长匹配：== >= -> .. :: 等）
+fn read_op(src: String, i: i32) -> String {
+    let two = if i + 1 < src.len() {
+        src[i..i + 2]
+    } else {
+        ""
+    }
+    if two == "==" || two == "!=" || two == "<=" || two == ">=" || two == "&&"
+        || two == "||" || two == "->" || two == "=>" || two == ".." || two == "::"
+        || two == "+=" || two == "-=" || two == "*=" || two == "/=" || two == "%=" {
+        return two
+    }
+    return src[i..i + 1]
+}
+
+fn tokenize(src: String) -> Vec<Token> {
+    var tokens: Vec<Token> = []
+    var i = 0
+    var line = 1
+    let len = src.len()
+
+    while i < len {
+        let c = src[i]
+
+        // 空白
+        if is_space(c) {
+            i += 1
+            continue
+        }
+        // 换行
+        if c == "\n" {
+            line += 1
+            i += 1
+            continue
+        }
+        // 行注释
+        if c == "/" && i + 1 < len && src[i + 1] == "/" {
+            while i < len && src[i] != "\n" {
+                i += 1
+            }
+            continue
+        }
+        // 块注释（可嵌套——简化版支持单层）
+        if c == "/" && i + 1 < len && src[i + 1] == "*" {
+            i += 2
+            while i < len {
+                if src[i] == "*" && i + 1 < len && src[i + 1] == "/" {
+                    i += 2
+                    break
+                }
+                if src[i] == "\n" {
+                    line += 1
+                }
+                i += 1
+            }
+            continue
+        }
+        // 标识符 / 关键字
+        if is_ident_start(c) {
+            let start = i
+            while i < len && is_ident_continue(src[i]) {
+                i += 1
+            }
+            tokens.push(Token { kind: "ident" text: src[start..i] line: line })
+            continue
+        }
+        // 数字
+        if is_digit(c) {
+            let start = i
+            while i < len && is_digit(src[i]) {
+                i += 1
+            }
+            if i < len && src[i] == "." && i + 1 < len && is_digit(src[i + 1]) {
+                i += 1
+                while i < len && is_digit(src[i]) {
+                    i += 1
+                }
+            }
+            tokens.push(Token { kind: "number" text: src[start..i] line: line })
+            continue
+        }
+        // 字符串字面量
+        if c == "\"" {
+            let start = i
+            i += 1
+            while i < len && src[i] != "\"" {
+                if src[i] == "\\" && i + 1 < len {
+                    i += 2
+                    continue
+                }
+                if src[i] == "\n" {
+                    line += 1
+                }
+                i += 1
+            }
+            if i < len {
+                i += 1 // 闭合引号
+            }
+            tokens.push(Token { kind: "string" text: src[start..i] line: line })
+            continue
+        }
+        // 运算符 / 标点
+        if is_op_char(c) {
+            let op = read_op(src, i)
+            tokens.push(Token { kind: "op" text: op line: line })
+            i += op.len()
+            continue
+        }
+        // 未知字符
+        tokens.push(Token { kind: "unknown" text: c line: line })
+        i += 1
+    }
+
+    tokens.push(Token { kind: "eof" text: "" line: line })
+    return tokens
+}
+
+fn main() {
+    let source = "var count = 0\nfn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n// 注释\nprint(f\"total: {count}\")"
+
+    let tokens = tokenize(source)
+    for t in tokens {
+        print(f"{t.line}: {t.kind} '{t.text}'")
+    }
+}

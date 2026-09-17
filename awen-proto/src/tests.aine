@@ -1,0 +1,744 @@
+// awen-proto/src/tests.aine —— 词法层验收测试(M2a,Aine 移植版)
+// 运行:aine test src/tests.aine(在 awen-proto 根目录,corpus 路径相对该目录)
+// 对应 Rust 版:crates/awen-syntax 各单元测试 + tests/lexer_spec.rs + testkit
+
+module diag;
+module registry;
+module fullwidth;
+module escape;
+module explicit;
+module lightweight;
+module lexer;
+module seed;
+
+// ── 测试辅助 ───────────────────────────────────────────────
+
+fn expect(cond: bool, msg: String) -> Result<i32, String> {
+    if cond {
+        return Ok(0)
+    }
+    return Err(msg)
+}
+
+fn extract_cmd_from_block(blk: Block) -> ExplicitCommand {
+    match blk {
+        Object(u) { return u.cmd }
+        _ { return Code }
+    }
+}
+
+fn extract_cu(b: LexedBlock) -> Option<CommandUse> {
+    match b.block {
+        Object(u) { return Some(u) }
+        _ { return None }
+    }
+}
+
+fn extract_cu_from_output(o: LexOutput) -> Option<CommandUse> {
+    if o.blocks.len() == 0 { return None }
+    return extract_cu(o.blocks[0])
+}
+
+fn load_corpus(name: String) -> String {
+    let src = read_file(f"corpus/{name}")
+    if src.contains("[read_file error") {
+        return f" corpus 加载失败(应以 awen-proto 为工作目录): {src}"
+    }
+    return src
+}
+
+
+
+// ── 行内树遍历 ─────────────────────────────────────────────
+
+// 行内树遍历(避免高阶函数,Aine 回调在跨 enum match 时不可靠)
+
+fn has_bold(items: Vec<Inline>) -> bool {
+    for it in items {
+        match it {
+            IBold(c) { return true }
+            Italic(c) { if has_bold(c) { return true } }
+            Strike(c) { if has_bold(c) { return true } }
+            Scoped(cmd, c) { if has_bold(c) { return true } }
+            _ { }
+        }
+    }
+    return false
+}
+
+fn has_italic(items: Vec<Inline>) -> bool {
+    for it in items {
+        match it {
+            Italic(c) { return true }
+            IBold(c) { if has_italic(c) { return true } }
+            Strike(c) { if has_italic(c) { return true } }
+            Scoped(cmd, c) { if has_italic(c) { return true } }
+            _ { }
+        }
+    }
+    return false
+}
+
+fn has_scoped_bold(items: Vec<Inline>) -> bool {
+    for it in items {
+        match it {
+            Scoped(cmd, c) { if cmd == Bold { return true } }
+            IBold(c) { if has_scoped_bold(c) { return true } }
+            Italic(c) { if has_scoped_bold(c) { return true } }
+            Strike(c) { if has_scoped_bold(c) { return true } }
+            _ { }
+        }
+    }
+    return false
+}
+
+fn has_scoped_underline(items: Vec<Inline>) -> bool {
+    for it in items {
+        match it {
+            Scoped(cmd, c) { if cmd == U { return true } }
+            _ { }
+        }
+    }
+    return false
+}
+
+fn has_raw_math(items: Vec<Inline>) -> bool {
+    for it in items {
+        match it {
+            RawInline(cmd, lang, content) { if cmd == Math { return true } }
+            _ { }
+        }
+    }
+    return false
+}
+}
+
+fn inline_plain_list(items: Vec<Vec<Inline>>) -> Vec<String> {
+    var out: Vec<String> = []
+    for it in items {
+        out = out.push(inline_plain(it))
+    }
+    return out
+}
+
+fn str_vec_any_starts_with(v: Vec<String>, prefix: String) -> bool {
+    for s in v {
+        if s.starts_with(prefix) {
+            return true
+        }
+    }
+    return false
+}
+
+fn str_vec_any_contains(v: Vec<String>, needle: String) -> bool {
+    for s in v {
+        if s.contains(needle) {
+            return true
+        }
+    }
+    return false
+}
+
+fn collect_inline_cmds(items: Vec<Inline>, out: Vec<ExplicitCommand>) -> Vec<ExplicitCommand> {
+    var acc = out
+    for i in items {
+        match i {
+            Command(u) {
+                acc = acc.push(u.cmd)
+            }
+            Bold(c) { acc = collect_inline_cmds(c, acc) }
+            Italic(c) { acc = collect_inline_cmds(c, acc) }
+            Strike(c) { acc = collect_inline_cmds(c, acc) }
+            Scoped(cmd, c) {
+                acc = acc.push(cmd)
+                acc = collect_inline_cmds(c, acc)
+            }
+            RawInline(cmd, lang, content) { acc = acc.push(cmd) }
+            AwTxt(s) { }
+            CodeSpan(s) { }
+            _ { }  // Nil 或未知变体(兼容 lw_resolve 历史遗留)
+        }
+    }
+    return acc
+}
+
+fn cmd_vec_contains(v: Vec<ExplicitCommand>, target: ExplicitCommand) -> bool {
+    for x in v {
+        if x == target {
+            return true
+        }
+    }
+    return false
+}
+
+fn count_errors(diags: Vec<Diagnostic>) -> i32 {
+    var n = 0
+    for d in diags {
+        if d.severity == SevError {
+            n += 1
+        }
+    }
+    return n
+}
+
+fn any_diag_msg_contains(diags: Vec<Diagnostic>, needle: String) -> bool {
+    for d in diags {
+        if d.message.contains(needle) {
+            return true
+        }
+    }
+    return false
+}
+
+fn any_diag_hint_contains(diags: Vec<Diagnostic>, needle: String) -> bool {
+    for d in diags {
+        match d.hint {
+            Some(h) {
+                if h.contains(needle) {
+                    return true
+                }
+            }
+            None { }
+        }
+    }
+    return false
+}
+
+// ── registry(§11)─────────────────────────────────────────
+
+@test
+fn registry_cn_aliases() -> Result<i32, String> {
+    let a = lookup("图片")
+    let b = lookup("字体")
+    let c = lookup("大小")
+    let d = lookup("标签")
+    return expect(a == Some(Image) && b == Some(Font) && c == Some(Size) && d == Some(Label),
+        "中文方言别名应解析到同一命令(§6.14)")
+}
+
+@test
+fn registry_whitelist_is_closed() {
+    assert(lookup("excel") == None, "未注册命令应为 None")
+    assert(lookup("样式") == None, "未注册命令应为 None")
+}
+
+@test
+fn registry_image_has_no_single_letter_short() {
+    assert(lookup("i") == None, "规范 §11.2:i 短命令废止")
+}
+
+@test
+fn registry_close_tag_aliases() {
+    assert(close_matches(Code, "code") && close_matches(Code, "c"), "code 关闭别名")
+    assert(close_matches(Math, "m"), "math 关闭别名")
+    assert(!close_matches(Code, "m"), "交叉关闭应拒绝")
+}
+
+@test
+fn registry_doc_level_and_scoped_partition() {
+    // §11.1:同一命令的文档级/作用域两种形式并存(font/size),语义不同
+    assert(is_doc_level(Font) && is_scoped(Font), "font 双形式")
+    assert(is_doc_level(Page) && !is_scoped(Page), "page 仅文档级")
+    assert(!is_doc_level(Image), "image 非文档级")
+}
+
+// ── escape(§6.8)──────────────────────────────────────────
+
+@test
+fn escape_all_forms() {
+    let a = escape_scan("@**ab", 0)
+    assert(a == Some(EscapeHit { consumed: 3, text: "**" }), "@** 转义")
+    let b = escape_scan("@1. 第一项", 0)
+    assert(b == Some(EscapeHit { consumed: 3, text: "1." }), "@数字. 转义")
+    let c = escape_scan("@12. x", 0)
+    assert(c == Some(EscapeHit { consumed: 4, text: "12." }), "多位数字转义")
+}
+
+@test
+fn escape_non_escapes() {
+    assert(escape_scan("@e", 0) == None, "user@example.com 的 @ 不是转义")
+    assert(escape_scan("@12", 0) == None, "无点数字不转义")
+    assert(escape_scan("@[x]", 0) == None, "@[ 由命令扫描器处理")
+}
+
+// ── fullwidth(§6.9–6.10)─────────────────────────────────
+
+@test
+fn fullwidth_table_is_closed_and_context_bound() {
+    assert(fw_normalize_in_command("“") == Some("\""), "全角引号归一化")
+    assert(fw_normalize_in_command("：") == Some(":"), "全角冒号归一化")
+    assert(fw_normalize_in_command("，") == None, "全角逗号不属于命令头表")
+    assert(fw_normalize_in_command("中") == None, "正文全角字符是内容")
+    assert(fw_normalize_comma_in_row("，") == Some(","), "逗号形式归一化")
+}
+
+// ── explicit(§6.1、§11)──────────────────────────────────
+
+@test
+fn explicit_quoted_string_and_attrs() -> Result<i32, String> {
+    let src = "@[link \"OpenAI\" url: \"https://openai.com\"]"
+    let hp_r = parse_header(src, 0)
+    let hp = match hp_r {
+        Ok(h) { h }
+        Err(e) { return Err(e.msg) }
+    }
+    let u = hp.cu
+    let ok_cmd = u.cmd == Link
+    let ok_args = u.args == [Str("OpenAI")]
+    let ok_attrs = u.attrs == [KVPair { key: "url", val: Str("https://openai.com") }]
+    let ok_len = hp.consumed == src.len()
+    return expect(ok_cmd && ok_args && ok_attrs && ok_len, "link 命令头解析")
+}
+
+@test
+fn explicit_full_width_quotes_and_colon() -> Result<i32, String> {
+    let hp_r = parse_header("@[字体：“微软雅黑”]", 0)
+    let hp = match hp_r {
+        Ok(h) { h }
+        Err(e) { return Err(e.msg) }
+    }
+    let u = hp.cu
+    return expect(u.cmd == Font && u.args == [Str("微软雅黑")],
+        "全角引号与冒号在命令头上下文归一化(§6.9)")
+}
+
+@test
+fn explicit_ideographic_space_rejected_with_hint() {
+    let hp = parse_header("@[字体　微软雅黑]", 0)
+    match hp {
+        Err(e) {
+            assert(e.msg.contains("全角空格"), "应报全角空格诊断")
+            match e.hint {
+                Some(h) { assert(h.contains("双引号"), "应提示使用双引号") }
+                None { assert(false, "缺少引导提示") }
+            }
+        }
+        Ok(_) { assert(false, "U+3000 应被拒绝(§6.10)") }
+    }
+}
+
+@test
+fn explicit_unquoted_multiword_exceeds_arity() {
+    let hp = parse_header("@[font Noto Sans CJK SC]", 0)
+    match hp {
+        Err(e) {
+            assert(e.msg.contains("位置参数过多"), "应报参数过多")
+            match e.hint {
+                Some(h) { assert(h.contains("双引号"), "应提示使用双引号") }
+                None { assert(false, "缺少引导提示") }
+            }
+        }
+        Ok(_) { assert(false, "未加引号多词值应被拒绝") }
+    }
+}
+
+@test
+fn explicit_unknown_command_rejected() {
+    let ok = match parse_header("@[excel x]", 0) {
+        Ok(_) { true }
+        Err(_) { false }
+    }
+    assert(!ok, "白名单外命令应拒绝(§11.0)")
+}
+
+@test
+fn explicit_comment_raw_content_balanced() {
+    let a = parse_header("@[comment 多行注释]", 0)
+    match a {
+        Ok(hp) { assert(hp.cu.content == Some("多行注释"), "行内注释内容") }
+        Err(e) { assert(false, f"应解析成功: {e.msg}") }
+    }
+    let b = parse_header("@[comment a [b] c]", 0)
+    match b {
+        Ok(hp) { assert(hp.cu.content == Some("a [b] c"), "平衡括号属于内容") }
+        Err(e) { assert(false, f"应解析成功: {e.msg}") }
+    }
+    let c = parse_header("@[comment]", 0)
+    match c {
+        Ok(hp) { assert(hp.cu.content == Some(""), "块级形式:空内容") }
+        Err(e) { assert(false, f"应解析成功: {e.msg}") }
+    }
+}
+
+@test
+fn explicit_footnote_content() {
+    let hp = parse_header("@[footnote 这里是脚注内容。]", 0)
+    match hp {
+        Ok(hp2) {
+            assert(hp2.cu.cmd == Footnote, "脚注命令")
+            assert(hp2.cu.content == Some("这里是脚注内容。"), "脚注内容")
+        }
+        Err(e) { assert(false, f"应解析成功: {e.msg}") }
+    }
+}
+
+@test
+fn explicit_code_lang_and_cell_attrs() {
+    let a = parse_header("@[c py]", 0)
+    match a {
+        Ok(hp) {
+            assert(hp.cu.cmd == Code, "c 短命令")
+            assert(hp.cu.args == [Atom("py")], "语言参数")
+        }
+        Err(e) { assert(false, f"应解析成功: {e.msg}") }
+    }
+    let b = parse_header("@[cell background: \"#EEEEEE\" span: 2]", 0)
+    match b {
+        Ok(hp) {
+            assert(hp.cu.cmd == Cell, "cell 命令")
+            assert(hp.cu.attrs == [
+                KVPair { key: "background", val: Str("#EEEEEE") },
+                KVPair { key: "span", val: Atom("2") },
+            ], "cell 属性(§9.3)")
+        }
+        Err(e) { assert(false, f"应解析成功: {e.msg}") }
+    }
+}
+
+// ── lightweight(§6.3–6.5、§6.11)────────────────────────
+
+@test
+fn lw_block_triggers_require_trailing_space() {
+    assert(classify("# 标题") == LcHeading(1), "一级标题")
+    assert(classify("###### 六级") == LcHeading(6), "六级标题")
+    assert(classify("#tag") == LcText, "§6.11:# 后必须有空格")
+    assert(classify("####### 七个") == LcText, "超过六级是字面文本")
+    assert(classify("- 项目") == LcListItem(false), "无序列表")
+    assert(classify("-5") == LcText, "-5 是字面文本")
+    assert(classify("-foo") == LcText, "-foo 是字面文本")
+    assert(classify("1. 项目") == LcListItem(true), "有序列表")
+    assert(classify("1.这是普通文字") == LcText, "无空格不构成有序列表")
+    assert(classify("Version 1.2.3") == LcText, "版本号是字面文本")
+    assert(classify("> 引用") == LcQuote(1), "一级引用")
+    assert(classify(">> 二级") == LcQuote(2), "二级引用")
+    assert(classify(">abc") == LcText, ">abc 是字面文本")
+    assert(classify("---") == LcDivider, "分节线")
+    assert(classify("  ---") == LcDivider, "分节线允许 ≤3 前导空格")
+    assert(classify("    ---") == LcText, "4 个前导空格不是分节线")
+    assert(classify("---abc") == LcText, "---abc 是字面文本")
+    assert(classify("   ") == LcBlank, "空白行")
+    assert(classify("@[image x]") == LcCommand, "命令行")
+}
+
+@test
+fn lw_boundary_rules_6_4() -> Result<i32, String> {
+    let a = lw_scan_inline("中文_斜体_中文", 0, [])
+    assert(has_italic(a.inline), "CJK 紧邻允许开启/闭合")
+    let b = lw_scan_inline("foo_bar_baz", 0, [])
+    assert(!has_italic(b.inline), "下划线左侧是字母,不触发")
+    let c = lw_scan_inline("2**3 不构成粗体", 0, [])
+    assert(!has_bold(c.inline), "2**3 不触发粗体")
+    assert(inline_plain(c.inline) == "2**3 不构成粗体", "字面回退保持原文")
+    let d = lw_scan_inline("an _em_ word", 0, [])
+    assert(has_italic(d.inline), "英文空格边界")
+    return Ok(0)
+}
+
+@test
+fn lw_nesting_and_crossing_6_5() -> Result<i32, String> {
+    let a = lw_scan_inline("**粗体中嵌 _斜体_**", 0, [])
+    assert(has_bold(a.inline) && has_italic(a.inline), "合法嵌套成树")
+    let b = lw_scan_inline("**a _b** c_", 0, [])
+    assert(inline_plain(b.inline) == "**a _b** c_", "交叉:整行按字面")
+    assert(any_diag_msg_contains(b.diags, "交叉"), "交叉应产生诊断")
+    let c = lw_scan_inline("**粗体没有结尾", 0, [])
+    assert(inline_plain(c.inline) == "**粗体没有结尾", "未闭合:整行按字面")
+    assert(any_diag_msg_contains(c.diags, "未闭合"), "未闭合应产生诊断")
+    return Ok(0)
+}
+
+@test
+fn lw_escapes_are_unconditional_6_8() -> Result<i32, String> {
+    let a = lw_scan_inline("@**不是粗体**", 0, [])
+    assert(inline_plain(a.inline) == "**不是粗体**", "@** 字面化")
+    assert(!has_bold(a.inline), "不得产生粗体节点")
+    let b = lw_scan_inline("@#todo", 0, [])
+    assert(inline_plain(b.inline) == "#todo", "@# 字面化")
+    let c = lw_scan_inline("@1. 第一项", 0, [])
+    assert(inline_plain(c.inline) == "1. 第一项", "@1. 字面化")
+    let d = lw_scan_inline("@@[image hero] 尾", 0, [])
+    assert(inline_plain(d.inline) == "@[image hero] 尾", "@@[...] 字面化")
+    return Ok(0)
+}
+
+@test
+fn lw_explicit_scopes_and_raw_inline() -> Result<i32, String> {
+    let a = lw_scan_inline("@[b]短命令粗体@[/b]", 0, [])
+    assert(has_scoped_bold(a.inline), "b 短命令作用域")
+    let b = lw_scan_inline("@[m]E = mc^2@[/m]", 0, [])
+    assert(has_raw_math(b.inline), "行内数学同行闭合(§6.7)")
+    let c = lw_scan_inline("@[b]a _b_ c@[/b]", 0, [])
+    assert(has_scoped_bold(c.inline) && has_italic(c.inline),
+        "轻量与显式互嵌仍须成树(§6.5)")
+    let d = lw_scan_inline("@[u]下划线@[/u]", 0, [])
+    assert(has_scoped_underline(d.inline), "下划线唯一入口是 @[u](§6.2)")
+    return Ok(0)
+}
+
+// ── corpus 集成(M2a 验收)───────────────────────────────
+
+@test
+fn corpus_lexes_without_errors() -> Result<i32, String> {
+    let out = lex(load_corpus("all_syntax.awen"))
+    let n = count_errors(out.diags)
+    if n == 0 {
+        return Ok(0)
+    }
+    return Err(f"corpus 是全部冻结语法的正样本,不得有词法错误(发现 {n} 个)")
+}
+
+@test
+fn corpus_block_structure_is_complete() -> Result<i32, String> {
+    let out = lex(load_corpus("all_syntax.awen"))
+    var heading: Vec<i32> = [0, 0, 0, 0, 0, 0, 0]
+    var divider = 0
+    var raw_code = false
+    var raw_math = false
+    var raw_comment = false
+    var table_open = 0
+    var table_close = 0
+    var rows = 0
+    var delimiter_rows = 0
+    var objects: Vec<ExplicitCommand> = []
+    var bi = 0
+    while bi < out.blocks.len() {
+        let blk = out.blocks[bi].block
+        match blk {
+            Heading(level, inline) {
+                heading[level] = heading[level] + 1
+                objects = collect_inline_cmds(inline, objects)
+            }
+            Divider { divider += 1 }
+            Paragraph(inline) { objects = collect_inline_cmds(inline, objects) }
+            ListItem(ordered, inline) { objects = collect_inline_cmds(inline, objects) }
+            Quote(depth, inline) { objects = collect_inline_cmds(inline, objects) }
+            RawOpen(cmd, lang) {
+                if cmd == Code { raw_code = true }
+                if cmd == Math { raw_math = true }
+                if cmd == Comment { raw_comment = true }
+            }
+            TableOpen(u) { table_open += 1 }
+            TableClose { table_close += 1 }
+            TableRow(cells, delimiter) {
+                rows += 1
+                if delimiter { delimiter_rows += 1 }
+                for cell in cells {
+                    objects = collect_inline_cmds(cell, objects)
+                }
+            }
+            Object(u) { objects = objects.push(extract_cmd_from_block(blk)) }
+            Blank { }
+            RawLine(content) { }
+            RawClose(cmd) { }
+            _ { }
+        }
+        bi += 1
+    }
+    var lvl = 1
+    while lvl <= 6 {
+        if heading[lvl] < 1 {
+            return Err(f"缺少 {lvl} 级标题")
+        }
+        lvl += 1
+    }
+    if divider < 1 { return Err("缺少分节线") }
+    if !raw_code { return Err("缺少代码 Raw Block") }
+    if !raw_math { return Err("缺少数学 Raw Block") }
+    if !raw_comment { return Err("缺少块级注释 Raw Block") }
+    if table_open != 2 { return Err(f"corpus 应有两个表格,得到 {table_open}") }
+    if table_close != 2 { return Err("表格未正确闭合") }
+    if rows < 9 { return Err(f"表格行数不足(两个表共 9 行),得到 {rows}") }
+    if delimiter_rows < 2 { return Err("缺少对齐分隔行") }
+    for cmd in [Image, Figure, Comment, Toc, Footnote, Link, Ref, Numbering, Theme, FirstLine] {
+        if !cmd_vec_contains(objects, cmd) {
+            return Err(f"缺少独立对象命令 {cmd}")
+        }
+    }
+    return Ok(0)
+}
+
+@test
+fn corpus_raw_content_survives_verbatim() -> Result<i32, String> {
+    // Raw Block 内的 @[b] 与 ] 不参与 Awen 解析(§6.7)
+    let out = lex(load_corpus("all_syntax.awen"))
+    var in_code = false
+    for b in out.blocks {
+        match b.block {
+            RawOpen(cmd, lang) {
+                if cmd == Code { in_code = true }
+            }
+            RawClose(cmd) {
+                if cmd == Code { in_code = false }
+            }
+            RawLine(content) {
+                if in_code && content.contains("代码内部的 @[b] 与 ] 均不参与 Awen 解析") {
+                    return Ok(0)
+                }
+            }
+            _ { }
+        }
+    }
+    return Err("代码内容行必须逐字保留")
+}
+
+@test
+fn p08_escapes_render_literal() -> Result<i32, String> {
+    let out = lex("@# 不是标题\n@**不是粗体**\n@1. 不是有序列表\n@@[image hero] 尾\n")
+    var plains: Vec<String> = []
+    for b in out.blocks {
+        match b.block {
+            Paragraph(inline) { plains = plains.push(inline_plain(inline)) }
+            _ { }
+        }
+    }
+    assert(str_vec_any_starts_with(plains, "# 不是标题"), "@# 字面化")
+    assert(str_vec_any_starts_with(plains, "**不是粗体**"), "@** 字面化")
+    assert(str_vec_any_starts_with(plains, "1. 不是有序列表"), "@1. 字面化")
+    assert(str_vec_any_starts_with(plains, "@[image hero] 尾"), "@@[...] 字面化")
+    // 全文不得残留任何转义产生的语法节点
+    for b in out.blocks {
+        match b.block {
+            Heading(level, inline) { return Err("不得产生标题节点") }
+            ListItem(ordered, inline) { return Err("不得产生列表节点") }
+            _ { }
+        }
+    }
+    return Ok(0)
+}
+
+@test
+fn p11_fullwidth_equals_halfwidth_in_command_context() -> Result<i32, String> {
+    let a = lex("@[font \"Noto Sans CJK SC\"]\n")
+    let b = lex("@[font “Noto Sans CJK SC”]\n")
+    let c = lex("@[字体 \"Noto Sans CJK SC\"]\n")
+    for o in [a, b, c] {
+        if count_errors(o.diags) != 0 {
+            return Err("全角/中文形式不应报错")
+        }
+    }
+    let ca_opt = extract_cu_from_output(a)
+    let cb_opt = extract_cu_from_output(b)
+    let cc_opt = extract_cu_from_output(c)
+    let ca = match ca_opt { Some(cu) { cu } None { return Err("半角形式:无对象") } }
+    let cb = match cb_opt { Some(cu) { cu } None { return Err("全角引号形式:无对象") } }
+    let cc = match cc_opt { Some(cu) { cu } None { return Err("中文别名形式:无对象") } }
+    if ca.cmd != Font { return Err("应为 font 命令") }
+    if ca.cmd != cb.cmd || ca.args != cb.args {
+        return Err("全角引号与半角引号词法等价(§6.9)")
+    }
+    if ca.cmd != cc.cmd || ca.args != cc.args {
+        return Err("中文方言别名与英文别名进入同一命令(§6.14)")
+    }
+    return Ok(0)
+}
+
+@test
+fn edge_cases_classify_and_diagnose() -> Result<i32, String> {
+    let out = lex(load_corpus("edge_cases.awen"))
+    var plains: Vec<String> = []
+    var has_italic = false
+    for b in out.blocks {
+        match b.block {
+            Paragraph(inline) {
+                plains = plains.push(inline_plain(inline))
+                if has_italic(inline) {
+                    has_italic = true
+                }
+            }
+            _ { }
+        }
+    }
+    for s in ["#tag 不是标题", "-5 不是列表", ">abc 不是引用", "1.这是普通文字",
+        "Version 1.2.3", "---abc 不是分节线", "A | B | C 不是表格", "user@example.com"] {
+        if !str_vec_any_contains(plains, s) {
+            return Err(f"应按字面段落处理: {s}")
+        }
+    }
+    if !has_italic {
+        return Err("中文紧邻的下划线应构成斜体(§6.4 已知接受残留)")
+    }
+    if !any_diag_msg_contains(out.diags, "全角空格") {
+        return Err("缺少 U+3000 诊断")
+    }
+    if !any_diag_hint_contains(out.diags, "双引号") {
+        return Err("缺少双引号引导提示")
+    }
+    var mut_warn = false
+    for d in out.diags {
+        if d.severity == SevWarning && d.message.contains("字面") {
+            mut_warn = true
+        }
+    }
+    if !mut_warn {
+        return Err("未闭合标记应产生按字面告警")
+    }
+    if count_errors(out.diags) != 2 {
+        return Err("edge_cases 中恰有两处预期词法错误")
+    }
+    return Ok(0)
+}
+
+// ── seed(§2.2/§3.3/§4)───────────────────────────────────
+
+@test
+fn seed_label_charset() -> Result<i32, String> {
+    assert(label_parse("架构图") != None, "Unicode 字母合法")
+    assert(label_parse("fig-1") != None, "连字符合法(Label 专有)")
+    assert(label_parse("figure_01") != None, "下划线合法")
+    assert(label_parse("a b") == None, "空格非法")
+    assert(label_parse("") == None, "空串非法")
+    return Ok(0)
+}
+
+@test
+fn seed_span_after_edit_rules() -> Result<i32, String> {
+    let s = span_new(10, 20)?
+    let r = span_after_edit(s, 0, 5, 3)?
+    if r.start != 8 || r.end != 18 {
+        return Err("编辑在 Span 之前 → 平移")
+    }
+    let keep = span_after_edit(s, 25, 30, 0)?
+    if keep.start != 10 || keep.end != 20 {
+        return Err("编辑在 Span 之后 → 原样")
+    }
+    if span_after_edit(s, 15, 18, 2) != None {
+        return Err("相交 → 失效,子树重解析")
+    }
+    return Ok(0)
+}
+
+@test
+fn seed_patch_invert_and_undo_chain() -> Result<i32, String> {
+    let r1 = buffer_insert(buffer_new("你好,世界"), 3, "Awen")?
+    if r1.buf.content != "你好,Awen世界" {
+        return Err("插入结果错误")
+    }
+    let inv0 = patch_invert(r1.patch)
+    let restored = buffer_apply(r1.buf, inv0)?
+    if restored.content != "你好,世界" {
+        return Err("逆补丁应还原")
+    }
+    // 补丁不匹配 → 拒绝且不猜(§4.1)
+    let bad = TextPatch { start: 0, old: "xyz", new: "q" }
+    match buffer_apply(buffer_new("abc"), bad) {
+        Err(e) {
+            if e != "补丁不匹配" {
+                return Err("错误消息应为补丁不匹配")
+            }
+        }
+        Ok(_) { return Err("错误补丁不应成功") }
+    }
+    // Undo 链:连续操作后逆向回放,逐字节还原(§4)
+    let b0 = buffer_new("第一段 @[b]粗体@[/b]")
+    let original = b0.content
+    let s1 = buffer_insert(b0, 0, "前缀:")?
+    let s2 = buffer_delete(s1.buf, 3, 6)?
+    let inv2 = patch_invert(s2.patch)
+    let r = buffer_apply(s2.buf, inv2)?
+    let inv1 = patch_invert(s1.patch)
+    let r2 = buffer_apply(r, inv1)?
+    if r2.content != original {
+        return Err("Undo 栈回放必须逐字节还原")
+    }
+    return Ok(0)
+}

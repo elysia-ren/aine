@@ -1,0 +1,56 @@
+// Conformance C3 —— 闭包子集（闭包契约 · 正向）
+// 依据: 设计方案 §11 闭包、Reference §11、自举 B5-M29/M30（捕获闭包）
+// 运行: aine test conformance/conf_closures.aine
+// 契约: 独立闭包值（参数须带类型注解）、捕获闭包（捕获变量提升为隐藏参数，源不变）、
+// 多参闭包、闭包捕获后外层变量仍可读。
+
+fn expect(cond: bool, msg: String) -> Result<i32, String> {
+    if cond {
+        return Ok(0)
+    }
+    return Err(msg)
+}
+
+@test
+fn c3_closure_value() -> Result<i32, String> {
+    let f = (x: i32) => x * 2
+    let g = (a: i32, b: i32) => a + b
+    return expect(f(21) == 42 && g(1, 2) == 3, "独立闭包值（一参/两参）直接调用")
+}
+
+@test
+fn c3_closure_multi_type() -> Result<i32, String> {
+    let greet = (name: String) => "hi, " + name
+    let half = (n: i32) => n / 2
+    return expect(greet("aine") == "hi, aine" && half(9) == 4, "闭包参数类型: String/i32")
+}
+
+@test
+fn c3_capturing_closure() -> Result<i32, String> {
+    let n = 10
+    let addn = (x: i32) => x + n
+    return expect(addn(5) == 15, "捕获外层 let（隐藏参数提升）")
+}
+
+@test
+fn c3_capture_string() -> Result<i32, String> {
+    let greeting = "hi"
+    let twice = (s: String) => greeting + s + s
+    return expect(twice("!") == "hi!!", "捕获 String 并拼接两次")
+}
+
+@test
+fn c3_source_readable_after_capture() -> Result<i32, String> {
+    let base = 100
+    let mk = (delta: i32) => base + delta
+    return expect(mk(7) == 107 && base == 100, "捕获后源变量仍完整可读")
+}
+
+@test
+fn c3_closure_predicate() -> Result<i32, String> {
+    let flag = (n: i32) => n > 0
+    if flag(5) {
+        return expect(true, "闭包返回 bool 用于条件")
+    }
+    return Err("flag(5) 应为 true")
+}

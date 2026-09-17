@@ -1,0 +1,214 @@
+// 自举拆分：类型工具在 altype.aine（文件模块，扁平注册）
+
+
+// parser_stmt.aine — 用 Aine 写的语句级解析器（自举 B4-M2）
+// 在 parser_expr.aine 的 Pratt 表达式核心之上，扩展：
+//   语句：let(mut/类型注解)/if-else/while/for..in/return/赋值/块/表达式语句
+//   项：fn 定义（参数、返回类型）
+// 输出完整 AST 的 stringify 回显，main 内自断言。
+
+enum TokKind {
+    TIdent
+    TInt
+    TFloat
+    TStr
+    TOp
+    TSemi
+    TEof
+}
+
+struct Token {
+    kind: TokKind
+    text: String
+}
+
+enum Expr {
+    EInt(i32)
+    EFloat(f64)
+    EStr(String)
+    EIdent(String)
+    EBin(String, Expr, Expr)
+    EUnary(String, Expr)
+    ECall(Expr, Vec<Expr>)
+    EField(Expr, String)
+    EBlock(Vec<Stmt>)
+    EVec(Vec<Expr>)
+    EUnit
+    EStruct(String, Vec<StructField>)
+    ETry(Expr)
+    ERange(Expr, Expr)
+    EClosure(Vec<Param>, Expr)
+    EIndex(Expr, Expr)
+    EIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    EMatch(Expr, Vec<MatchArm>)
+}
+
+enum Stmt {
+    SLet(String, bool, Option<String>, Expr)
+    SIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    SWhile(Expr, Vec<Stmt>)
+    SFor(String, Expr, Vec<Stmt>)
+    SReturn(Option<Expr>)
+    SExpr(Expr)
+    SBlock(Vec<Stmt>)
+    SAssign(String, String, Expr)
+    SAssignIdx(String, Expr, String, Expr)
+    SDef(String, Vec<Param>, Option<String>, Vec<Stmt>)
+    SStruct(String, Vec<Field>)
+    SEnum(String, Vec<EVariant>)
+    SImpl(String, Vec<Stmt>)
+    SMod(String, Vec<Stmt>)
+    SImport(String)
+    SMatch(Expr, Vec<MatchArm>)
+    SGo(bool, Vec<Stmt>)
+    SUi(Vec<Stmt>)
+    SGlobalVar(String, Option<String>, Expr)
+}
+
+struct MatchArm {
+    pat: String
+    body: Stmt
+}
+
+struct Field {
+    name: String
+    ty: String
+}
+
+struct StructField {
+    name: String
+    value: Expr
+}
+
+struct EVariant {
+    name: String
+    fields: Vec<String>
+}
+
+struct Param {
+    name: String
+    ty: String
+}
+
+struct EPResult {
+    value: Expr
+    next: i32
+}
+
+struct SPResult {
+    stmt: Stmt
+    next: i32
+}
+
+struct BlockResult {
+    stmts: Vec<Stmt>
+    next: i32
+}
+
+struct TyResult {
+    ty: String
+    next: i32
+}
+
+struct FlatResult {
+    out: Vec<Stmt>
+    loaded: Vec<String>
+}
+
+// var name -> type tables
+struct VarInfo {
+    names: Vec<String>
+    types: Vec<String>
+}
+
+module altype;
+module allex;
+module alparse;
+module alstr;
+module alcollect;
+module alee;
+// aine_pkg 最小版：解析 aine.toml → 构建入口程序 → 运行验证
+struct Pkg {
+    name: String
+    version: String
+    entry: String
+}
+
+fn toml_get(src: String, key: String) -> String {
+    // 极简 TOML：逐行找 key = value（值支持 "引号"）
+    var start = 0
+    while start < src.len() {
+        var e = start
+        while e < src.len() && src[e..e + 1] != "\n" {
+            e += 1
+        }
+        let line = src[start..e]
+        var eq = 0
+        var found = false
+        while eq < line.len() {
+            if line[eq..eq + 1] == "=" {
+                found = true
+                break
+            }
+            eq += 1
+        }
+        if found {
+            var k = line[0..eq]
+            while k.len() > 0 && k[k.len() - 1..k.len()] == " " {
+                k = k[0..k.len() - 1]
+            }
+            var v = line[eq + 1..line.len()]
+            while v.len() > 0 && v[0..1] == " " {
+                v = v[1..v.len()]
+            }
+            while v.len() > 0 && v[v.len() - 1..v.len()] == " " {
+                v = v[0..v.len() - 1]
+            }
+            if v.len() >= 2 && v[0..1] == "\"" && v[v.len() - 1..v.len()] == "\"" {
+                v = v[1..v.len() - 1]
+            }
+            print(f"TOML k='{k}' v='{v}'")
+            if k == key {
+                return v
+            }
+        }
+        start = e + 1
+    }
+    return ""
+}
+
+fn pkg_build(dir: String) -> Result<(), String> {
+    let toml_src = read_file(dir + "/aine.toml")
+    if toml_src.len() == 0 {
+        return Err("aine.toml not found in " + dir)
+    }
+    let name = toml_get(toml_src, "name")
+    let version = toml_get(toml_src, "version")
+    let entry = toml_get(toml_src, "entry")
+    if name == "" || entry == "" {
+        return Err("aine.toml missing [package] name/entry")
+    }
+    print(f"building {name} v{version}")
+    let entry_path = dir + "/" + entry
+    let src = read_file(entry_path)
+    if src.len() == 0 {
+        return Err("entry file empty: " + entry_path)
+    }
+    let p = parse_program(tokenize(src))?
+    let c = c_program(p, collect_user_types(p), collect_variant_names(p), collect_variant_owners(p), collect_fn_names(p), collect_fn_returns(p), collect_var_names(p), collect_var_types(p), collect_fn_ptypes(p), collect_enum_ty_names(p), collect_enum_variant_lists(p))
+    print(f"generated C: {c.len()} bytes -> {name}.c")
+    // 产物包含入口 main 与标准头（自宿主 C 产物可 zig cc 直编）
+    if !c.contains("int main(int _argc, char** _argv) {") {
+        return Err("generated C missing main")
+    }
+    print("build OK")
+    Ok(())
+}
+
+fn main() -> Result<(), String> {
+    let st = pkg_build("examples/myapp")
+    match st {
+        Ok(v) { Ok(()) }
+        Err(e) { Err(e) }
+    }
+}

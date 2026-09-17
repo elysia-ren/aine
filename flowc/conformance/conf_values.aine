@@ -1,0 +1,102 @@
+// Conformance C2 —— 值语义 / 所有权子集（Value Aine 行为契约 · 正向）
+// 依据: 设计方案 §1 值语义、§22.2 Value Aine、Flow_Type_System.md
+// 运行: aine test conformance/conf_values.aine
+// 契约核心: Aine 对象按值语义行事 —— 赋值/传参后各自独立，
+// 开发者永远不需要决定 borrow 还是 move（编译器承担复杂度）。
+
+fn expect(cond: bool, msg: String) -> Result<i32, String> {
+    if cond {
+        return Ok(0)
+    }
+    return Err(msg)
+}
+
+struct Buf {
+    data: Vec<i32>,
+    tag: String,
+}
+
+struct Row {
+    name: String,
+    values: Vec<i32>,
+}
+
+@test
+fn c2_vec_assign_independent() -> Result<i32, String> {
+    let a = [1, 2, 3]
+    let b = append_one(a, 4)
+    return expect(a.len() == 3 && b.len() == 4, "传参后源与副本独立（值语义）")
+}
+
+@test
+fn c2_string_assign_independent() -> Result<i32, String> {
+    let s = "abc"
+    let t = s + "def"
+    return expect(s == "abc" && t == "abcdef", "字符串拼接不改源")
+}
+
+@test
+fn c2_struct_field_independent() -> Result<i32, String> {
+    let b1 = Buf { data: [1, 2], tag: "b1" }
+    let b2 = Buf { data: [9, 9], tag: "b2" }
+    let n1 = total(b1.data)
+    let n2 = total(b2.data)
+    return expect(n1 == 3 && n2 == 18, "两个结构体的同名字段互不干扰")
+}
+
+@test
+fn c2_callee_rebuilds_value() -> Result<i32, String> {
+    let v = [1, 2, 3]
+    let doubled = double_all(v)
+    let kept = total(v)
+    return expect(kept == 6 && total(doubled) == 12, "调用方实参保持不变（值语义）+ 被调方返回新值")
+}
+
+@test
+fn c2_return_owned_value() -> Result<i32, String> {
+    let v = make_range(4)
+    return expect(v.len() == 4 && total(v) == 6, "函数返回新所有权值（0..4 → 和 6）")
+}
+
+@test
+fn c2_field_read_after_pass() -> Result<i32, String> {
+    let r = Row { name: "x", values: [5, 5] }
+    let n = total(r.values)
+    return expect(n == 10 && r.name == "x", "字段传参后结构体其余字段仍可读")
+}
+
+fn total(v: Vec<i32>) -> i32 {
+    var t = 0
+    var i = 0
+    while i < v.len() {
+        t += v[i]
+        i += 1
+    }
+    return t
+}
+
+fn append_one(v: Vec<i32>, x: i32) -> Vec<i32> {
+    var out: Vec<i32> = v
+    out.push(x)
+    return out
+}
+
+fn double_all(v: Vec<i32>) -> Vec<i32> {
+    var out: Vec<i32> = []
+    var i = 0
+    while i < v.len() {
+        out.push(v[i] * 2)
+        i += 1
+    }
+    return out
+}
+
+fn make_range(n: i32) -> Vec<i32> {
+    var out: Vec<i32> = []
+    var i = 0
+    while i < n {
+        out.push(i)
+        i += 1
+    }
+    return out
+}

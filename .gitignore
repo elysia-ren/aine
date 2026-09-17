@@ -1,15 +1,56 @@
-# flowc 是独立 git 仓库
-flowc/
+# ===== 构建生成物 =====
+target/
+target2/
+target3/
+dist/
+bin/
 
-# 生成物
-*.exe
-*.pdb
-*.c
-*.o
+# 依赖供应商源码的生成物（保留源码）
+vendor/scintilla/bin/
+vendor/lexilla/bin/
 
-# 临时输出
-*.txt
+# 根目录历史生成物
+flowc/*.exe
+flowc/*.pdb
+flowc/*.dll
+flowc/*.lib
+flowc/*.ilk
+flowc/*_gen.exe
+flowc/sh_*.pdb
+flowc/self_host_*.pdb
+flowc/_book_gen.*
+
+# ===== 本地/隐私（含 API Key，绝不入库）=====
+.aine_studio/
+flowc/.aine_studio/
+models.toml
+flowc/models.toml
+
+# ===== IDE/工具缓存 =====
+.zc5
+.zc5b/
+.zc_ide/
+flowc/.zc5
+flowc/.zc5b/
+flowc/.zc_ide/
+.vscode/
+.idea/
+
+# ===== 调试临时脚本 =====
+flowc/_dbg*.py
+flowc/_probe*.py
+
+# ===== 测试垃圾 =====
+flowc/examples/file_*.aine
+
+# ===== 日志/临时 =====
 *.log
+tmp/
 
-# 会话临时目录
+# ===== 嵌套仓库元数据备份 =====
+flowc/.git_backup/
 临时-dsh-session-*/
+
+# 杂项临时文件
+flowc/tmp_*
+flowc/*.check

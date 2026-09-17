@@ -1,0 +1,12 @@
+LIBRARY Scintilla
+EXPORTS
+    Scintilla_DirectFunction
+    Scintilla_RegisterClasses
+    CreateLexer
+    GetLexerCount
+    GetLexerName
+    GetLexerFactory
+    LexerNameFromID
+    GetLibraryPropertyNames
+    SetLibraryProperty
+    GetNameSpace

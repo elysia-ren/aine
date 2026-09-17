@@ -1,0 +1,2519 @@
+// alinterp.aine — Aine 写的全量解释器(全 Aine 迁移 Phase 4, 全量版)
+// 目标: 解释执行 transpiler.aine 自身, 与 aine run 输出逐行一致
+// 值系统: AVal 枚举(Int/Float/Str/Bool/Vec/Map/Struct/Variant/Option/Result/Closure/Unit)
+// 控制流: 语句返回 "ok"/"return"/"break"/"continue" + 值
+
+enum TokKind {
+    TIdent
+    TInt
+    TFloat
+    TStr
+    TOp
+    TSemi
+    TEof
+}
+
+struct Token {
+    kind: TokKind
+    text: String
+}
+
+enum Expr {
+    EInt(i32)
+    EFloat(f64)
+    EStr(String)
+    EIdent(String)
+    EBin(String, Expr, Expr)
+    EUnary(String, Expr)
+    ECall(Expr, Vec<Expr>)
+    EField(Expr, String)
+    EBlock(Vec<Stmt>)
+    EVec(Vec<Expr>)
+    EUnit
+    EStruct(String, Vec<StructField>)
+    ETry(Expr)
+    ERange(Expr, Expr)
+    EClosure(Vec<Param>, Expr)
+    EIndex(Expr, Expr)
+    EIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    EMatch(Expr, Vec<MatchArm>)
+}
+
+enum Stmt {
+    SLet(String, bool, Option<String>, Expr)
+    SIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    SWhile(Expr, Vec<Stmt>)
+    SFor(String, Expr, Vec<Stmt>)
+    SReturn(Option<Expr>)
+    SExpr(Expr)
+    SBlock(Vec<Stmt>)
+    SAssign(String, String, Expr)
+    SAssignIdx(String, Expr, String, Expr)
+    SDef(String, Vec<Param>, Option<String>, Vec<Stmt>)
+    SStruct(String, Vec<Field>)
+    SEnum(String, Vec<EVariant>)
+    SImpl(String, Vec<Stmt>)
+    SMod(String, Vec<Stmt>)
+    SImport(String)
+    SMatch(Expr, Vec<MatchArm>)
+    SGo(bool, Vec<Stmt>)
+    SUi(Vec<Stmt>)
+    SGlobalVar(String, Option<String>, Expr)
+}
+
+struct MatchArm {
+    pat: String
+    body: Stmt
+}
+
+struct Field {
+    name: String
+    ty: String
+}
+
+struct StructField {
+    name: String
+    value: Expr
+}
+
+struct EVariant {
+    name: String
+    fields: Vec<String>
+}
+
+struct Param {
+    name: String
+    ty: String
+}
+
+struct EPResult {
+    value: Expr
+    next: i32
+}
+
+struct SPResult {
+    stmt: Stmt
+    next: i32
+}
+
+struct BlockResult {
+    stmts: Vec<Stmt>
+    next: i32
+}
+
+struct TyResult {
+    ty: String
+    next: i32
+}
+
+struct FlatResult {
+    out: Vec<Stmt>
+    loaded: Vec<String>
+}
+
+struct VarInfo {
+    names: Vec<String>
+    types: Vec<String>
+}
+
+module allex;
+module alparse;
+module alstr;
+module alcollect;
+module altype;
+
+// ---------- 值系统 ----------
+
+struct AEntry {
+    key: String
+    value: AVal
+}
+
+struct JPResult {
+    value: AVal
+    text: String
+    next: i32
+}
+
+enum AVal {
+    AInt(i32)
+    AFloat(f64)
+    AStr(String)
+    ABool(bool)
+    AVec(Vec<AVal>)
+    AMap(Vec<AEntry>)
+    AStruct(String, Vec<AEntry>)
+    AVariant(String, String, Vec<AVal>)
+    AOption(bool, AVal)
+    AResult(bool, AVal)
+    AClosure(String, Vec<Param>, Expr, Vec<String>)
+    AUnit
+}
+
+fn ai_is_num_str(t: String) -> bool {
+    if t.len() == 0 {
+        return false
+    }
+    var i = 0
+    if t[0] == "-" {
+        i = 1
+    }
+    if i >= t.len() {
+        return false
+    }
+    while i < t.len() {
+        let c = t[i]
+        if !(c >= "0" && c <= "9") {
+            return false
+        }
+        i += 1
+    }
+    return true
+}
+
+fn ai_display(v: AVal) -> String {
+    match v {
+        AInt(n) { return f"{n}" }
+        AFloat(n) { return f"{n}" }
+        AStr(s) { return s }
+        ABool(b) { return if b { "true" } else { "false" } }
+        AVec(items) {
+            var parts: Vec<String> = []
+            for it in items {
+                parts.push(ai_display(it))
+            }
+            return "[" + join(parts, ", ") + "]"
+        }
+        AMap(entries) {
+            var parts: Vec<String> = []
+            for e in entries {
+                parts.push(e.key + ": " + ai_display(e.value))
+            }
+            return "{ " + join(parts, ", ") + " }"
+        }
+        AStruct(ty, fields) {
+            var parts: Vec<String> = []
+            for f in fields {
+                parts.push(f.key + ": " + ai_display(f.value))
+            }
+            return ty + " { " + join(parts, ", ") + " }"
+        }
+        AVariant(ty, name, payload) {
+            if payload.len() == 0 {
+                return name
+            }
+            var parts: Vec<String> = []
+            for p in payload {
+                parts.push(ai_display(p))
+            }
+            return name + "(" + join(parts, ", ") + ")"
+        }
+        AOption(some, v) {
+            if some { return "Some(" + ai_display(v) + ")" }
+            return "None"
+        }
+        AResult(ok, v) {
+            if ok { return "Ok(" + ai_display(v) + ")" }
+            return "Err(" + ai_display(v) + ")"
+        }
+        AClosure(name, params, body, caps) { return "closure" }
+        AUnit { return "()" }
+    }
+}
+
+// 数值转换
+fn ai_as_i32(v: AVal) -> i32 {
+    match v {
+        AInt(n) { return n }
+        AFloat(n) { return ai_f64_to_i32(n) }
+        AStr(s) {
+            return s.to_i32()
+        }
+        _ { return 0 }
+    }
+}
+
+// f64 → i32(取整)
+fn ai_f64_to_i32(n: f64) -> i32 {
+    var x = n
+    var r = 0
+    if x >= 0.0 {
+        while x >= 1.0 {
+            r += 1
+            x -= 1.0
+        }
+    } else {
+        while x <= -1.0 {
+            r -= 1
+            x += 1.0
+        }
+    }
+    return r
+}
+
+fn ai_as_f64(v: AVal) -> f64 {
+    match v {
+        AInt(n) { return ai_int_to_f64(n) }
+        AFloat(n) { return n }
+        AStr(s) { return s.to_f64() }
+        _ { return 0.0 }
+    }
+}
+
+// i32 → f64: 用算术转换(宿主 Int 无 to_f64 方法)
+fn ai_int_to_f64(n: i32) -> f64 {
+    var x = n + 0.0
+    return x
+}
+
+fn ai_as_str(v: AVal) -> String {
+    match v {
+        AStr(s) { return s }
+        _ { return ai_display(v) }
+    }
+}
+
+// JSON 编码(Std API 双引擎一致; 支持 Int/Float/Bool/String/Vec/Map/None/Unit)
+fn ai_json_encode(v: AVal) -> String {
+    match v {
+        AInt(n) { return f"{n}" }
+        AFloat(n) {
+            let x = n
+            if x == x.to_i32().to_f64() && x >= -1e15 && x <= 1e15 {
+                return f"{x.to_i32()}"
+            }
+            return f"{x}"
+        }
+        ABool(b) { return if b { "true" } else { "false" } }
+        AStr(s) { return ai_json_quote(s) }
+        AUnit { return "null" }
+        AOption(some, val) {
+            if some {
+                return ai_json_encode(val)
+            }
+            return "null"
+        }
+        AResult(ok, val) {
+            if ok {
+                return ai_json_encode(val)
+            }
+            return ai_json_quote("[json_encode: Err 值无法序列化]")
+        }
+        AVec(items) {
+            var parts: Vec<String> = []
+            for it in items {
+                parts.push(ai_json_encode(it))
+            }
+            return "[" + join(parts, ",") + "]"
+        }
+        AMap(entries) {
+            var parts: Vec<String> = []
+            for e in entries {
+                parts.push(ai_json_quote(e.key) + ":" + ai_json_encode(e.value))
+            }
+            return "{" + join(parts, ",") + "}"
+        }
+        _ { return ai_json_quote("[json_encode: 不支持的类型]") }
+    }
+}
+
+fn ai_json_quote(s: String) -> String {
+    var out = "\""
+    var i = 0
+    while i < s.len() {
+        let c = s[i]
+        if c == "\"" {
+            out = out + "\\\""
+        } else if c == "\\" {
+            out = out + "\\\\"
+        } else if c == "\n" {
+            out = out + "\\n"
+        } else if c == "\r" {
+            out = out + "\\r"
+        } else if c == "\t" {
+            out = out + "\\t"
+        } else {
+            out = out + c
+        }
+        i += 1
+    }
+    return out + "\""
+}
+
+// JSON 解码 → AVal(null→None; 对象→Map<String,AVal>); 非法输入返回 None
+// (宿主对非法输入报运行时错误终止; alinterp 返回 None —— 错误路径差异记录于规格)
+fn ai_json_decode(s: String) -> AVal {
+    let pr = ai_json_parse(s, 0)
+    match pr {
+        Ok(r) {
+            if r.next < s.len() {
+                return AOption(false, AUnit)
+            }
+            return r.value
+        }
+        Err(_) { return AOption(false, AUnit) }
+    }
+}
+
+fn ai_json_parse(s: String, i0: i32) -> Result<JPResult, String> {
+    var i = i0
+    while i < s.len() && (s[i] == " " || s[i] == "\n" || s[i] == "\t" || s[i] == "\r") {
+        i += 1
+    }
+    if i >= s.len() {
+        return Err("empty")
+    }
+    let c = s[i]
+    if c == "{" {
+        var entries: Vec<AEntry> = []
+        var j = i + 1
+        while true {
+            while j < s.len() && (s[j] == " " || s[j] == "\n" || s[j] == "\t" || s[j] == "\r") {
+                j += 1
+            }
+            if j >= s.len() {
+                return Err("obj unclosed")
+            }
+            if s[j] == "}" {
+                return Ok(JPResult { value: AMap(entries) next: j + 1 })
+            }
+            if s[j] != "\"" {
+                return Err("obj key")
+            }
+            let ks = ai_json_str(s, j)
+            match ks {
+                Ok(kr) {
+                    var k2 = kr.next
+                    while k2 < s.len() && (s[k2] == " " || s[k2] == "\n" || s[k2] == "\t" || s[k2] == "\r") {
+                        k2 += 1
+                    }
+                    if k2 >= s.len() || s[k2] != ":" {
+                        return Err("obj colon")
+                    }
+                    let vr = ai_json_parse(s, k2 + 1)
+                    match vr {
+                        Ok(vok) {
+                            entries.push(AEntry { key: kr.text value: vok.value })
+                            var k3 = vok.next
+                            while k3 < s.len() && (s[k3] == " " || s[k3] == "\n" || s[k3] == "\t" || s[k3] == "\r") {
+                                k3 += 1
+                            }
+                            if k3 < s.len() && s[k3] == "," {
+                                j = k3 + 1
+                            } else if k3 < s.len() && s[k3] == "}" {
+                                return Ok(JPResult { value: AMap(entries) next: k3 + 1 })
+                            } else {
+                                return Err("obj sep")
+                            }
+                        }
+                        Err(e) { return Err(e) }
+                    }
+                }
+                Err(e) { return Err(e) }
+            }
+        }
+    }
+    if c == "[" {
+        var items: Vec<AVal> = []
+        var j = i + 1
+        while true {
+            while j < s.len() && (s[j] == " " || s[j] == "\n" || s[j] == "\t" || s[j] == "\r") {
+                j += 1
+            }
+            if j >= s.len() {
+                return Err("arr unclosed")
+            }
+            if s[j] == "]" {
+                return Ok(JPResult { value: AVec(items) next: j + 1 })
+            }
+            let vr = ai_json_parse(s, j)
+            match vr {
+                Ok(vok) {
+                    items.push(vok.value)
+                    var k3 = vok.next
+                    while k3 < s.len() && (s[k3] == " " || s[k3] == "\n" || s[k3] == "\t" || s[k3] == "\r") {
+                        k3 += 1
+                    }
+                    if k3 < s.len() && s[k3] == "," {
+                        j = k3 + 1
+                    } else if k3 < s.len() && s[k3] == "]" {
+                        return Ok(JPResult { value: AVec(items) next: k3 + 1 })
+                    } else {
+                        return Err("arr sep")
+                    }
+                }
+                Err(e) { return Err(e) }
+            }
+        }
+    }
+    if c == "\"" {
+        let ks = ai_json_str(s, i)
+        match ks {
+            Ok(kr) { return Ok(JPResult { value: AStr(kr.text) next: kr.next }) }
+            Err(e) { return Err(e) }
+        }
+    }
+    if c == "t" && i + 4 <= s.len() && s[i..i + 4] == "true" {
+        return Ok(JPResult { value: ABool(true) next: i + 4 })
+    }
+    if c == "f" && i + 5 <= s.len() && s[i..i + 5] == "false" {
+        return Ok(JPResult { value: ABool(false) next: i + 5 })
+    }
+    if c == "n" && i + 4 <= s.len() && s[i..i + 4] == "null" {
+        return Ok(JPResult { value: AOption(false, AUnit) next: i + 4 })
+    }
+    if c == "-" || (c >= "0" && c <= "9") {
+        var j = i
+        var is_float = false
+        while j < s.len() {
+            let d = s[j]
+            if d >= "0" && d <= "9" {
+                j += 1
+            } else if d == "-" || d == "+" || d == "." || d == "e" || d == "E" {
+                is_float = true
+                j += 1
+            } else {
+                break
+            }
+        }
+        let txt = s[i..j]
+        if is_float {
+            return Ok(JPResult { value: AFloat(txt.to_f64()) next: j })
+        }
+        return Ok(JPResult { value: AInt(txt.to_i32()) next: j })
+    }
+    return Err("unknown")
+}
+
+// 解析 JSON 字符串字面量(含转义) → {text, next}
+fn ai_json_str(s: String, i0: i32) -> Result<JPResult, String> {
+    if i0 >= s.len() || s[i0] != "\"" {
+        return Err("no quote")
+    }
+    var out = ""
+    var i = i0 + 1
+    while i < s.len() {
+        let c = s[i]
+        if c == "\"" {
+            return Ok(JPResult { value: AUnit text: out next: i + 1 })
+        }
+        if c == "\\" && i + 1 < s.len() {
+            let e = s[i + 1]
+            if e == "\"" {
+                out = out + "\""
+                i += 2
+            } else if e == "\\" {
+                out = out + "\\"
+                i += 2
+            } else if e == "/" {
+                out = out + "/"
+                i += 2
+            } else if e == "n" {
+                out = out + "\n"
+                i += 2
+            } else if e == "r" {
+                out = out + "\r"
+                i += 2
+            } else if e == "t" {
+                out = out + "\t"
+                i += 2
+            } else if e == "b" {
+                out = out + "\u{08}"
+                i += 2
+            } else if e == "f" {
+                out = out + "\u{0c}"
+                i += 2
+            } else if e == "u" && i + 5 < s.len() {
+                let hx = s[i + 2..i + 6]
+                var code = 0
+                var k = 0
+                while k < 4 {
+                    let hc = hx[k]
+                    var dv = -1
+                    if hc >= "0" && hc <= "9" {
+                        dv = hc.to_i32()
+                    } else if hc == "a" {
+                        dv = 10
+                    } else if hc == "b" {
+                        dv = 11
+                    } else if hc == "c" {
+                        dv = 12
+                    } else if hc == "d" {
+                        dv = 13
+                    } else if hc == "e" {
+                        dv = 14
+                    } else if hc == "f" {
+                        dv = 15
+                    } else if hc == "A" {
+                        dv = 10
+                    } else if hc == "B" {
+                        dv = 11
+                    } else if hc == "C" {
+                        dv = 12
+                    } else if hc == "D" {
+                        dv = 13
+                    } else if hc == "E" {
+                        dv = 14
+                    } else if hc == "F" {
+                        dv = 15
+                    }
+                    if dv < 0 {
+                        return Err("bad hex")
+                    }
+                    code = code * 16 + dv
+                    k += 1
+                }
+                if code >= 32 && code <= 126 {
+                    out = out + al_chr(code)
+                } else {
+                    out = out + "?"
+                }
+                i += 6
+            } else {
+                return Err("bad esc")
+            }
+        } else {
+            out = out + c
+            i += 1
+        }
+    }
+    return Err("str unclosed")
+}
+
+// 真值判定
+fn ai_truthy(v: AVal) -> bool {
+    match v {
+        ABool(b) { return b }
+        AInt(n) { return n != 0 }
+        AStr(s) { return s.len() > 0 }
+        AUnit { return false }
+        _ { return true }
+    }
+}
+
+// 相等
+fn ai_eq(a: AVal, b: AVal) -> bool {
+    match a {
+        AInt(n) {
+            match b {
+                AInt(m) { return n == m }
+                AFloat(m) { return n.to_f64() == m }
+                _ { return false }
+            }
+        }
+        AFloat(n) {
+            match b {
+                AFloat(m) { return n == m }
+                AInt(m) { return n == m.to_f64() }
+                _ { return false }
+            }
+        }
+        AStr(s) {
+            match b {
+                AStr(t) { return s == t }
+                _ { return false }
+            }
+        }
+        ABool(x) {
+            match b {
+                ABool(y) { return x == y }
+                _ { return false }
+            }
+        }
+        AVariant(ty1, n1, p1) {
+            match b {
+                AVariant(ty2, n2, p2) {
+                    if n1 != n2 {
+                        return false
+                    }
+                    if p1.len() != p2.len() {
+                        return false
+                    }
+                    var i = 0
+                    while i < p1.len() {
+                        if !ai_eq(p1[i], p2[i]) {
+                            return false
+                        }
+                        i += 1
+                    }
+                    return true
+                }
+                _ { return false }
+            }
+        }
+        AOption(s1, v1) {
+            match b {
+                AOption(s2, v2) {
+                    if s1 != s2 {
+                        return false
+                    }
+                    return if s1 { ai_eq(v1, v2) } else { true }
+                }
+                _ { return false }
+            }
+        }
+        AResult(o1, v1) {
+            match b {
+                AResult(o2, v2) {
+                    if o1 != o2 {
+                        return false
+                    }
+                    return ai_eq(v1, v2)
+                }
+                _ { return false }
+            }
+        }
+        _ { return false }
+    }
+}
+
+// ---------- 函数查找 ----------
+
+// ---- 程序索引(预计算一次, 避免每次调用全程序扫描) ----
+
+struct FnEntry {
+    name: String
+    params: Vec<Param>
+    body: Vec<Stmt>
+}
+
+struct SEntry {
+    ty: String
+    fields: Vec<Field>
+}
+
+struct EEntry {
+    ty: String
+    variants: Vec<EVariant>
+}
+
+struct OEntry {
+    vname: String
+    owner: String
+}
+
+struct IEntry {
+    ity: String
+    methods: Vec<Stmt>
+}
+
+struct Index {
+    fns: Vec<FnEntry>
+    structs: Vec<SEntry>
+    enums: Vec<EEntry>
+    owners: Vec<OEntry>
+    impls: Vec<IEntry>
+}
+
+fn ai_build_index(p: Vec<Stmt>) -> Index {
+    var fns: Vec<FnEntry> = []
+    var structs: Vec<SEntry> = []
+    var enums: Vec<EEntry> = []
+    var owners: Vec<OEntry> = []
+    var impls: Vec<IEntry> = []
+    for s in p {
+        match s {
+            SDef(fname, params, ret, body) {
+                fns.push(FnEntry { name: fname params: params body: body })
+            }
+            SStruct(n, fields) {
+                structs.push(SEntry { ty: n fields: fields })
+            }
+            SEnum(n, variants) {
+                enums.push(EEntry { ty: n variants: variants })
+                for v in variants {
+                    owners.push(OEntry { vname: v.name owner: n })
+                }
+            }
+            SImpl(ity, methods) {
+                impls.push(IEntry { ity: ity methods: methods })
+            }
+            _ {}
+        }
+    }
+    return Index { fns: fns structs: structs enums: enums owners: owners impls: impls }
+}
+
+fn ai_find_params(program: Index, name: String) -> Vec<Param> {
+    for f in program.fns {
+        if f.name == name {
+            return f.params
+        }
+    }
+    return []
+}
+
+fn ai_find_body(program: Index, name: String) -> Vec<Stmt> {
+    for f in program.fns {
+        if f.name == name {
+            return f.body
+        }
+    }
+    return []
+}
+
+fn ai_find_struct(program: Index, ty: String) -> Vec<Field> {
+    for e in program.structs {
+        if e.ty == ty {
+            return e.fields
+        }
+    }
+    return []
+}
+
+fn ai_find_enum(program: Index, ty: String) -> Vec<EVariant> {
+    for e in program.enums {
+        if e.ty == ty {
+            return e.variants
+        }
+    }
+    return []
+}
+
+fn ai_enum_owner(program: Index, vname: String) -> String {
+    for o in program.owners {
+        if o.vname == vname {
+            return o.owner
+        }
+    }
+    return ""
+}
+
+// ---------- 方法分发 ----------
+
+fn ai_call_method(base: AVal, method: String, args: Vec<AVal>, env: Map<String, AVal>, program: Index) -> AVal {
+    match base {
+        AStr(s) {
+            if method == "len" { return AInt(s.len()) }
+            if method == "to_i32" {
+                if args.len() == 0 {
+                    return AInt(s.to_i32())
+                }
+                return AInt(s.to_i32())
+            }
+            if method == "to_f64" {
+                return AFloat(s.to_f64())
+            }
+            if method == "trim" {
+                return AStr(al_trim_str(s))
+            }
+            if method == "split" {
+                var sep = ""
+                if args.len() > 0 {
+                    sep = ai_as_str(args[0])
+                }
+                var parts: Vec<AVal> = []
+                if sep == "" {
+                    var i = 0
+                    while i < s.len() {
+                        parts.push(AStr(s[i..i + 1]))
+                        i += 1
+                    }
+                } else {
+                    var cur = ""
+                    var i = 0
+                    while i < s.len() {
+                        if s[i..i + 1] == sep {
+                            parts.push(AStr(cur))
+                            cur = ""
+                        } else {
+                            cur = cur + s[i..i + 1]
+                        }
+                        i += 1
+                    }
+                    parts.push(AStr(cur))
+                }
+                return AVec(parts)
+            }
+            if method == "contains" {
+                if args.len() > 0 {
+                    let p = ai_as_str(args[0])
+                    return ABool(s.contains(p))
+                }
+                return ABool(false)
+            }
+            if method == "starts_with" {
+                if args.len() > 0 {
+                    let p = ai_as_str(args[0])
+                    return ABool(s.starts_with(p))
+                }
+                return ABool(false)
+            }
+            if method == "ends_with" {
+                if args.len() > 0 {
+                    let p = ai_as_str(args[0])
+                    return ABool(s.ends_with(p))
+                }
+                return ABool(false)
+            }
+            if method == "replace" {
+                if args.len() >= 2 {
+                    let from = ai_as_str(args[0])
+                    let to = ai_as_str(args[1])
+                    return AStr(al_replace_str(s, from, to))
+                }
+                return base
+            }
+            if method == "clone" { return base }
+            return AUnit
+        }
+        AVec(items) {
+            if method == "len" { return AInt(items.len()) }
+            if method == "push" {
+                if args.len() > 0 {
+                    var new_items: Vec<AVal> = []
+                    for it in items { new_items.push(it) }
+                    new_items.push(args[0])
+                    return AVec(new_items)
+                }
+                return base
+            }
+            if method == "pop" {
+                if items.len() > 0 {
+                    return items[items.len() - 1]
+                }
+                return AUnit
+            }
+            if method == "iter" { return base }
+            if method == "map" {
+                // map(closure) → 新 Vec
+                if args.len() > 0 {
+                    match args[0] {
+                        AClosure(cname, params, body, caps) {
+                            var out: Vec<AVal> = []
+                            for it in items {
+                                var env2: Map<String, AVal> = Map.new()
+                                for cp in caps {
+                                    let cv = env.get(cp).unwrap_or(AUnit)
+                                    env2.set(cp, cv)
+                                }
+                                var pn = "x"
+                                if params.len() > 0 {
+                                    pn = params[0].name
+                                }
+                                env2.set(pn, it)
+                                out.push(ai_expr(body, env2, program))
+                            }
+                            return AVec(out)
+                        }
+                        _ {}
+                    }
+                }
+                return base
+            }
+            if method == "sum" {
+                var total_i = 0
+                var has_f = false
+                var total_f = 0.0
+                for it in items {
+                    match it {
+                        AFloat(n) {
+                            total_f = total_f + n
+                            has_f = true
+                        }
+                        _ {
+                            total_i = total_i + ai_as_i32(it)
+                        }
+                    }
+                }
+                if has_f {
+                    return AFloat(total_f + ai_int_to_f64(total_i))
+                }
+                return AInt(total_i)
+            }
+            return AUnit
+        }
+        AMap(entries) {
+            if method == "set" {
+                if args.len() >= 2 {
+                    let k = ai_as_str(args[0])
+                    var new_entries: Vec<AEntry> = []
+                    var found = false
+                    for e in entries {
+                        if e.key == k {
+                            new_entries.push(AEntry { key: k value: args[1] })
+                            found = true
+                        } else {
+                            new_entries.push(e)
+                        }
+                    }
+                    if !found {
+                        new_entries.push(AEntry { key: k value: args[1] })
+                    }
+                    return AMap(new_entries)
+                }
+                return base
+            }
+            if method == "get" {
+                if args.len() > 0 {
+                    let k = ai_as_str(args[0])
+                    for e in entries {
+                        if e.key == k {
+                            return AOption(true, e.value)
+                        }
+                    }
+                }
+                return AOption(false, AUnit)
+            }
+            if method == "contains" {
+                if args.len() > 0 {
+                    let k = ai_as_str(args[0])
+                    for e in entries {
+                        if e.key == k {
+                            return ABool(true)
+                        }
+                    }
+                }
+                return ABool(false)
+            }
+            if method == "len" { return AInt(entries.len()) }
+            if method == "keys" {
+                var ks: Vec<AVal> = []
+                for e in entries {
+                    ks.push(AStr(e.key))
+                }
+                return AVec(ks)
+            }
+            if method == "values" {
+                var vs: Vec<AVal> = []
+                for e in entries {
+                    vs.push(e.value)
+                }
+                return AVec(vs)
+            }
+            if method == "new" {
+                return AMap([])
+            }
+            return AUnit
+        }
+        AStruct(ty, fields) {
+            if method == "len" {
+                return AInt(fields.len())
+            }
+            for im in program.impls {
+                if im.ity == ty {
+                    let methods = im.methods
+                    for m in methods {
+                                match m {
+                                    SDef(mname, params, ret, body) {
+                                        if mname == method {
+                                            var env2: Map<String, AVal> = Map.new()
+                                            env2.set("self", base)
+                                            var i = 0
+                                            for p in params {
+                                                if p.name != "self" {
+                                                    let av = args[i]
+                                                    env2.set(p.name, av)
+                                                    i += 1
+                                                }
+                                            }
+                                            let r = ai_stmts(body, env2, program)
+                                            if r.ctrl == "return" {
+                                                return r.value
+                                            }
+                                            if r.ctrl == "error" {
+                                                return AResult(false, r.value)
+                                            }
+                                            return AUnit
+                                        }
+                                    }
+                                    _ {}
+                                }
+                            }
+                        }
+                    }
+            return AUnit
+        }
+        AOption(some, v) {
+            if method == "unwrap_or" {
+                if some {
+                    return v
+                }
+                if args.len() > 0 {
+                    return args[0]
+                }
+                return AUnit
+            }
+            if method == "unwrap" {
+                if some {
+                    return v
+                }
+                return AUnit
+            }
+            if method == "is_some" {
+                return ABool(some)
+            }
+            return AUnit
+        }
+        AResult(ok, v) {
+            if method == "unwrap_or" {
+                if ok {
+                    return v
+                }
+                if args.len() > 0 {
+                    return args[0]
+                }
+                return AUnit
+            }
+            if method == "unwrap" {
+                if ok {
+                    return v
+                }
+                return AUnit
+            }
+            return AUnit
+        }
+        _ { return AUnit }
+    }
+}
+
+// 字符串工具(宿主内建缺失时的 Aine 实现)
+fn al_trim_str(s: String) -> String {
+    var start = 0
+    var end = s.len()
+    while start < end && s[start] == " " {
+        start += 1
+    }
+    while end > start && s[end - 1] == " " {
+        end -= 1
+    }
+    if start >= end {
+        return ""
+    }
+    return s[start..end]
+}
+
+fn al_replace_str(s: String, from: String, to: String) -> String {
+    if from.len() == 0 {
+        return s
+    }
+    var out = ""
+    var i = 0
+    while i < s.len() {
+        if s[i..i + 1] == from[0..1] && i + from.len() <= s.len() && s[i..i + from.len()] == from {
+            out = out + to
+            i += from.len()
+        } else {
+            out = out + s[i..i + 1]
+            i += 1
+        }
+    }
+    return out
+}
+
+
+// ---------- 表达式求值 ----------
+
+fn ai_expr(e: Expr, env: Map<String, AVal>, program: Index) -> AVal {
+    match e {
+        EInt(n) { return AInt(n) }
+        EFloat(n) { return AFloat(n) }
+        EStr(s) {
+            if s.len() >= 3 && s[0..2] == "f\"" && s[s.len() - 1..s.len()] == "\"" {
+                return AStr(ai_fstr(s, env, program))
+            }
+            return AStr(s)
+        }
+        EIdent(n) {
+            if n == "true" { return ABool(true) }
+            if n == "false" { return ABool(false) }
+            if n == "None" { return AOption(false, AUnit) }
+            if n == "Map" { return AMap([]) }
+            // 枚举无载荷变体
+            let owner = ai_enum_owner(program, n)
+            if owner != "" {
+                return AVariant(owner, n, [])
+            }
+            let envv = env.get(n).unwrap_or(AUnit)
+            match envv {
+                AUnit {
+                    // 函数名作值(高阶参数): 返回函数名标记(AClosure name 字段承载)
+                    let fp = ai_find_params(program, n)
+                    let fb = ai_find_body(program, n)
+                    if fb.len() > 0 || fp.len() > 0 {
+                        return AClosure(n, fp, EBlock(fb), [])
+                    }
+                    return AUnit
+                }
+                _ { return envv }
+            }
+        }
+        EUnit { return AUnit }
+        EBin(op, l, r) {
+            let lv = ai_expr(l, env, program)
+            let rv = ai_expr(r, env, program)
+            if op == "+" {
+                let l_is_num = match lv { AInt(_) { true } AFloat(_) { true } _ { false } }
+                let r_is_num = match rv { AInt(_) { true } AFloat(_) { true } _ { false } }
+                if l_is_num && r_is_num {
+                    let l_int = match lv { AInt(_) { true } _ { false } }
+                    let r_int = match rv { AInt(_) { true } _ { false } }
+                    if l_int && r_int {
+                        return AInt(ai_as_i32(lv) + ai_as_i32(rv))
+                    }
+                    return AFloat(ai_as_f64(lv) + ai_as_f64(rv))
+                }
+                return AStr(ai_display(lv) + ai_display(rv))
+            }
+            if op == "-" {
+                let l_int = match lv { AInt(_) { true } _ { false } }
+                let r_int = match rv { AInt(_) { true } _ { false } }
+                if l_int && r_int {
+                    return AInt(ai_as_i32(lv) - ai_as_i32(rv))
+                }
+                return AFloat(ai_as_f64(lv) - ai_as_f64(rv))
+            }
+            if op == "*" {
+                let l_int = match lv { AInt(_) { true } _ { false } }
+                let r_int = match rv { AInt(_) { true } _ { false } }
+                if l_int && r_int {
+                    return AInt(ai_as_i32(lv) * ai_as_i32(rv))
+                }
+                return AFloat(ai_as_f64(lv) * ai_as_f64(rv))
+            }
+            if op == "/" {
+                let l_int = match lv { AInt(_) { true } _ { false } }
+                let r_int = match rv { AInt(_) { true } _ { false } }
+                if l_int && r_int {
+                    let rv_i = ai_as_i32(rv)
+                    if rv_i == 0 {
+                        return AInt(0)
+                    }
+                    return AInt(ai_as_i32(lv) / rv_i)
+                }
+                let rv_i = ai_as_f64(rv)
+                if rv_i == 0.0 {
+                    return AInt(0)
+                }
+                return AFloat(ai_as_f64(lv) / rv_i)
+            }
+            if op == "%" {
+                let rv_i = ai_as_i32(rv)
+                if rv_i == 0 {
+                    return AInt(0)
+                }
+                return AInt(ai_as_i32(lv) % rv_i)
+            }
+            if op == "==" {
+                return ABool(ai_eq(lv, rv))
+            }
+            if op == "!=" { return ABool(!ai_eq(lv, rv)) }
+            if op == "<" {
+                let l_num = match lv { AInt(_) { true } AFloat(_) { true } _ { false } }
+                let r_num = match rv { AInt(_) { true } AFloat(_) { true } _ { false } }
+                if l_num && r_num {
+                    return ABool(ai_as_f64(lv) < ai_as_f64(rv))
+                }
+                return ABool(ai_display(lv) < ai_display(rv))
+            }
+            if op == ">" {
+                let l_num = match lv { AInt(_) { true } AFloat(_) { true } _ { false } }
+                let r_num = match rv { AInt(_) { true } AFloat(_) { true } _ { false } }
+                if l_num && r_num {
+                    return ABool(ai_as_f64(lv) > ai_as_f64(rv))
+                }
+                return ABool(ai_display(lv) > ai_display(rv))
+            }
+            if op == "<=" {
+                let l_num = match lv { AInt(_) { true } AFloat(_) { true } _ { false } }
+                let r_num = match rv { AInt(_) { true } AFloat(_) { true } _ { false } }
+                if l_num && r_num {
+                    return ABool(ai_as_f64(lv) <= ai_as_f64(rv))
+                }
+                return ABool(ai_display(lv) <= ai_display(rv))
+            }
+            if op == ">=" {
+                let l_num = match lv { AInt(_) { true } AFloat(_) { true } _ { false } }
+                let r_num = match rv { AInt(_) { true } AFloat(_) { true } _ { false } }
+                if l_num && r_num {
+                    return ABool(ai_as_f64(lv) >= ai_as_f64(rv))
+                }
+                return ABool(ai_display(lv) >= ai_display(rv))
+            }
+            if op == "&&" { return ABool(ai_truthy(lv) && ai_truthy(rv)) }
+            if op == "||" { return ABool(ai_truthy(lv) || ai_truthy(rv)) }
+            return AUnit
+        }
+        EUnary(op, x) {
+            let xv = ai_expr(x, env, program)
+            if op == "!" {
+                return ABool(!ai_truthy(xv))
+            }
+            if op == "-" {
+                return AInt(0 - ai_as_i32(xv))
+            }
+            return xv
+        }
+        ECall(callee, args) {
+            var arg_vals: Vec<AVal> = []
+            for a in args {
+                arg_vals.push(ai_expr(a, env, program))
+            }
+            match callee {
+                EIdent(fname) {
+                    // 闭包变量调用: let f = (x) => ...; f(21)
+                    let cv = env.get(fname).unwrap_or(AUnit)
+                    match cv {
+                        AClosure(cn, cparams, cbody, ccaps) {
+                            var env2: Map<String, AVal> = Map.new()
+                            var i = 0
+                            for p in cparams {
+                                let av = arg_vals[i]
+                                env2.set(p.name, av)
+                                i += 1
+                            }
+                            match cbody {
+                                EBlock(bstmts) {
+                                    let r = ai_stmts(bstmts, env2, program)
+                                    if r.ctrl == "return" {
+                                        return r.value
+                                    }
+                                    if r.ctrl == "error" {
+                                        return AResult(false, r.value)
+                                    }
+                                    return ai_tail(bstmts, env2, program)
+                                }
+                                _ {
+                                    return ai_expr(cbody, env2, program)
+                                }
+                            }
+                        }
+                        _ {}
+                    }
+                    if fname == "print" {
+                        var parts: Vec<String> = []
+                        for av in arg_vals {
+                            parts.push(ai_display(av))
+                        }
+                        print(join(parts, " "))
+                        return AUnit
+                    }
+                    if fname == "assert" {
+                        if arg_vals.len() > 0 && !ai_truthy(arg_vals[0]) {
+                            print("断言失败")
+                        }
+                        return AUnit
+                    }
+                    let owner = ai_enum_owner(program, fname)
+                    if owner != "" {
+                        return AVariant(owner, fname, arg_vals)
+                    }
+                    if fname == "Some" {
+                        if arg_vals.len() > 0 {
+                            return AOption(true, arg_vals[0])
+                        }
+                        return AOption(true, AUnit)
+                    }
+                    if fname == "Ok" {
+                        if arg_vals.len() > 0 {
+                            return AResult(true, arg_vals[0])
+                        }
+                        return AResult(true, AUnit)
+                    }
+                    if fname == "Err" {
+                        if arg_vals.len() > 0 {
+                            return AResult(false, arg_vals[0])
+                        }
+                        return AResult(false, AUnit)
+                    }
+                    let params = ai_find_params(program, fname)
+                    let body = ai_find_body(program, fname)
+                    if body.len() > 0 || params.len() > 0 {
+                        var env2: Map<String, AVal> = Map.new()
+                        var i = 0
+                        for p in params {
+                            let av = arg_vals[i]
+                            env2.set(p.name, av)
+                            i += 1
+                        }
+                        let r = ai_stmts(body, env2, program)
+                        if r.ctrl == "return" {
+                            return r.value
+                        }
+                        if r.ctrl == "error" {
+                            return AResult(false, r.value)
+                        }
+                        let tv = ai_tail(body, env2, program)
+                        return tv
+                    }
+                    if fname == "read_file" {
+                        if arg_vals.len() > 0 {
+                            return AStr(read_file(ai_as_str(arg_vals[0])))
+                        }
+                        return AStr("")
+                    }
+                    if fname == "read_line" {
+                        return AStr(read_line())
+                    }
+                    if fname == "env" {
+                        if arg_vals.len() > 0 {
+                            return AStr(env(ai_as_str(arg_vals[0])))
+                        }
+                        return AStr("")
+                    }
+                    if fname == "file_list" {
+                        if arg_vals.len() > 0 {
+                            return AVec(file_list(ai_as_str(arg_vals[0])))
+                        }
+                        return AVec([])
+                    }
+                    if fname == "sleep" {
+                        if arg_vals.len() > 0 {
+                            sleep(ai_as_i32(arg_vals[0]))
+                        }
+                        return AUnit
+                    }
+                    if fname == "json_encode" {
+                        if arg_vals.len() > 0 {
+                            return AStr(ai_json_encode(arg_vals[0]))
+                        }
+                        return AStr("null")
+                    }
+                    if fname == "json_decode" {
+                        if arg_vals.len() > 0 {
+                            return ai_json_decode(ai_as_str(arg_vals[0]))
+                        }
+                        return AOption(false, AUnit)
+                    }
+                    if fname == "window_new" || fname == "label_new" || fname == "button_new" || fname == "set_text" || fname == "get_text" || fname == "button_onclick" || fname == "ui_run" || fname == "input_new" || fname == "listbox_new" || fname == "listbox_add" || fname == "listbox_clear" || fname == "listbox_selected" {
+                        print("UI 内建仅原生构建支持(aine build)")
+                        return AUnit
+                    }
+                    if fname == "http_request" {
+                        print("http_request: 解释器(alinterp)不支持, 请用原生构建")
+                        return AInt(0)
+                    }
+                    if fname == "write_file" {
+                        if arg_vals.len() >= 2 {
+                            return ABool(write_file(ai_as_str(arg_vals[0]), ai_as_str(arg_vals[1])))
+                        }
+                        return ABool(false)
+                    }
+                    if fname == "file_exists" {
+                        if arg_vals.len() > 0 {
+                            return ABool(file_exists(ai_as_str(arg_vals[0])))
+                        }
+                        return ABool(false)
+                    }
+                    if fname == "now" {
+                        return AInt(now())
+                    }
+                    if fname == "Map" {
+                        return AMap([])
+                    }
+                    if fname == "run_ui" {
+                        return AUnit
+                    }
+                    return AUnit
+                }
+                EField(base, mname) {
+                    let bv = ai_expr(base, env, program)
+                    return ai_call_method(bv, mname, arg_vals, env, program)
+                }
+                _ { return AUnit }
+            }
+        }
+        EField(b, name) {
+            let bv = ai_expr(b, env, program)
+            match bv {
+                AStruct(ty, fields) {
+                    for f in fields {
+                        match f {
+                            AEntry(k, v) {
+                                if k == name {
+                                    return v
+                                }
+                            }
+                            _ {}
+                        }
+                    }
+                }
+                _ {}
+            }
+            return AUnit
+        }
+        EIndex(b, idx) {
+            match idx {
+                ERange(a, b2) {
+                    // 切片 s[a..b] / v[a..b]（全量语义，与宿主一致）
+                    let av = ai_as_i32(ai_expr(a, env, program))
+                    let bv = ai_as_i32(ai_expr(b2, env, program))
+                    let bv2 = ai_expr(b, env, program)
+                    match bv2 {
+                        AStr(s2) {
+                            if av >= 0 && bv <= s2.len() && av <= bv {
+                                return AStr(s2[av..bv])
+                            }
+                            return AStr("")
+                        }
+                        AVec(items) {
+                            var out: Vec<AVal> = []
+                            var k = av
+                            while k < bv {
+                                if k >= 0 && k < items.len() {
+                                    out.push(items[k])
+                                }
+                                k += 1
+                            }
+                            return AVec(out)
+                        }
+                        _ { return AUnit }
+                    }
+                }
+                _ {}
+            }
+            let bv = ai_expr(b, env, program)
+            let iv = ai_as_i32(ai_expr(idx, env, program))
+            match bv {
+                AStr(s) {
+                    if iv >= 0 && iv < s.len() {
+                        return AStr(s[iv..iv + 1])
+                    }
+                    return AStr("")
+                }
+                AVec(items) {
+                    if iv >= 0 && iv < items.len() {
+                        return items[iv]
+                    }
+                    return AUnit
+                }
+                _ { return AUnit }
+            }
+        }
+        EStruct(ty, fields) {
+            var vals: Vec<AEntry> = []
+            for fd in fields {
+                vals.push(AEntry { key: fd.name value: ai_expr(fd.value, env, program) })
+            }
+            return AStruct(ty, vals)
+        }
+        EVec(items) {
+            var vals: Vec<AVal> = []
+            for it in items {
+                vals.push(ai_expr(it, env, program))
+            }
+            return AVec(vals)
+        }
+        ERange(a, b) {
+            return AInt(ai_as_i32(ai_expr(a, env, program)))
+        }
+        ETry(x) {
+            let v = ai_expr(x, env, program)
+            match v {
+                AResult(ok, val) {
+                    if ok {
+                        return val
+                    }
+                    // 错误标记: 由语句层(SLet/SExpr/SReturn)转成 ctrl="error" 传播
+                    return AResult(false, val)
+                }
+                AOption(some, val) {
+                    if some {
+                        return val
+                    }
+                    return AOption(false, val)
+                }
+                _ { return v }
+            }
+        }
+        EClosure(params, body) {
+            return AClosure("", params, body, [])
+        }
+        EBlock(stmts) {
+            var env2: Map<String, AVal> = Map.new()
+            for k in env.keys() {
+                env2.set(k, env.get(k).unwrap_or(AUnit))
+            }
+            let r = ai_stmts(stmts, env2, program)
+            if r.ctrl == "return" {
+                return r.value
+            }
+            return ai_tail(stmts, r.env, program)
+        }
+        EIf(cond, then_s, else_s) {
+            let cv = ai_expr(cond, env, program)
+            if ai_truthy(cv) {
+                var env2: Map<String, AVal> = Map.new()
+                for k in env.keys() {
+                    env2.set(k, env.get(k).unwrap_or(AUnit))
+                }
+                let r = ai_stmts(then_s, env2, program)
+                if r.ctrl == "return" {
+                    return r.value
+                }
+                return ai_tail(then_s, r.env, program)
+            }
+            if else_s.len() > 0 {
+                var env3: Map<String, AVal> = Map.new()
+                for k in env.keys() {
+                    env3.set(k, env.get(k).unwrap_or(AUnit))
+                }
+                let r = ai_stmts(else_s, env3, program)
+                if r.ctrl == "return" {
+                    return r.value
+                }
+                return ai_tail(else_s, r.env, program)
+            }
+            return AUnit
+        }
+        EMatch(scrut, arms) {
+            let sv = ai_expr(scrut, env, program)
+            for arm in arms {
+                if ai_pat_match(arm.pat, sv, env, program) {
+                    // 臂体为块时按块语义：显式 return 取值，否则取块尾值
+                    match arm.body {
+                        SBlock(bstmts) {
+                            let r = ai_stmts(bstmts, env, program)
+                            if r.ctrl == "return" {
+                                return r.value
+                            }
+                            return ai_tail(bstmts, r.env, program)
+                        }
+                        _ {
+                            let r = ai_stmt(arm.body, env, program)
+                            if r.ctrl == "return" {
+                                return r.value
+                            }
+                            return AUnit
+                        }
+                    }
+                }
+            }
+            return AUnit
+        }
+        _ { return AUnit }
+    }
+}
+
+// f-string 插值
+fn ai_fstr_expr(text: String, env: Map<String, AVal>, program: Index) -> AVal {
+    // 全量: 插值表达式用 parse_expr 解析后求值(方法链/嵌套调用)
+    let toks = tokenize(text)
+    let pr = parse_expr(toks, 0, 0)
+    match pr {
+        Ok(pr_ok) {
+            if pr_ok.next < toks.len() && toks[pr_ok.next].kind == TEof {
+                return ai_expr(pr_ok.value, env, program)
+            }
+        }
+        Err(pe) {}
+    }
+    var is_ident = true
+    if text.len() == 0 {
+        is_ident = false
+    } else {
+        // 首字符不能是数字(否则纯数字是字面量)
+        let fc = text[0]
+        if fc >= "0" && fc <= "9" {
+            is_ident = false
+        }
+    }
+    var i0 = 0
+    while i0 < text.len() {
+        let c = text[i0]
+        if !(c >= "a" && c <= "z" || c >= "A" && c <= "Z" || c == "_" || c >= "0" && c <= "9") {
+            is_ident = false
+        }
+        i0 += 1
+    }
+    if is_ident {
+        if text == "true" {
+            return ABool(true)
+        }
+        if text == "false" {
+            return ABool(false)
+        }
+        return env.get(text).unwrap_or(AUnit)
+    }
+    if ai_is_num_str(text) {
+        return AInt(text.to_i32())
+    }
+    var lp = 0
+    var found_lp = false
+    while lp < text.len() {
+        if text[lp..lp + 1] == "(" {
+            found_lp = true
+            break
+        }
+        lp += 1
+    }
+    if found_lp {
+        let fname = text[0..lp]
+        let args_txt = text[lp + 1..text.len() - 1]
+        var arg_vals: Vec<AVal> = []
+        var cur = ""
+        var j = 0
+        while j < args_txt.len() {
+            if args_txt[j..j + 1] == "," {
+                arg_vals.push(ai_fstr_expr(cur, env, program))
+                cur = ""
+            } else {
+                cur = cur + args_txt[j..j + 1]
+            }
+            j += 1
+        }
+        if cur.len() > 0 {
+            arg_vals.push(ai_fstr_expr(cur, env, program))
+        }
+        if fname == "print" {
+            return AUnit
+        }
+        var dot = 0
+        var has_dot = false
+        while dot < fname.len() {
+            if fname[dot..dot + 1] == "." {
+                has_dot = true
+                break
+            }
+            dot += 1
+        }
+        if has_dot {
+            let base_name = fname[0..dot]
+            let method_name = fname[dot + 1..fname.len()]
+            let bv = env.get(base_name).unwrap_or(AUnit)
+            return ai_call_method(bv, method_name, arg_vals, env, program)
+        }
+        let params = ai_find_params(program, fname)
+        let body = ai_find_body(program, fname)
+        if body.len() > 0 || params.len() > 0 {
+            var env2: Map<String, AVal> = Map.new()
+            var i = 0
+            for p in params {
+                let av = arg_vals[i]
+                env2.set(p.name, av)
+                i += 1
+            }
+            let r = ai_stmts(body, env2, program)
+            if r.ctrl == "return" {
+                return r.value
+            }
+            if r.ctrl == "error" {
+                return AResult(false, r.value)
+            }
+            return ai_tail(body, env2, program)
+        }
+        // 闭包变量调用: {half(9)}
+        let cv2 = env.get(fname).unwrap_or(AUnit)
+        match cv2 {
+            AClosure(cn2, cparams2, cbody2, ccaps2) {
+                var env2b: Map<String, AVal> = Map.new()
+                var ib = 0
+                for pb in cparams2 {
+                    let avb = arg_vals[ib]
+                    env2b.set(pb.name, avb)
+                    ib += 1
+                }
+                return ai_expr(cbody2, env2b, program)
+            }
+            _ {}
+        }
+        return AUnit
+    }
+    var dot2 = 0
+    var has_dot2 = false
+    while dot2 < text.len() {
+        if text[dot2..dot2 + 1] == "." {
+            has_dot2 = true
+            break
+        }
+        dot2 += 1
+    }
+    if has_dot2 {
+        let bname = text[0..dot2]
+        let fname2 = text[dot2 + 1..text.len()]
+        let bv = env.get(bname).unwrap_or(AUnit)
+        match bv {
+            AStruct(ty, fields) {
+                for f in fields {
+                    if f.key == fname2 {
+                        return f.value
+                    }
+                }
+            }
+            _ {}
+        }
+    }
+    return AUnit
+}
+
+fn ai_fstr(s: String, env: Map<String, AVal>, program: Index) -> String {
+    var out = ""
+    var i = 2
+    while i < s.len() - 1 {
+        let c = s[i]
+        if c == "{" {
+            var j = i + 1
+            while j < s.len() && s[j] != "}" {
+                j += 1
+            }
+            if j < s.len() {
+                let expr_txt = s[i + 1..j]
+                out = out + ai_display(ai_fstr_expr(expr_txt, env, program))
+                i = j + 1
+                continue
+            }
+        }
+        out = out + c
+        i += 1
+    }
+    return out
+}
+
+// 模式匹配
+fn ai_pat_name(pat: String) -> String {
+    var out = ""
+    var i = 0
+    while i < pat.len() {
+        let c = pat[i]
+        if c == "(" || c == "{" {
+            break
+        }
+        out = out + c
+        i += 1
+    }
+    return out
+}
+
+fn ai_pat_match(pat: String, v: AVal, env: Map<String, AVal>, program: Index) -> bool {
+    if pat == "_" {
+        return true
+    }
+    let pname = ai_pat_name(pat)
+    // 绑定载荷: Some(x)/Circle(r)/Ok(x) → x 绑定
+    match v {
+        AVariant(ty, name, payload) {
+            if pname == name {
+                // 嵌套载荷模式校验: SReturn(Some(e)) 要求载荷为 Some/Ok; SReturn(None) 要求 None
+                let pe = ai_pat_payload(pat)
+                if pe != "" {
+                    var names = str_split(pe, ",")
+                    var bi = 0
+                    for bn in names {
+                        let bnv = al_trim_str(bn)
+                        if bnv != "" && bi < payload.len() {
+                            if bnv.starts_with("Some(") || bnv.starts_with("Ok(") {
+                                let pv = payload[bi]
+                                var flag_ok = false
+                                match pv {
+                                    AOption(some, _) { flag_ok = some }
+                                    AResult(ok2, _) { flag_ok = ok2 }
+                                    _ {}
+                                }
+                                if !flag_ok {
+                                    return false
+                                }
+                            }
+                            if bnv.starts_with("None") || bnv.starts_with("Err(") {
+                                let pv2 = payload[bi]
+                                var flag_ok2 = true
+                                match pv2 {
+                                    AOption(some2, _) { flag_ok2 = !some2 }
+                                    AResult(ok3, _) { flag_ok2 = !ok3 }
+                                    _ {}
+                                }
+                                if !flag_ok2 {
+                                    return false
+                                }
+                            }
+                        }
+                        bi += 1
+                    }
+                }
+                return true
+            }
+            return false
+        }
+        AOption(some, val) {
+            if pname == "AOption" {
+                return true
+            }
+            if pname == "Some" && some {
+                return ai_pat_lit_ok(pat, val)
+            }
+            if pname == "None" && !some {
+                return true
+            }
+            return false
+        }
+        AResult(ok, val) {
+            if pname == "AResult" {
+                return true
+            }
+            if pname == "Ok" && ok {
+                return ai_pat_lit_ok(pat, val)
+            }
+            if pname == "Err" && !ok {
+                return ai_pat_lit_ok(pat, val)
+            }
+            return false
+        }
+        AInt(n) {
+            if ai_is_num_str(pat) {
+                return n == pat.to_i32()
+            }
+            if pname == "AInt" {
+                return true
+            }
+            return false
+        }
+        AFloat(f) {
+            if pname == "AFloat" {
+                return true
+            }
+            return false
+        }
+        AStr(s2) {
+            if pname == "AStr" {
+                return true
+            }
+            return false
+        }
+        ABool(b2) {
+            if pname == "ABool" {
+                return true
+            }
+            return false
+        }
+        AVec(items2) {
+            if pname == "AVec" {
+                return true
+            }
+            return false
+        }
+        AMap(entries2) {
+            if pname == "AMap" {
+                return true
+            }
+            return false
+        }
+        AStruct(ty2, fields2) {
+            if pname == ty2 {
+                return true
+            }
+            return false
+        }
+        AUnit { return false }
+        _ { return false }
+    }
+}
+
+// 模式载荷绑定名: Some(x) → x
+// 载荷提取(括号深度感知): SReturn(Some(e)) → "Some(e)"; SReturn(e) → "e"
+fn ai_pat_payload(pat: String) -> String {
+    var lp = 0
+    while lp < pat.len() {
+        if pat[lp..lp + 1] == "(" {
+            break
+        }
+        lp += 1
+    }
+    if lp < pat.len() {
+        var out = ""
+        var depth = 0
+        var i = lp + 1
+        while i < pat.len() {
+            let c = pat[i..i + 1]
+            if c == "(" {
+                depth += 1
+            }
+            if c == ")" {
+                if depth == 0 {
+                    break
+                }
+                depth -= 1
+            }
+            out = out + c
+            i += 1
+        }
+        return out
+    }
+    return ""
+}
+
+// 载荷字面量校验：Some("i32") 这类模式须与值相等才匹配；
+// 载荷为标识符（绑定形）或无载荷时恒真
+fn ai_pat_lit_ok(pat: String, v: AVal) -> bool {
+    let pe = ai_pat_payload(pat)
+    let pt = al_trim_str(pe)
+    if pt == "" {
+        return true
+    }
+    if pt.starts_with("\"") && pt.ends_with("\"") && pt.len() >= 2 {
+        let lit = al_unescape_body(pt[1..pt.len() - 1])
+        return ai_display(v) == lit
+    }
+    var num = true
+    var i = 0
+    while i < pt.len() {
+        let c = pt[i..i + 1]
+        if !((c >= "0" && c <= "9") || c == "-" || c == "+" || c == ".") {
+            num = false
+        }
+        i += 1
+    }
+    if num {
+        return ai_display(v) == pt
+    }
+    return true
+}
+
+// 尾表达式返回
+fn ai_tail(body: Vec<Stmt>, env: Map<String, AVal>, program: Index) -> AVal {
+    if body.len() > 0 {
+        let last = body[body.len() - 1]
+        match last {
+            SExpr(e) {
+                match e {
+                    ECall(cc, aa) {
+                        match cc {
+                            EIdent(fn3) {
+                                if fn3 == "print" {
+                                    return AUnit
+                                }
+                            }
+                            _ {}
+                        }
+                    }
+                    _ {}
+                }
+                return ai_expr(e, env, program)
+            }
+            SIf(cond, then_s, else_s) {
+                let cv = ai_expr(cond, env, program)
+                if ai_truthy(cv) {
+                    return ai_tail(then_s, env, program)
+                }
+                if else_s.len() > 0 {
+                    return ai_tail(else_s, env, program)
+                }
+                return AUnit
+            }
+            SBlock(stmts) {
+                return ai_tail(stmts, env, program)
+            }
+            SMatch(scrut2, arms2) {
+                // 语句形 match 作尾：绑定臂载荷后取命中臂体的块尾值（分类器函数大量依赖）
+                let sv2 = ai_expr(scrut2, env, program)
+                for arm2 in arms2 {
+                    if ai_pat_match(arm2.pat, sv2, env, program) {
+                        match arm2.body {
+                            SBlock(bst2) {
+                                let nenv = ai_arm_bind(arm2.pat, sv2, env)
+                                return ai_tail(bst2, nenv, program)
+                            }
+                            _ { return AUnit }
+                        }
+                    }
+                }
+                return AUnit
+            }
+            _ {}
+        }
+    }
+    return AUnit
+}
+
+// 匹配臂载荷绑定：把模式中的名字绑定到对应载荷位置（返回新 env）
+fn ai_arm_bind(pat: String, sv: AVal, env: Map<String, AVal>) -> Map<String, AVal> {
+    var new_env = env
+    let pe = ai_pat_payload(pat)
+    if pe != "" {
+        let pn2 = ai_pat_name(pat)
+        var names = str_split(pe, ",")
+        var bi = 0
+        for bn in names {
+            let bnv = al_trim_str(bn)
+            if bnv != "" {
+                match sv {
+                    AOption(some, val) {
+                        if pn2 == "AOption" {
+                            if bi == 0 {
+                                new_env.set(bnv, ABool(some))
+                            }
+                            if bi == 1 {
+                                new_env.set(bnv, val)
+                            }
+                        } else {
+                            if some && bi == 0 {
+                                new_env.set(bnv, val)
+                            }
+                        }
+                    }
+                    AResult(ok, val) {
+                        if pn2 == "AResult" {
+                            if bi == 0 {
+                                new_env.set(bnv, ABool(ok))
+                            }
+                            if bi == 1 {
+                                new_env.set(bnv, val)
+                            }
+                        } else {
+                            if bi == 0 {
+                                new_env.set(bnv, val)
+                            }
+                        }
+                    }
+                    AVariant(ty, vname, payload) {
+                        if bi < payload.len() {
+                            let pv = payload[bi]
+                            if bnv.starts_with("Some(") && bnv.ends_with(")") {
+                                let iname = al_trim_str(bnv[5..bnv.len() - 1])
+                                if iname != "" && iname != "_" {
+                                    match pv {
+                                        AOption(some, val2) {
+                                            if some {
+                                                new_env.set(iname, val2)
+                                            }
+                                        }
+                                        AResult(ok2, val2) {
+                                            if ok2 {
+                                                new_env.set(iname, val2)
+                                            }
+                                        }
+                                        _ {}
+                                    }
+                                }
+                            } else if bnv.starts_with("Ok(") && bnv.ends_with(")") {
+                                let iname = al_trim_str(bnv[4..bnv.len() - 1])
+                                if iname != "" && iname != "_" {
+                                    match pv {
+                                        AResult(ok2, val2) {
+                                            if ok2 {
+                                                new_env.set(iname, val2)
+                                            }
+                                        }
+                                        AOption(some, val2) {
+                                            if some {
+                                                new_env.set(iname, val2)
+                                            }
+                                        }
+                                        _ {}
+                                    }
+                                }
+                            } else if bnv.starts_with("Err(") && bnv.ends_with(")") {
+                                let iname = al_trim_str(bnv[4..bnv.len() - 1])
+                                if iname != "" && iname != "_" {
+                                    match pv {
+                                        AResult(ok2, val2) {
+                                            if !ok2 {
+                                                new_env.set(iname, val2)
+                                            }
+                                        }
+                                        AOption(some, val2) {
+                                            if !some {
+                                                new_env.set(iname, val2)
+                                            }
+                                        }
+                                        _ {}
+                                    }
+                                }
+                            } else if bnv != "None" {
+                                new_env.set(bnv, pv)
+                            }
+                        }
+                    }
+                    AStruct(ty2, fields2) {
+                        if bi < fields2.len() {
+                            new_env.set(bnv, fields2[bi].value)
+                        }
+                    }
+                    _ {}
+                }
+            }
+            bi += 1
+        }
+    }
+    return new_env
+}
+
+
+// ---------- 语句执行 ----------
+
+struct AiFlow {
+    ctrl: String
+    value: AVal
+    env: Map<String, AVal>
+}
+
+// 返回 (control, value): control = "ok" | "return" | "break" | "continue"
+fn ai_stmt(s: Stmt, env: Map<String, AVal>, program: Index) -> AiFlow {
+    match s {
+        SLet(vn, is_mut, ty, init) {
+            let v = ai_expr(init, env, program)
+            match init {
+                ETry(tx) {
+                    match v {
+                        AResult(ok2, msg2) {
+                            if !ok2 {
+                                return AiFlow { ctrl: "error" value: msg2 env: env }
+                            }
+                        }
+                        AOption(some2, val2) {
+                            if !some2 {
+                                return AiFlow { ctrl: "error" value: val2 env: env }
+                            }
+                        }
+                        _ {}
+                    }
+                }
+                _ {}
+            }
+            var new_env = env
+            new_env.set(vn, v)
+            return AiFlow { ctrl: "ok" value: AUnit env: new_env }
+        }
+        SAssign(vn, op, rhs) {
+            var new_env = env
+            if op == "=" {
+                let v = ai_expr(rhs, env, program)
+                new_env.set(vn, v)
+            } else {
+                // 复合赋值 += -= *= /=
+                let old = env.get(vn).unwrap_or(AUnit)
+                let v = ai_expr(rhs, env, program)
+                var result = old
+                if op == "+=" {
+                    let l_int = match old { AInt(_) { true } _ { false } }
+                    let r_int = match v { AInt(_) { true } _ { false } }
+                    if l_int && r_int {
+                        result = AInt(ai_as_i32(old) + ai_as_i32(v))
+                    } else {
+                        result = AStr(ai_display(old) + ai_display(v))
+                    }
+                }
+                if op == "-=" {
+                    result = AInt(ai_as_i32(old) - ai_as_i32(v))
+                }
+                if op == "*=" {
+                    result = AInt(ai_as_i32(old) * ai_as_i32(v))
+                }
+                if op == "/=" {
+                    let rv_i = ai_as_i32(v)
+                    if rv_i == 0 {
+                        result = AInt(0)
+                    } else {
+                        result = AInt(ai_as_i32(old) / rv_i)
+                    }
+                }
+                new_env.set(vn, result)
+            }
+            return AiFlow { ctrl: "ok" value: AUnit env: new_env }
+        }
+        SAssignIdx(vn, idx, op, rhs) {
+            let v = ai_expr(rhs, env, program)
+            let iv = ai_as_i32(ai_expr(idx, env, program))
+            let bv = env.get(vn).unwrap_or(AUnit)
+            var new_env = env
+            match bv {
+                AVec(items) {
+                    var new_items: Vec<AVal> = []
+                    var i = 0
+                    while i < items.len() {
+                        if i == iv {
+                            if op == "+=" {
+                                let oldv = items[iv]
+                                let ov_int = match oldv { AInt(n) { true } _ { false } }
+                                let nv_int = match v { AInt(n) { true } _ { false } }
+                                if ov_int && nv_int {
+                                    new_items.push(AInt(ai_as_i32(oldv) + ai_as_i32(v)))
+                                } else {
+                                    new_items.push(v)
+                                }
+                            } else {
+                                new_items.push(v)
+                            }
+                        } else {
+                            new_items.push(items[i])
+                        }
+                        i += 1
+                    }
+                    new_env.set(vn, AVec(new_items))
+                }
+                _ { new_env.set(vn, v) }
+            }
+            return AiFlow { ctrl: "ok" value: AUnit env: new_env }
+        }
+        SExpr(e) {
+            match e {
+                ETry(tx) {
+                    let tv = ai_expr(e, env, program)
+                    match tv {
+                        AResult(ok2, msg2) {
+                            if !ok2 {
+                                return AiFlow { ctrl: "error" value: msg2 env: env }
+                            }
+                        }
+                        AOption(some2, val2) {
+                            if !some2 {
+                                return AiFlow { ctrl: "error" value: val2 env: env }
+                            }
+                        }
+                        _ {}
+                    }
+                }
+                EIdent(kw) {
+                    if kw == "break" {
+                        return AiFlow { ctrl: "break" value: AUnit env: env }
+                    }
+                    if kw == "continue" {
+                        return AiFlow { ctrl: "continue" value: AUnit env: env }
+                    }
+                }
+                _ {}
+            }
+            match e {
+                ECall(cc, aa) {
+                    match cc {
+                        EIdent(fn4) {
+                            if fn4 == "print" {
+                                var parts: Vec<String> = []
+                                for av in aa {
+                                    let avv = ai_expr(av, env, program)
+                                    parts.push(ai_display(avv))
+                                }
+                                print(join(parts, " "))
+                                return AiFlow { ctrl: "ok" value: AUnit env: env }
+                            }
+                        }
+                        EField(eb, mname) {
+                            // 方法调用语句: mutating 方法(push/set/pop)更新变量
+                            match eb {
+                                EIdent(bn) {
+                                    let bv = ai_expr(eb, env, program)
+                                    var arg_vals: Vec<AVal> = []
+                                    for av in aa {
+                                        arg_vals.push(ai_expr(av, env, program))
+                                    }
+                                    let res = ai_call_method(bv, mname, arg_vals, env, program)
+                                    var new_env = env
+                                    if mname == "push" || mname == "set" || mname == "pop" {
+                                        new_env.set(bn, res)
+                                    }
+                                    return AiFlow { ctrl: "ok" value: AUnit env: new_env }
+                                }
+                                _ {}
+                            }
+                        }
+                        _ {}
+                    }
+                }
+                _ {}
+            }
+            let v = ai_expr(e, env, program)
+            return AiFlow { ctrl: "ok" value: v env: env }
+        }
+        SReturn(eo) {
+            match eo {
+                Some(x) {
+                    let rv2 = ai_expr(x, env, program)
+                    // 内部语句直接 return AiFlow{...}：透传其控制流(错误标记等)
+                    match rv2 {
+                        AStruct(fty, flds) {
+                            if fty == "AiFlow" {
+                                var fctrl = "error"
+                                var fval: AVal = AUnit
+                                for f in flds {
+                                    match f {
+                                        AEntry(k2, v2) {
+                                            if k2 == "ctrl" {
+                                                fctrl = ai_display(v2)
+                                            }
+                                            if k2 == "value" {
+                                                fval = v2
+                                            }
+                                        }
+                                        _ {}
+                                    }
+                                }
+                                return AiFlow { ctrl: fctrl value: fval env: env }
+                            }
+                        }
+                        _ {}
+                    }
+                    return AiFlow { ctrl: "return" value: rv2 env: env }
+                }
+                None { return AiFlow { ctrl: "return" value: AUnit env: env } }
+            }
+        }
+        SIf(cond, then_s, else_s) {
+            let cv = ai_expr(cond, env, program)
+            if ai_truthy(cv) {
+                let r = ai_stmts(then_s, env, program)
+                if r.ctrl == "return" || r.ctrl == "break" || r.ctrl == "continue" {
+                    return r
+                }
+                return r
+            }
+            if else_s.len() > 0 {
+                let r = ai_stmts(else_s, env, program)
+                if r.ctrl == "return" || r.ctrl == "break" || r.ctrl == "continue" {
+                    return r
+                }
+                return r
+            }
+            return AiFlow { ctrl: "ok" value: AUnit env: env }
+        }
+        SWhile(cond, body) {
+            var cur_env = env
+            while true {
+                let cv = ai_expr(cond, cur_env, program)
+                if !ai_truthy(cv) {
+                    break
+                }
+                let r = ai_stmts(body, cur_env, program)
+                if r.ctrl == "return" {
+                    return r
+                }
+                // break/continue 前保留循环内最后一次变量更新
+                cur_env = r.env
+                if r.ctrl == "break" {
+                    break
+                }
+            }
+            return AiFlow { ctrl: "ok" value: AUnit env: cur_env }
+        }
+        SFor(v, iter, body) {
+            match iter {
+                ERange(a, b) {
+                    let av = ai_as_i32(ai_expr(a, env, program))
+                    let bv = ai_as_i32(ai_expr(b, env, program))
+                    var cur_env = env
+                    var i = av
+                    while i < bv {
+                        cur_env.set(v, AInt(i))
+                        let r = ai_stmts(body, cur_env, program)
+                        if r.ctrl == "return" {
+                            return r
+                        }
+                        cur_env = r.env
+                        if r.ctrl == "break" {
+                            break
+                        }
+                        i += 1
+                    }
+                    return AiFlow { ctrl: "ok" value: AUnit env: cur_env }
+                }
+                _ {
+                    let iv = ai_expr(iter, env, program)
+                    var cur_env = env
+                    match iv {
+                        AVec(items) {
+                            for it in items {
+                                cur_env.set(v, it)
+                                let r = ai_stmts(body, cur_env, program)
+                                if r.ctrl == "return" {
+                                    return r
+                                }
+                                cur_env = r.env
+                                if r.ctrl == "break" {
+                                    break
+                                }
+                            }
+                        }
+                        AStr(str) {
+                            var si = 0
+                            while si < str.len() {
+                                cur_env.set(v, AStr(str[si..si + 1]))
+                                let r = ai_stmts(body, cur_env, program)
+                                if r.ctrl == "return" {
+                                    return r
+                                }
+                                cur_env = r.env
+                                if r.ctrl == "break" {
+                                    break
+                                }
+                                si += 1
+                            }
+                        }
+                        _ {}
+                    }
+                    return AiFlow { ctrl: "ok" value: AUnit env: cur_env }
+                }
+            }
+        }
+        SBlock(stmts) {
+            let r = ai_stmts(stmts, env, program)
+            if r.ctrl == "return" || r.ctrl == "break" || r.ctrl == "continue" {
+                return r
+            }
+            return r
+        }
+        SGo(is_detached, stmts) {
+            let r = ai_stmts(stmts, env, program)
+            if r.ctrl == "return" {
+                return r
+            }
+            return r
+        }
+        SUi(stmts) {
+            let r = ai_stmts(stmts, env, program)
+            if r.ctrl == "return" {
+                return r
+            }
+            return r
+        }
+        SMatch(scrut, arms) {
+            let sv = ai_expr(scrut, env, program)
+            var cur_env = env
+            for arm in arms {
+                if ai_pat_match(arm.pat, sv, cur_env, program) {
+                    let new_env = ai_arm_bind(arm.pat, sv, cur_env)
+                    let r = ai_stmt(arm.body, new_env, program)
+                    if r.ctrl == "return" || r.ctrl == "break" || r.ctrl == "continue" {
+                        return r
+                    }
+                    return r
+                }
+            }
+            return AiFlow { ctrl: "ok" value: AUnit env: cur_env }
+        }
+        _ { return AiFlow { ctrl: "ok" value: AUnit env: env } }
+    }
+}
+
+fn ai_stmts(stmts: Vec<Stmt>, env: Map<String, AVal>, program: Index) -> AiFlow {
+    var cur_env = env
+    for s in stmts {
+        let r = ai_stmt(s, cur_env, program)
+        if r.ctrl != "ok" {
+            return r
+        }
+        cur_env = r.env
+    }
+    return AiFlow { ctrl: "ok" value: AUnit env: cur_env }
+}
+
+// ---------- 入口 ----------
+
+fn main() -> Result<(), String> {
+    var src_path = "examples/fib.aine"
+    if cli_args.len() >= 1 {
+        src_path = cli_args[0]
+    }
+    let src = read_file(src_path)
+    let p0 = parse_program(tokenize(src))?
+    let flr = flatten_stmts(p0, "examples/", [])
+    var p = p0
+    match flr {
+        Ok(flok) {
+            p = flok.out
+        }
+        Err(flerr) {
+            print("ALP flatten-ERR: " + flerr)
+        }
+    }
+    let idx = ai_build_index(p)
+    let params = ai_find_params(idx, "main")
+    let body = ai_find_body(idx, "main")
+    if body.len() > 0 || params.len() > 0 {
+        var env: Map<String, AVal> = Map.new()
+        let r = ai_stmts(body, env, idx)
+        // main 正常结束: 与宿主 aine run 一致(返回值如 Ok(()) 原样打印; 错误打印信息)
+        if r.ctrl == "return" {
+            print(ai_display(r.value))
+        }
+        if r.ctrl == "error" {
+            print(ai_display(r.value))
+        }
+    }
+}

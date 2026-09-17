@@ -1,0 +1,11 @@
+fn foo() -> Result<i32, String> {
+    return Err("boom")
+}
+
+fn main() -> Result<(), String> {
+    print("M1")
+    let x = foo()?
+    print("X=" + f"{x}")
+    print("M2")
+    return Ok(())
+}

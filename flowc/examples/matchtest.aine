@@ -1,0 +1,23 @@
+enum Color {
+    Red
+    Green
+}
+
+enum Shape {
+    Circle(f64)
+    Rect(f64, f64)
+}
+
+fn main() {
+    var c = Red
+    match c {
+        Red { print("RED") }
+        Green { print("GREEN") }
+    }
+    var s = Circle(2.0)
+    match s {
+        Circle(r) { print("CIR r=" + f"{r}") }
+        Rect(w, h) { print("RECT") }
+    }
+    print("matchtest done")
+}

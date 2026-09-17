@@ -1,0 +1,27 @@
+// awen-proto/src/fullwidth.aine —— 全角归一化(核心规范 §6.9–§6.10)
+// 封闭表,且上下文敏感:仅在 ASCII 对应物构成语法的上下文中应用
+// (命令头内的引号/冒号;遗留 row: 逗号形式)。正文中的全角字符一律是内容。
+
+// 命令头上下文:全角引号 → 字符串定界符;全角冒号 → 冒号
+fn fw_normalize_in_command(c: String) -> Option<String> {
+    if c == "“" || c == "”" || c == "‘" || c == "’" {
+        return Some("\"")
+    }
+    if c == "：" {
+        return Some(":")
+    }
+    return None
+}
+
+// 遗留 row: 逗号形式上下文(§9.6):全角逗号 → 分隔符
+fn fw_normalize_comma_in_row(c: String) -> Option<String> {
+    if c == "，" {
+        return Some(",")
+    }
+    return None
+}
+
+// U+3000 全角空格:不是语法分隔符(§6.10)。源码内直接内嵌该字符。
+fn fw_is_ideo_space(c: String) -> bool {
+    return c == "　"
+}

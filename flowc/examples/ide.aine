@@ -1,0 +1,1043 @@
+// Aine Studio v0 — 纯 Aine 自绘 IDE（D2D rt_* 运行时 + Scintilla 编辑器）
+// 布局与 mockup 一致：顶栏 / rail / 左栏 / 编辑器 / Assistant / Problems / 状态栏
+// S1e-3c: Problems/Symbols/状态栏接真实编译器输出（tokenize → parse_program_safe
+//         → tck_program，rpc() 直调语义：编译器前端模块内嵌进程）
+
+struct Seg {
+    text: String
+    col: i32
+    wd: i32
+    md: i32
+}
+
+struct Diag {
+    code: String
+    msg: String
+    line: i32
+    sev: i32
+}
+
+// TokKind/Token 本地定义（枚举变体不过模块边界; 与 alinterp/compiler_service 同惯例）
+enum TokKind {
+    TIdent
+    TInt
+    TFloat
+    TStr
+    TOp
+    TSemi
+    TEof
+}
+
+struct Token {
+    kind: TokKind
+    text: String
+}
+
+enum Expr {
+    EInt(i32)
+    EFloat(f64)
+    EStr(String)
+    EIdent(String)
+    EBin(String, Expr, Expr)
+    EUnary(String, Expr)
+    ECall(Expr, Vec<Expr>)
+    EField(Expr, String)
+    EBlock(Vec<Stmt>)
+    EVec(Vec<Expr>)
+    EUnit
+    EStruct(String, Vec<StructField>)
+    ETry(Expr)
+    ERange(Expr, Expr)
+    EClosure(Vec<Param>, Expr)
+    EIndex(Expr, Expr)
+    EIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    EMatch(Expr, Vec<MatchArm>)
+}
+
+enum Stmt {
+    SLet(String, bool, Option<String>, Expr)
+    SIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    SWhile(Expr, Vec<Stmt>)
+    SFor(String, Expr, Vec<Stmt>)
+    SReturn(Option<Expr>)
+    SExpr(Expr)
+    SBlock(Vec<Stmt>)
+    SAssign(String, String, Expr)
+    SAssignIdx(String, Expr, String, Expr)
+    SDef(String, Vec<Param>, Option<String>, Vec<Stmt>)
+    SStruct(String, Vec<Field>)
+    SEnum(String, Vec<EVariant>)
+    SImpl(String, Vec<Stmt>)
+    SMod(String, Vec<Stmt>)
+    SImport(String)
+    SMatch(Expr, Vec<MatchArm>)
+    SGo(bool, Vec<Stmt>)
+    SUi(Vec<Stmt>)
+    SGlobalVar(String, Option<String>, Expr)
+}
+
+struct MatchArm {
+    pat: String
+    body: Stmt
+}
+
+struct Field {
+    name: String
+    ty: String
+}
+
+struct StructField {
+    name: String
+    value: Expr
+}
+
+struct EVariant {
+    name: String
+    fields: Vec<String>
+}
+
+struct Param {
+    name: String
+    ty: String
+}
+
+struct EPResult {
+    value: Expr
+    next: i32
+}
+
+struct SPResult {
+    stmt: Stmt
+    next: i32
+}
+
+struct BlockResult {
+    stmts: Vec<Stmt>
+    next: i32
+}
+
+struct TyResult {
+    ty: String
+    next: i32
+}
+
+struct FlatResult {
+    out: Vec<Stmt>
+    loaded: Vec<String>
+}
+
+struct VarInfo {
+    names: Vec<String>
+    types: Vec<String>
+}
+
+// UI/表面语言状态 (S0.6): 0=zh-CN 1=en 2=ja 3=de 4=fr 5=ru
+@global var g_lang: i32 = 0
+@global var g_langmenu: bool = false
+@global var g_status: String = "就绪"
+@global var g_orig: String = ""
+
+// ---------- 主题（mockup CSS，0xRRGGBB） ----------
+fn c_paper() -> i32 { return 16513783 }
+fn c_paper2() -> i32 { return 16184559 }
+fn c_ink() -> i32 { return 2434335 }
+fn c_sub() -> i32 { return 7829103 }
+fn c_faint() -> i32 { return 10855323 }
+fn c_line() -> i32 { return 14671317 }
+fn c_green() -> i32 { return 4351323 }
+fn c_green2() -> i32 { return 15133929 }
+fn c_rail() -> i32 { return 15658214 }
+fn c_white() -> i32 { return 16777215 }
+fn c_kw() -> i32 { return 7035767 }
+fn c_ty() -> i32 { return 4352093 }
+fn c_str() -> i32 { return 9854010 }
+fn c_num() -> i32 { return 10580035 }
+fn c_ln() -> i32 { return 12039338 }
+fn c_sel() -> i32 { return 15133929 }
+fn c_curbg() -> i32 { return 16316403 }
+fn c_red() -> i32 { return 3292360 }
+
+// ---------- 语法高亮 ----------
+fn is_word_char(ch: char) -> bool {
+    (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_"
+}
+
+fn is_kw(w: String) -> bool {
+    if w == "fn" || w == "let" || w == "mut" || w == "if" || w == "else" || w == "while" || w == "for" || w == "in" || w == "match" || w == "return" || w == "break" || w == "continue" || w == "use" || w == "module" || w == "struct" || w == "enum" || w == "type" || w == "impl" || w == "true" || w == "false" || w == "None" || w == "Some" || w == "Ok" || w == "Err" || w == "as" || w == "pub" {
+        return true
+    }
+    return false
+}
+
+fn tok_color(tok: String, mode: i32) -> i32 {
+    if mode == 3 { return c_ln() }
+    if mode == 2 { return c_str() }
+    if mode == 1 {
+        if is_kw(tok) { return c_kw() }
+        let c0 = tok[0]
+        if c0 >= "A" && c0 <= "Z" { return c_ty() }
+        if c0 >= "0" && c0 <= "9" { return c_num() }
+        return c_ink()
+    }
+    return c_ink()
+}
+
+// mode: 0 标点 1 单词 2 字符串 3 注释
+fn line_segments(line: String) -> Vec<Seg> {
+    var segs: Vec<Seg> = []
+    let n = line.len()
+    var i = 0
+    var mode = 0
+    var tok_start = 0
+    while i < n {
+        let ch = line[i]
+        var nm = mode
+        if mode == 2 {
+            nm = 2
+            if ch == "\"" { nm = 0 }
+        } else if mode == 3 {
+            nm = 3
+        } else if ch == "\"" {
+            nm = 2
+        } else if ch == "/" && i + 1 < n {
+            if line[i + 1] == "/" { nm = 3 }
+        } else if is_word_char(ch) {
+            nm = 1
+        } else {
+            nm = 0
+        }
+        if nm != mode {
+            var end = i
+            if mode == 2 && ch == "\"" { end = i + 1 }
+            if end > tok_start {
+                let tok = line[tok_start..end]
+                segs.push(Seg { text: tok, col: tok_color(tok, mode), wd: tok.len(), md: mode })
+            }
+            tok_start = i
+            if mode == 2 && ch == "\"" { tok_start = i + 1 }
+            mode = nm
+        }
+        i += 1
+    }
+    if n > tok_start {
+        let tok = line[tok_start..n]
+        segs.push(Seg { text: tok, col: tok_color(tok, mode), wd: tok.len(), md: mode })
+    }
+    return segs
+}
+
+fn ends_with(s: String, suf: String) -> bool {
+    let sl = s.len()
+    let fl = suf.len()
+    if fl > sl { return false }
+    return s[sl - fl..sl] == suf
+}
+
+fn int_to_str(v: i32) -> String {
+    if v == 0 { return "0" }
+    var n: i32 = v
+    var out = ""
+    while n > 0 {
+        let d = n - (n / 10) * 10
+        let digits = "0123456789"
+        out = out + digits[d..d + 1]
+        n = n / 10
+    }
+    // 反转
+    var rev = ""
+    var i = out.len() - 1
+    while i >= 0 {
+        rev = rev + out[i..i + 1]
+        i -= 1
+    }
+    return rev
+}
+
+fn clip_to(s: String, mx: i32) -> String {
+    if s.len() <= mx { return s }
+    var out = ""
+    var k: i32 = 0
+    while k < mx {
+        out = out + s[k..k + 1]
+        k += 1
+    }
+    return out
+}
+
+// ---------- 真实诊断：tokenize → parse_program_safe → tck_program ----------
+fn tok_line(toks: Vec<Token>, index: i32) -> i32 {
+    // PErr.index 是 token 下标；换行在词法层是 TSemi("\n")，数它得到行号
+    var ln: i32 = 1
+    var j: i32 = 0
+    let n: i32 = toks.len()
+    while j < index && j < n {
+        let tk: Token = toks[j]
+        if tk.kind == TSemi && tk.text == "\n" {
+            ln += 1
+        }
+        j += 1
+    }
+    return ln
+}
+
+fn compute_diags(content: String) -> Vec<Diag> {
+    var out: Vec<Diag> = []
+    let toks: Vec<Token> = tokenize(content)
+    let psr: SafeParse = parse_program_safe(toks)
+    let en: i32 = psr.errors.len()
+    var i: i32 = 0
+    while i < en {
+        let pe: PErr = psr.errors[i]
+        let ln: i32 = tok_line(toks, pe.index)
+        out.push(Diag { code: "E0001", msg: pe.message, line: ln, sev: 0 })
+        i += 1
+        if i >= 60 {
+            return out
+        }
+    }
+    if en == 0 {
+        let tdiags: Vec<String> = tck_program(psr.stmts)
+        var k: i32 = 0
+        let tn: i32 = tdiags.len()
+        while k < tn && k < 60 {
+            out.push(Diag { code: "W0401", msg: tdiags[k], line: 0, sev: 1 })
+            k += 1
+        }
+    }
+    return out
+}
+
+fn compute_symbols(content: String) -> Vec<String> {
+    var out: Vec<String> = []
+    let toks: Vec<Token> = tokenize(content)
+    let psr: SafeParse = parse_program_safe(toks)
+    if psr.errors.len() > 0 {
+        return out
+    }
+    out = collect_fn_names(psr.stmts)
+    return out
+}
+
+fn compute_types(content: String) -> Vec<String> {
+    var out: Vec<String> = []
+    let toks: Vec<Token> = tokenize(content)
+    let psr: SafeParse = parse_program_safe(toks)
+    if psr.errors.len() > 0 {
+        return out
+    }
+    out = collect_user_types(psr.stmts)
+    return out
+}
+
+// ---------- 快速指南 (Docs 菜单) ----------
+fn doc_text() -> String {
+    var d = "# Aine Studio\n"
+    d = d + "\n"
+    d = d + "左栏: 项目文件树, 点击打开/切换 (切换前自动保存)"
+    d = d + "\n"
+    d = d + "编辑器: Scintilla, 直接输入, Aine 语法着色"
+    d = d + "\n"
+    d = d + "问题面板: 真实编译器诊断, 点击行跳转"
+    d = d + "\n"
+    d = d + "符号面板: 当前文件的函数与类型"
+    d = d + "\n"
+    d = d + "\n"
+    d = d + "菜单:"
+    d = d + "\n"
+    d = d + "  运行 - 编译当前文件成 exe 并启动"
+    d = d + "\n"
+    d = d + "  测试 - 工作区全部 .aine 文件解析扫描"
+    d = d + "\n"
+    d = d + "  文档 - 打开本指南"
+    d = d + "\n"
+    d = d + "  右上语言按钮 - 切换表面: 中文/EN/日本語/Deutsch/Français/Русский"
+    d = d + "\n"
+    d = d + "\n"
+    d = d + "试试 examples/zh_demo.aine: 纯中文语法, 运行按钮直接构建启动。"
+    return d
+}
+
+// ---------- UI 本地化 (用户导向: 全部 chrome 文案经 tr) ----------
+fn tr(key: String) -> String {
+    if g_lang == 0 {
+        if key == "project" { return "项目" }
+        if key == "symbols" { return "符号" }
+        if key == "assistant" { return "助手" }
+        if key == "problems" { return "问题" }
+        if key == "checkok" { return "检查通过" }
+        if key == "e1" { return "个错误" }
+        if key == "errors" { return "错误" }
+        if key == "warnings" { return "警告" }
+        if key == "noproblems" { return "未检测到问题。" }
+        if key == "command" { return "Ctrl+K 命令" }
+        if key == "ask" { return "向此文件提问..." }
+        if key == "explain" { return "解释此文件" }
+        if key == "jump" { return "跳到第一个问题" }
+        if key == "h1a" { return "诊断在打开/切换文件时刷新;" }
+        if key == "h1b" { return "解析错误带行号, 可点击跳转。" }
+        if key == "h2a" { return "点击问题面板中的行," }
+        if key == "h2b" { return "编辑器跳到对应行。" }
+        if key == "kfn" { return "函数" }
+        if key == "ktype" { return "类型" }
+        if key == "mcode" { return "代码" }
+        if key == "mrun" { return "运行" }
+        if key == "mtest" { return "测试" }
+        if key == "mdocs" { return "文档" }
+        return key
+    }
+    if key == "project" { return "PROJECT" }
+    if key == "symbols" { return "SYMBOLS" }
+    if key == "assistant" { return "ASSISTANT" }
+    if key == "problems" { return "Problems" }
+    if key == "checkok" { return "Check OK" }
+    if key == "e1" { return "error(s)" }
+    if key == "errors" { return "errors" }
+    if key == "warnings" { return "warnings" }
+    if key == "noproblems" { return "No problems detected in this file." }
+    if key == "command" { return "Ctrl+K Command" }
+    if key == "ask" { return "Ask about this file..." }
+    if key == "explain" { return "Explain this file" }
+    if key == "jump" { return "Jump to first problem" }
+    if key == "h1a" { return "Diagnostics refresh on file open/" }
+    if key == "h1b" { return "switch; parse errors carry lines." }
+    if key == "h2a" { return "Click a row in Problems to" }
+    if key == "h2b" { return "jump to that line in the editor." }
+    if key == "kfn" { return "fn" }
+    if key == "ktype" { return "type" }
+    if key == "mcode" { return "Code" }
+    if key == "mrun" { return "Run" }
+    if key == "mtest" { return "Test" }
+    if key == "mdocs" { return "Docs" }
+    if g_lang == 2 {
+        if key == "project" { return "プロジェクト" }
+        if key == "symbols" { return "シンボル" }
+        if key == "assistant" { return "アシスタント" }
+        if key == "problems" { return "問題" }
+        if key == "checkok" { return "チェックOK" }
+        if key == "errors" { return "エラー" }
+        if key == "warnings" { return "警告" }
+        if key == "noproblems" { return "このファイルに問題はありません。" }
+        if key == "ask" { return "このファイルについて質問..." }
+        if key == "explain" { return "このファイルを説明" }
+        if key == "jump" { return "最初の問題にジャンプ" }
+        if key == "h1a" { return "診断はファイルを開く/切替時に更新" }
+        if key == "h1b" { return "解析エラーには行番号があります。" }
+        if key == "h2a" { return "問題パネルの行をクリック" }
+        if key == "h2b" { return "エディタの対応行にジャンプします。" }
+        if key == "kfn" { return "関数" }
+        if key == "ktype" { return "型" }
+        if key == "mcode" { return "コード" }
+        if key == "mrun" { return "実行" }
+        if key == "mtest" { return "テスト" }
+        if key == "mdocs" { return "ドキュメント" }
+    }
+    if g_lang == 3 {
+        if key == "project" { return "PROJEKT" }
+        if key == "symbols" { return "SYMBOLE" }
+        if key == "assistant" { return "ASSISTENT" }
+        if key == "problems" { return "Probleme" }
+        if key == "checkok" { return "Prüfung OK" }
+        if key == "errors" { return "Fehler" }
+        if key == "warnings" { return "Warnungen" }
+        if key == "noproblems" { return "Keine Probleme in dieser Datei." }
+        if key == "ask" { return "Fragen zu dieser Datei..." }
+        if key == "explain" { return "Diese Datei erklären" }
+        if key == "jump" { return "Zum ersten Problem springen" }
+        if key == "h1a" { return "Diagnosen werden bei Dateiwechsel" }
+        if key == "h1b" { return "aktualisiert; Parserfehler mit Zeilen." }
+        if key == "h2a" { return "Klicken Sie auf eine Zeile in Probleme" }
+        if key == "h2b" { return "um zur entsprechenden Zeile zu springen." }
+        if key == "kfn" { return "Funktion" }
+        if key == "ktype" { return "Typ" }
+        if key == "mcode" { return "Code" }
+        if key == "mrun" { return "Ausführen" }
+        if key == "mtest" { return "Testen" }
+        if key == "mdocs" { return "Dokumente" }
+    }
+    if g_lang == 4 {
+        if key == "project" { return "PROJET" }
+        if key == "symbols" { return "SYMBOLES" }
+        if key == "assistant" { return "ASSISTANT" }
+        if key == "problems" { return "Problèmes" }
+        if key == "checkok" { return "Vérif OK" }
+        if key == "errors" { return "erreurs" }
+        if key == "warnings" { return "avertissements" }
+        if key == "noproblems" { return "Aucun problème dans ce fichier." }
+        if key == "ask" { return "Poser une question sur ce fichier..." }
+        if key == "explain" { return "Expliquer ce fichier" }
+        if key == "jump" { return "Aller au premier problème" }
+        if key == "h1a" { return "Les diagnostics se mettent à jour" }
+        if key == "h1b" { return "à l'ouverture; erreurs avec lignes." }
+        if key == "h2a" { return "Cliquez sur une ligne dans Problèmes" }
+        if key == "h2b" { return "pour aller à la ligne correspondante." }
+        if key == "kfn" { return "fonction" }
+        if key == "ktype" { return "type" }
+        if key == "mcode" { return "Code" }
+        if key == "mrun" { return "Exécuter" }
+        if key == "mtest" { return "Tester" }
+        if key == "mdocs" { return "Documentation" }
+    }
+    if g_lang == 5 {
+        if key == "project" { return "ПРОЕКТ" }
+        if key == "symbols" { return "СИМВОЛЫ" }
+        if key == "assistant" { return "АССИСТЕНТ" }
+        if key == "problems" { return "Проблемы" }
+        if key == "checkok" { return "Проверка OK" }
+        if key == "errors" { return "ошибки" }
+        if key == "warnings" { return "предупреждения" }
+        if key == "noproblems" { return "Нет проблем в этом файле." }
+        if key == "ask" { return "Задать вопрос об этом файле..." }
+        if key == "explain" { return "Объяснить этот файл" }
+        if key == "jump" { return "Перейти к первой проблеме" }
+        if key == "h1a" { return "Диагностика обновляется при" }
+        if key == "h1b" { return "открытии/переключении файла." }
+        if key == "h2a" { return "Нажмите строку в Проблемы," }
+        if key == "h2b" { return "чтобы перейти к этой строке." }
+        if key == "kfn" { return "функция" }
+        if key == "ktype" { return "тип" }
+        if key == "mcode" { return "Код" }
+        if key == "mrun" { return "Запуск" }
+        if key == "mtest" { return "Тест" }
+        if key == "mdocs" { return "Документация" }
+    }
+    return key
+}
+
+// ---------- 绘制 ----------
+fn draw_code_line(p_x: i32, p_y: i32, line: String, max_x: i32) {
+    var x: i32 = p_x
+    let segs: Vec<Seg> = line_segments(line)
+    for si in 0..segs.len() {
+        let seg = segs[si]
+        if x >= max_x {
+            return
+        }
+        rt_text(x, p_y, seg.text, seg.col, 1, 13)
+        x = x + seg.wd * 8
+    }
+    return
+}
+
+// ---------- Scintilla 编辑控件（COLORREF 0x00BBGGRR 预计算） ----------
+fn b_ink() -> i32 { return 2041125 }
+fn b_kw() -> i32 { return 7822187 }
+fn b_ty() -> i32 { return 6121538 }
+fn b_str() -> i32 { return 3824790 }
+fn b_num() -> i32 { return 4419745 }
+fn b_ln() -> i32 { return 11187383 }
+fn b_white() -> i32 { return 16777215 }
+fn b_caretbg() -> i32 { return 15988728 }
+
+fn sci_style(st: i32, fore: i32) {
+    sci_msgp(2056, st, "Consolas")
+    sci_msg(2055, st, 13)
+    sci_msg(2051, st, fore)
+    return
+}
+
+fn sci_setup() {
+    // UTF-8（SetCodePage=2037, 单参数走 wParam）
+    sci_msg(2037, 65001, 0)
+    // 行号边栏（SetMarginTypeN=2240, SetMarginWidthN=2242, SC_MARGIN_NUMBER=1）
+    sci_msg(2240, 0, 1)
+    sci_msg(2242, 0, 44)
+    // 默认样式（StyleSetFont=2056, StyleSetSize=2055, StyleSetFore=2051, StyleSetBack=2052）
+    sci_msgp(2056, 32, "Consolas")
+    sci_msg(2055, 32, 13)
+    sci_msg(2051, 32, b_ink())
+    sci_msg(2052, 32, b_white())
+    sci_msg(2050, 0, 0)
+    // Aine 配色: 注释/数字/关键字/类型/字符串/操作符/标识符
+    sci_style(1, b_ln())
+    sci_style(2, b_ln())
+    sci_style(3, b_ln())
+    sci_style(4, b_num())
+    sci_style(5, b_kw())
+    sci_style(16, b_ty())
+    sci_style(6, b_str())
+    sci_style(7, b_str())
+    sci_style(12, b_str())
+    sci_style(9, b_num())
+    sci_style(10, b_ink())
+    sci_style(11, b_ink())
+    sci_msg(2268, 0, 0)
+    sci_msg(2036, 4, 0)
+    sci_msg(2096, 1, 0)
+    sci_msg(2098, b_caretbg(), 0)
+    return
+}
+
+// 容器样式: Aine tokenizer 直接产出样式字节
+fn seg_style(md: i32, tok: String) -> i32 {
+    if md == 3 { return 2 }
+    if md == 2 { return 6 }
+    if md == 1 {
+        if is_kw(tok) {
+            return 5
+        }
+        if lang_has_kw(g_lang, tok) {
+            return 5
+        }
+        let c0 = tok[0]
+        if c0 >= "A" && c0 <= "Z" { return 16 }
+        if c0 >= "0" && c0 <= "9" { return 4 }
+        return 11
+    }
+    return 10
+}
+
+fn style_cb(pos: i32) {
+    // ADDTEXT 会把文档标记为已样式化, 通知的 pos 不可靠 → 每次从 0 全量重刷
+    var line: i32 = 0
+    let total: i32 = sci_msg(2183, 0, 0)
+    var guard: i32 = 0
+    while guard < 8000 {
+        guard += 1
+        let lstart = sci_msg(2167, line, 0)
+        if lstart >= total {
+            return
+        }
+        let linelen = sci_msg(2350, line, 0)
+        let text = sci_get_line(line)
+        // 计算行尾 EOL 字节数
+        var eol: i32 = 0
+        if linelen > 0 {
+            let last: String = text[linelen - 1..linelen]
+            if last == "\n" {
+                eol = 1
+                if linelen >= 2 {
+                    let prev: String = text[linelen - 2..linelen - 1]
+                    if prev == "\r" { eol = 2 }
+                }
+            }
+        }
+        let bodylen: i32 = linelen - eol
+        sci_msg(2032, lstart, 255)
+        if bodylen > 0 {
+            let body = text[0..bodylen]
+            let segs: Vec<Seg> = line_segments(body)
+            for si in 0..segs.len() {
+                let seg = segs[si]
+                sci_msg(2033, seg.wd, seg_style(seg.md, seg.text))
+            }
+        }
+        if eol > 0 {
+            sci_msg(2029, eol, 0)
+        }
+        line += 1
+    }
+    return
+}
+
+fn open_file(name: String) {
+    let path = "examples/" + name
+    let content = read_file(path)
+    sci_set_text(content)
+    sci_msg(2014, 0, 0)
+    g_orig = sci_get_text()
+    return
+}
+
+fn save_current(name: String) {
+    write_file("examples/" + name, sci_get_text())
+    return
+}
+
+fn draw_all(files: Vec<String>, selected: i32, diags: Vec<Diag>, syms: Vec<String>, typs: Vec<String>) {
+    let X0 = 0
+    let TOP = 48
+    let RAILW = 52
+    let LEFTW = 226
+    let RIGHTW = 236
+    let W = rt_w()
+    let H = rt_h()
+    let STATUS = 27
+    let PROB = 148
+    let TABH = 40
+    let MIDX = X0 + RAILW + LEFTW
+    let RIGHTX = X0 + W - RIGHTW
+    let MIDW = RIGHTX - MIDX
+    let EDY = TOP + TABH
+    let PROBY = H - STATUS - PROB
+    let EDH = PROBY - EDY
+    let STATUSY = H - STATUS
+
+    var nshow: i32 = files.len()
+    if nshow > 16 { nshow = 16 }
+    var sel: i32 = selected
+    if sel >= nshow { sel = 0 }
+
+    // 真实计数
+    var nerr: i32 = 0
+    var nwarn: i32 = 0
+    for di in 0..diags.len() {
+        let d: Diag = diags[di]
+        if d.sev == 0 {
+            nerr += 1
+        } else {
+            nwarn += 1
+        }
+    }
+
+    // 画布
+    rt_fill(X0, 0, W, H, c_paper())
+
+    // ===== 顶栏 =====
+    rt_fill(X0, 0, W, TOP, c_paper())
+    rt_rrect(14, 12, 23, 23, 8, c_green())
+    rt_srect(14, 12, 23, 23, 8, c_green())
+    rt_text(25, 17, "*", c_paper(), 0, 8)
+    rt_text(44, 15, "Aine", c_ink(), 0, 14)
+    rt_text(82, 18, "studio", c_sub(), 0, 10)
+    rt_text(MIDX + 16, 16, tr("mcode"), c_sub(), 0, 12)
+    rt_click(MIDX + 10, 8, 56, 32, 240)
+    rt_text(MIDX + 72, 16, tr("mrun"), c_green(), 0, 12)
+    rt_click(MIDX + 66, 8, 56, 32, 205)
+    rt_text(MIDX + 122, 16, tr("mtest"), c_sub(), 0, 12)
+    rt_click(MIDX + 116, 8, 56, 32, 220)
+    rt_text(MIDX + 172, 16, tr("mdocs"), c_sub(), 0, 12)
+    rt_click(MIDX + 166, 8, 56, 32, 230)
+    // 语言切换 (S0.6 Profile 系统): 点击弹 6 语言下拉
+    let langlabel: String = lang_name(g_lang)
+    rt_rrect(W - 224, 11, 54, 24, 6, c_green2())
+    rt_srect(W - 224, 11, 54, 24, 6, c_green())
+    rt_text(W - 216, 15, langlabel, c_green(), 0, 11)
+    rt_click(W - 224, 11, 54, 24, 200)
+    if g_langmenu {
+        // 语言下拉: 6 个 Profile
+        let pc: i32 = profile_count()
+        for li in 0..pc {
+            let ly = 40 + li * 26
+            let lname: String = lang_name(li)
+            if li == g_lang {
+                rt_fill(W - 224, ly, 100, 26, c_sel())
+            }
+            rt_text(W - 216, ly + 4, lname, c_ink(), 0, 11)
+            rt_click(W - 224, ly, 100, 26, 300 + li)
+        }
+    }
+    rt_text(W - 156, 17, tr("command"), c_faint(), 0, 11)
+
+    // ===== Rail =====
+    rt_fill(X0, TOP, RAILW, H - TOP - STATUS, c_rail())
+    for ri in 0..5 {
+        let ry = TOP + 14 + ri * 40
+        if ri == 0 {
+            rt_rrect(15, ry, 22, 22, 6, c_green2())
+            rt_srect(15, ry, 22, 22, 6, c_green())
+        } else {
+            rt_srect(15, ry, 22, 22, 6, c_line())
+        }
+    }
+
+    // ===== 左侧面板: 真实文件树 =====
+    let LX = X0 + RAILW
+    rt_fill(LX, TOP, LEFTW, H - TOP - STATUS, c_paper())
+    rt_hline(LX + LEFTW, LX + LEFTW + 1, TOP, c_line())
+    rt_text(LX + 14, 58, tr("project"), c_faint(), 0, 9)
+    rt_hline(LX, LX + LEFTW, 80, c_line())
+    for fi in 0..nshow {
+        let fy = 92 + fi * 27
+        let sel_now = fi == sel
+        if sel_now {
+            rt_fill(LX + 8, fy, LEFTW - 16, 27, c_sel())
+        }
+        if sel_now {
+            rt_rrect(LX + 15, fy + 10, 6, 6, 3, c_green())
+        } else {
+            rt_rrect(LX + 15, fy + 10, 6, 6, 3, c_line())
+        }
+        if sel_now {
+            rt_text(LX + 28, fy + 6, files[fi], c_green(), 0, 11)
+        } else {
+            rt_text(LX + 28, fy + 6, files[fi], c_ink(), 0, 11)
+        }
+        rt_click(LX + 8, fy, LEFTW - 16, 27, 10 + fi)
+    }
+
+    // ===== 左侧面板: 真实 Symbols =====
+    let SY0 = 92 + nshow * 27 + 16
+    rt_text(LX + 14, SY0, tr("symbols"), c_faint(), 0, 9)
+    var nsym: i32 = syms.len()
+    if nsym > 4 { nsym = 4 }
+    for si in 0..nsym {
+        let sy = SY0 + 18 + si * 24
+        let sname: String = clip_to(syms[si], 18)
+        rt_text(LX + 20, sy, sname, c_sub(), 0, 11)
+        rt_text(LX + LEFTW - 44, sy + 1, tr("kfn"), c_faint(), 0, 9)
+    }
+    var ntyp: i32 = typs.len()
+    if ntyp > 3 { ntyp = 3 }
+    for ti in 0..ntyp {
+        let ty = SY0 + 18 + (nsym + ti) * 24
+        let tname: String = clip_to(typs[ti], 18)
+        rt_text(LX + 20, ty, tname, c_sub(), 0, 11)
+        rt_text(LX + LEFTW - 44, ty + 1, tr("ktype"), c_faint(), 0, 9)
+    }
+
+    // ===== Assistant =====
+    rt_fill(RIGHTX, TOP, RIGHTW, H - TOP - STATUS, c_paper2())
+    rt_hline(RIGHTX, X0 + W, TOP, c_line())
+    rt_text(RIGHTX + 14, 58, tr("assistant"), c_faint(), 0, 9)
+    rt_rrect(RIGHTX + RIGHTW - 26, 60, 6, 6, 3, c_green())
+    rt_hline(RIGHTX, X0 + W, 80, c_line())
+    rt_rrect(RIGHTX + 14, 92, RIGHTW - 44, 24, 5, c_green2())
+    rt_text(RIGHTX + 22, 97, tr("explain"), c_green(), 0, 10)
+    rt_fill(RIGHTX + 14, 122, RIGHTW - 28, 58, c_white())
+    rt_text(RIGHTX + 20, 126, tr("h1a"), c_ink(), 0, 10)
+    rt_text(RIGHTX + 20, 143, tr("h1b"), c_ink(), 0, 10)
+    rt_text(RIGHTX + 20, 160, "", c_ink(), 0, 10)
+    rt_rrect(RIGHTX + 14, 190, RIGHTW - 44, 24, 5, c_green2())
+    rt_text(RIGHTX + 22, 195, tr("jump"), c_green(), 0, 10)
+    rt_fill(RIGHTX + 14, 220, RIGHTW - 28, 40, c_white())
+    rt_text(RIGHTX + 20, 224, tr("h2a"), c_ink(), 0, 10)
+    rt_text(RIGHTX + 20, 241, tr("h2b"), c_ink(), 0, 10)
+    let INY = PROBY - 66
+    rt_fill(RIGHTX + 14, INY, RIGHTW - 28, 46, c_white())
+    rt_srect(RIGHTX + 14, INY, RIGHTW - 28, 46, 8, c_line())
+    rt_text(RIGHTX + 24, INY + 12, tr("ask"), c_faint(), 0, 10)
+
+    // ===== Tab 栏: 当前文件名 =====
+    rt_fill(MIDX, TOP, MIDW, TABH, c_paper2())
+    rt_fill(MIDX, TOP, 124, TABH, c_paper())
+    if files.len() > 0 {
+        rt_text(MIDX + 12, TOP + 12, files[sel], c_ink(), 0, 12)
+        let lang: String = lang_code(g_lang)
+        rt_text(MIDX + MIDW - 190, TOP + 13, files[sel] + " - " + lang + " - UTF-8", c_sub(), 0, 9)
+    }
+    rt_fill(MIDX + 14, TOP + TABH - 2, 96, 2, c_green())
+
+    // ===== 编辑区: Scintilla 控件（铺满中部, 自带行号/高亮/编辑） =====
+    rt_fill(MIDX, EDY, MIDW, EDH, c_white())
+    sci_fit(MIDX, EDY, MIDW, EDH)
+
+    // ===== Problems: 真实编译器诊断 =====
+    rt_fill(MIDX, PROBY, MIDW, PROB, c_paper())
+    rt_hline(MIDX, X0 + W, PROBY, c_line())
+    rt_text(MIDX + 12, PROBY + 8, tr("problems"), c_ink(), 0, 12)
+    var counts = int_to_str(nerr) + " " + tr("errors") + " - " + int_to_str(nwarn) + " " + tr("warnings")
+    rt_text(MIDX + 80, PROBY + 9, counts, c_sub(), 0, 10)
+    rt_hline(MIDX, X0 + W, PROBY + 30, c_line())
+    let rows_fit: i32 = (PROB - 44) / 17
+    var shown: i32 = diags.len()
+    if shown > rows_fit { shown = rows_fit }
+    let msgcap: i32 = (MIDW - 320) / 6
+    for pi in 0..shown {
+        let d: Diag = diags[pi]
+        let ry = PROBY + 34 + pi * 17
+        if d.sev == 0 {
+            rt_rrect(MIDX + 16, ry + 4, 7, 7, 3, c_red())
+        } else {
+            rt_rrect(MIDX + 16, ry + 4, 7, 7, 3, c_num())
+        }
+        if d.sev == 0 {
+            rt_text(MIDX + 32, ry, d.code, c_red(), 0, 10)
+        } else {
+            rt_text(MIDX + 32, ry, d.code, c_num(), 0, 10)
+        }
+        let mshort: String = clip_to(d.msg, msgcap)
+        rt_text(MIDX + 78, ry, mshort, c_ink(), 0, 10)
+        if d.line > 0 {
+            let where_s = files[sel] + ":" + int_to_str(d.line)
+            rt_text(MIDX + MIDW - 150, ry, where_s, c_faint(), 0, 9)
+        }
+        rt_click(MIDX, ry, MIDW, 17, 1000 + pi)
+    }
+    if diags.len() == 0 {
+        rt_text(MIDX + 32, PROBY + 36, tr("noproblems"), c_sub(), 0, 10)
+    }
+
+    // ===== 状态栏: 真实检查状态 =====
+    rt_fill(X0, STATUSY, W, STATUS, c_rail())
+    rt_hline(X0, X0 + W, STATUSY, c_line())
+    if nerr == 0 {
+        rt_rrect(11, STATUSY + 10, 6, 6, 3, c_green())
+        rt_text(24, STATUSY + 7, tr("checkok"), c_green(), 0, 10)
+    } else {
+        rt_rrect(11, STATUSY + 10, 6, 6, 3, c_red())
+        let es = int_to_str(nerr) + " " + tr("e1")
+        rt_text(24, STATUSY + 7, es, c_red(), 0, 10)
+    }
+    if files.len() > 0 {
+        rt_text(W / 2 - 60, STATUSY + 7, files[sel], c_sub(), 0, 10)
+    }
+    rt_text(W - 320, STATUSY + 7, g_status, c_sub(), 0, 10)
+    rt_text(W - 120, STATUSY + 7, "UTF-8 - Aine 0.1", c_sub(), 0, 10)
+    return
+}
+
+fn main() -> Result<(), String> {
+    rt_window("Aine Studio", 1200, 760)
+    sci_init()
+    sci_new(290, 88, 620, 500)
+    sci_setup()
+    rt_on_style(style_cb)
+    // 真实文件树: examples/*.aine 按名排序
+    var files: Vec<String> = []
+    let raw: Vec<String> = file_list("examples")
+    let rawn: i32 = raw.len()
+    var i = 0
+    while i < rawn {
+        let nm: String = raw[i]
+        if ends_with(nm, ".aine") {
+            files.push(nm)
+        }
+        i += 1
+    }
+    var selected = 0
+    var diags: Vec<Diag> = []
+    var syms: Vec<String> = []
+    var typs: Vec<String> = []
+    if files.len() > 0 {
+        open_file(files[selected])
+        let buf = sci_get_text()
+        var canon: String = buf
+        if g_lang != 1 {
+            canon = surface_to_canonical_p(buf, g_lang)
+        }
+        diags = compute_diags(canon)
+        syms = compute_symbols(canon)
+        typs = compute_types(canon)
+    }
+    var quit = false
+    while quit == false {
+        rt_begin()
+        draw_all(files, selected, diags, syms, typs)
+        rt_invalidate()
+        let ev = rt_wait_event()
+        if ev == -2 {
+            quit = true
+        }
+        // ev == -1: 窗口尺寸变化 → 回顶用新 rt_w()/rt_h() 重画
+        if ev >= 10 && ev < 50 && ev - 10 < files.len() && ev - 10 != selected {
+            // 切文件前保存(有修改才写盘)
+            let cur: String = sci_get_text()
+            if cur != g_orig {
+                save_current(files[selected])
+            }
+            selected = ev - 10
+            open_file(files[selected])
+            let buf = sci_get_text()
+            var canon: String = buf
+            if g_lang != 1 {
+                canon = surface_to_canonical_p(buf, g_lang)
+            }
+            diags = compute_diags(canon)
+            syms = compute_symbols(canon)
+            typs = compute_types(canon)
+        }
+        // ev == 200: 弹出/收起语言下拉; ev 300+i: 选择语言 Profile
+        if ev == 200 {
+            if g_langmenu {
+                g_langmenu = false
+            } else {
+                g_langmenu = true
+            }
+        }
+        if ev >= 300 && ev < 300 + profile_count() {
+            let newlang: i32 = ev - 300
+            if newlang != g_lang {
+                let buf2 = sci_get_text()
+                // 先归一到 canonical (旧表面), 再渲染到新表面
+                var canonbuf: String = buf2
+                if g_lang != 1 {
+                    canonbuf = surface_to_canonical_p(buf2, g_lang)
+                }
+                var rendered = canonbuf
+                if newlang != 1 {
+                    rendered = render_to(canonbuf, newlang)
+                }
+                g_lang = newlang
+                sci_set_text(rendered)
+                sci_msg(2014, 0, 0)
+                var canon2 = rendered
+                if g_lang != 1 {
+                    canon2 = surface_to_canonical_p(rendered, g_lang)
+                }
+                diags = compute_diags(canon2)
+                syms = compute_symbols(canon2)
+                typs = compute_types(canon2)
+            }
+            g_langmenu = false
+        }
+        // ev == 205: 运行 → 内嵌发射器出 C → zig cc → 启动
+        if ev == 205 && files.len() > 0 {
+            let buf3 = sci_get_text()
+            var canon3: String = buf3
+            if g_lang != 1 {
+                canon3 = surface_to_canonical_p(buf3, g_lang)
+            }
+            let tk3: Vec<Token> = tokenize(canon3)
+            let ps3: SafeParse = parse_program_safe(tk3)
+            if ps3.errors.len() > 0 {
+                g_status = "无法运行: 先修复解析错误"
+                diags = compute_diags(canon3)
+            } else {
+                g_status = "构建中..."
+                rt_invalidate()
+                let pp = ps3.stmts
+                let csrc = c_program(pp, collect_user_types(pp), collect_variant_names(pp), collect_variant_owners(pp), collect_fn_names(pp), collect_fn_returns(pp), collect_var_names(pp), collect_var_types(pp), collect_fn_ptypes(pp), collect_enum_ty_names(pp), collect_enum_variant_lists(pp))
+                write_file("run_out.c", csrc)
+                let rc = sys_exec("zig cc -std=c23 -O2 -luser32 -lgdi32 -ld2d1 -ldwrite -luuid -lole32 -o run_out.exe run_out.c")
+                if rc == 0 {
+                    g_status = "构建完成, 启动 run_out.exe"
+                    sys_open("run_out.exe")
+                } else {
+                    g_status = "构建失败 (zig 退出码 " + int_to_str(rc) + ")"
+                }
+                diags = compute_diags(canon3)
+                syms = compute_symbols(canon3)
+                typs = compute_types(canon3)
+            }
+        }
+        // ev == 220: 测试 → 工作区全文件解析扫描
+        if ev == 220 {
+            var nerr2: i32 = 0
+            var nfiles: i32 = files.len()
+            if nfiles > 16 {
+                nfiles = 16
+            }
+            for tf in 0..nfiles {
+                let c1: String = read_file("examples/" + files[tf])
+                var cc: String = c1
+                if g_lang != 1 {
+                    cc = surface_to_canonical_p(c1, g_lang)
+                }
+                let tk2: Vec<Token> = tokenize(cc)
+                let ps2: SafeParse = parse_program_safe(tk2)
+                nerr2 += ps2.errors.len()
+            }
+            g_status = "测试: " + int_to_str(nfiles) + " 个文件, " + int_to_str(nerr2) + " 个解析错误"
+        }
+        // ev == 230: 文档 → 编辑器打开快速指南
+        if ev == 230 {
+            sci_set_text(doc_text())
+            g_status = "已打开快速指南 (缓冲区未保存)"
+        }
+        // ev == 240: 代码 → 焦点回编辑器
+        if ev == 240 {
+            sci_msg(2380, 1, 0)
+        }
+        // ev >= 1000: Problems 行点击 → 跳到对应行（GotoLine=2024, 0 基）
+        if ev >= 1000 {
+            let pi: i32 = ev - 1000
+            if pi < diags.len() {
+                let d: Diag = diags[pi]
+                if d.line > 0 {
+                    sci_msg(2024, d.line - 1, 0)
+                    sci_msg(2380, 1, 0)
+                }
+            }
+        }
+    }
+    return Ok(())
+}
+
+module altype;
+module altypeck;
+module allex;
+module alparse;
+module alstr;
+module alcollect;
+module alee;
+module alrender;

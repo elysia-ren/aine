@@ -1,0 +1,31 @@
+# 构建产物
+target/
+target2/
+target3/
+
+# 生成/二进制文件
+*.exe
+*.pdb
+*.rlib
+*.rmeta
+*.d
+*.c
+*.o
+*.obj
+
+# 调试脚本与输出
+_dbg*.py
+_probe*.py
+_fix*.py
+*.txt
+sh_*.c
+self_host*.c
+self_host*.exe
+
+# 临时
+t.txt
+u.txt
+z*.txt
+
+# 发布产物
+/dist/

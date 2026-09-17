@@ -1,0 +1,13 @@
+struct Token {
+    kind: String
+    text: String
+}
+
+fn main() {
+    var t = Token { kind: "k" text: "fn" }
+    var x = t.kind
+    print(f"x={x}")
+    var y = t.text
+    print(f"y={y}")
+    print("fieldtest done")
+}

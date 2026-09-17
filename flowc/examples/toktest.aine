@@ -1,0 +1,23 @@
+enum TokKind {
+    TIdent
+    TInt
+    TFloat
+    TStr
+    TOp
+    TSemi
+    TEof
+}
+
+struct Token {
+    kind: TokKind
+    text: String
+}
+
+module allex;
+
+fn main() {
+    let src = read_file("examples/alparse.aine")
+    print(f"len={src.len()}")
+    let toks = tokenize(src)
+    print(f"toks={toks.len()}")
+}

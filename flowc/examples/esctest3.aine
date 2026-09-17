@@ -1,0 +1,8 @@
+fn main() {
+    var out = ""
+    if true {
+        out = out + "\n"
+        continue
+    }
+    print("done")
+}

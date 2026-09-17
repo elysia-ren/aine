@@ -1,0 +1,26 @@
+// awen-proto/src/diag.aine —— 诊断(核心规范 §6.10 的引导性提示在此定义)
+// 移植自 Rust 版 crates/awen-syntax/src/diag.rs
+
+enum Severity {
+    SevError
+    SevWarning
+}
+
+struct Diagnostic {
+    severity: Severity
+    message: String
+    hint: Option<String>
+    line: i32
+}
+
+fn diag_error(message: String, line: i32) -> Diagnostic {
+    return Diagnostic { severity: SevError, message: message, hint: None, line: line }
+}
+
+fn diag_warning(message: String, line: i32) -> Diagnostic {
+    return Diagnostic { severity: SevWarning, message: message, hint: None, line: line }
+}
+
+fn diag_hint(d: Diagnostic, hint: String) -> Diagnostic {
+    return Diagnostic { severity: d.severity, message: d.message, hint: Some(hint), line: d.line }
+}

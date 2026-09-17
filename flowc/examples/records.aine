@@ -1,0 +1,13 @@
+struct Record {
+    desc: String
+    amount: f64
+}
+
+fn main() {
+    let records = [
+        Record { desc: "a" amount: 1.5 }
+        Record { desc: "b" amount: 2.5 }
+    ]
+    print(records.len())
+    print(records[0].desc)
+}

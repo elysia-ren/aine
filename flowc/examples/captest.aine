@@ -1,0 +1,12 @@
+// 闭包捕获（隐藏参数提升）：捕获外层变量并调用
+fn main() {
+    let n = 10
+    let addn = (x: i32) => x + n
+    print(addn(5))
+    let greeting = "hi"
+    let twice = (s: String) => greeting + s + s
+    print(twice("!"))
+    let base = 100
+    let mk = (delta: i32) => base + delta
+    print(f"mk={mk(7)} base_still={base}")
+}
