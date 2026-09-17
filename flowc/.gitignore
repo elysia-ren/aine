@@ -30,6 +30,7 @@ z*.txt
 # 发布产物
 /dist/
 
-# 例外：IDE 源码目录（勿被 bin/ 规则误伤）
-!flowc/src/bin/
-!flowc/src/bin/**
+# 例外：IDE 源码目录（*.exe 规则误伤 src/bin/*.rs 的可能性为 0，
+# 但 *.c/*.txt 等规则可能误伤；显式重新包含 IDE 源码目录）
+!src/bin/
+!src/bin/**
