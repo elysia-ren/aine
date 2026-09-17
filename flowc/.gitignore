@@ -29,3 +29,7 @@ z*.txt
 
 # 发布产物
 /dist/
+
+# 例外：IDE 源码目录（勿被 bin/ 规则误伤）
+!flowc/src/bin/
+!flowc/src/bin/**
