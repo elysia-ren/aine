@@ -3568,8 +3568,23 @@ impl eframe::App for App {
                                             ).frame(false)).clicked() {
                                                 self.jump_to_line(d.line);
                                             }
+                                            if ui.small_button("BP").on_hover_text("切换断点").clicked() {
+                                                if self.breakpoints.contains(&d.line) {
+                                                    self.breakpoints.retain(|b| *b != d.line);
+                                                } else {
+                                                    self.breakpoints.push(d.line);
+                                                    self.breakpoints.sort();
+                                                }
+                                            }
                                             if ui.small_button("Explain").clicked() {
                                                 explain_idx = Some(i);
+                                            }
+                                            if ui.small_button("Debug@Ln").clicked() {
+                                                if !self.breakpoints.contains(&d.line) {
+                                                    self.breakpoints.push(d.line);
+                                                    self.breakpoints.sort();
+                                                }
+                                                self.run_debugger();
                                             }
                                             if ui.small_button("Fix").clicked() {
                                                 fix_idx = Some(i);
