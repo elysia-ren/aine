@@ -673,6 +673,7 @@ struct App {
     lsp_next_id: i64,
     show_completion: bool,          // 补全弹窗
     completions: Vec<String>,
+    show_veil_preview: bool,       // Veil 双视图：canonical/表面 对照预览
     hover_idle: Option<std::time::Instant>,
     hover_sent_at: Option<std::time::Instant>,
     task_tx: Option<std::sync::mpsc::Sender<TaskMsg>>, // 后台任务通道（clone 给线程）
@@ -752,6 +753,7 @@ impl App {
             lsp_stdin: None, lsp_rx: None,
             lsp_res_rx: None, lsp_wait: None, lsp_next_id: 10,
             show_completion: false, completions: vec![],
+            show_veil_preview: false,
             hover_idle: None, hover_sent_at: None,
             task_tx: None, task_rx: None, task_busy: None,
             fs_root: None, fs_scanned_at: None,
@@ -2066,6 +2068,10 @@ impl eframe::App for App {
                             self.focus_mode = !self.focus_mode;
                             ui.close_menu();
                         }
+                        if ui.button(if lang == 1 { "Veil 双视图预览" } else { "Veil dual-view preview" }).clicked() {
+                            self.show_veil_preview = !self.show_veil_preview;
+                            ui.close_menu();
+                        }
                         ui.separator();
                         // Language Veil：编辑器表面语言（仅显示层，保存恒 canonical）
                         ui.label(egui::RichText::new(if lang == 1 { "Language Veil 表面：" } else { "Language Veil surface:" }).color(theme::FG_DIM).size(11.0));
@@ -2976,6 +2982,39 @@ impl eframe::App for App {
                         }
                     });
                     ui.separator();
+
+                    // Veil 双视图预览：显示层 ↔ canonical 对照
+                    if self.show_veil_preview {
+                        if let Some(t) = self.tabs.get(self.active_tab) {
+                            let cname = aine::veil::SURFACE_NAMES[1];
+                            let sname = aine::veil::SURFACE_NAMES[t.surface];
+                            let preview = if t.surface == 1 {
+                                aine::veil::render_to(&t.content, 0)
+                            } else {
+                                t.content.clone()
+                            };
+                            let (l1, l2) = if t.surface == 1 { (sname, cname) } else { (cname, sname) };
+                            ui.separator();
+                            ui.horizontal(|ui| {
+                                ui.add_space(8.0);
+                                ui.label(egui::RichText::new(format!(
+                                    "Veil 预览  上：编辑器({})   下：{}(canonical)",
+                                    l1, l2
+                                )).color(theme::FG_DIM).size(10.0));
+                            });
+                            let mut preview_ro = preview;
+                            ui.push_id("veil_preview", |ui| {
+                                egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
+                                    ui.add(
+                                        egui::TextEdit::multiline(&mut preview_ro)
+                                            .font(egui::TextStyle::Monospace)
+                                            .desired_width(ui.available_width())
+                                            .interactive(false),
+                                    );
+                                });
+                            });
+                        }
+                    }
 
                     // 搜索替换栏（计数/下一个/全部替换/高亮）
                     if show_search {
