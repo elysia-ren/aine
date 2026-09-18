@@ -2980,6 +2980,14 @@ impl eframe::App for App {
                             }
                         }
                         scored.sort_by(|a, b| b.0.cmp(&a.0));
+                        // Enter 执行最优匹配
+                        if !filter.is_empty() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            if let Some((_sc, best)) = scored.first() {
+                                command_action = Some(**best);
+                                show_command_bar = false;
+                                command_filter.clear();
+                            }
+                        }
                         for (_sc, c) in scored.iter().take(30) {
                             let name = c.label(lang);
                             ui.horizontal(|ui| {
