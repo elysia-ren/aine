@@ -278,7 +278,7 @@ const LANGS: &[&str] = &["EN", "中文", "日本語", "Deutsch", "Français", "�
 enum Cmd {
     Save, Build, Run, Check, NewFile, QuickOpen, Search, ToggleTerminal, ToggleAiPanel,
     GotoDef, FindRefs, Format, ClearTerm, Lang(usize), FocusMode, RunTests,
-    GotoLine, ToggleComment, DuplicateLine, RenameSymbol,
+    GotoLine, ToggleComment, DuplicateLine, RenameSymbol, Debug,
 }
 
 impl Cmd {
@@ -319,6 +319,7 @@ impl Cmd {
             Cmd::ToggleComment => ("切换行注释", "Toggle Comment"),
             Cmd::DuplicateLine => ("复制当前行", "Duplicate Line"),
             Cmd::RenameSymbol => ("重命名符号", "Rename Symbol"),
+            Cmd::Debug => ("调试运行", "Debug Run"),
         };
         if lang == 1 { zh } else { en }
     }
@@ -328,7 +329,7 @@ impl Cmd {
             Cmd::QuickOpen => "Ctrl+P", Cmd::Search => "Ctrl+F", Cmd::ToggleTerminal => "Ctrl+`",
             Cmd::ToggleAiPanel => "Ctrl+I", Cmd::GotoDef => "F12", Cmd::FindRefs => "Shift+F12",
             Cmd::GotoLine => "Ctrl+G", Cmd::ToggleComment => "Ctrl+/", Cmd::FocusMode => "Ctrl+Alt+F",
-            Cmd::RenameSymbol => "F2",
+            Cmd::RenameSymbol => "F2", Cmd::Debug => "F9",
             _ => "",
         }
     }
@@ -354,6 +355,7 @@ impl Cmd {
             Cmd::ToggleComment => app.toggle_comment(),
             Cmd::DuplicateLine => app.duplicate_line(),
             Cmd::RenameSymbol => app.show_rename = true,
+            Cmd::Debug => app.run_debugger(),
         }
     }
 }
@@ -650,6 +652,8 @@ struct App {
     proj_search: String,           // project-wide search query
     proj_results: Vec<(String, usize, String)>, // (file, line, text)
     test_output: String,           // aine test results
+    breakpoints: Vec<usize>,       // 断点行号（1 基，当前文件）
+    debug_output: String,          // aine debug 报告
     models: Vec<ModelEntry>,       // models.toml routing table
     focus_mode: bool,              // 禅模式：隐藏所有面板只留编辑器
     confirm: Option<Confirm>,      // 危险操作确认（删除文件/关闭脏Tab）
@@ -738,6 +742,7 @@ impl App {
             sidebar_view: 0, proj_search: String::new(), proj_results: vec![],
             outline: vec![],
             test_output: String::new(),
+            breakpoints: vec![], debug_output: String::new(),
             models: Vec::new(),
             focus_mode: false,
             confirm: None, pending_selection: None, show_goto: false, goto_input: String::new(),
@@ -1604,6 +1609,35 @@ impl App {
         });
     }
 
+    /// 调试：aine debug 当前文件 + 断点行
+    fn run_debugger(&mut self) {
+        let Some(tab_name) = self.active_tab().map(|t| t.name.clone()) else { return };
+        if self.breakpoints.is_empty() {
+            self.toast("先右键点击行号设断点");
+            return;
+        }
+        {
+            self.save();
+            let path = self.root.join("examples").join(&tab_name);
+            let aine = self.root.join("target").join("debug").join("aine.exe");
+            let bps = self.breakpoints.clone();
+            self.spawn_task("调试中", move |tx| {
+                let mut cmd_args = vec!["debug".to_string(), path.to_string_lossy().to_string()];
+                for b in &bps { cmd_args.push(b.to_string()); }
+                let out = std::process::Command::new(&aine).args(&cmd_args).output();
+                let text = match out {
+                    Ok(o) => {
+                        let mut t = String::from_utf8_lossy(&o.stdout).to_string();
+                        t.push_str(&String::from_utf8_lossy(&o.stderr));
+                        t
+                    }
+                    Err(e) => format!("debug error: {}\n", e),
+                };
+                let _ = tx.send(TaskMsg::Ran { text });
+            });
+        }
+    }
+
     /// 运行当前文件的 #[test] 函数（aine test）
     fn run_tests(&mut self) {
         if let Some(tab) = self.active_tab() {
@@ -1883,6 +1917,7 @@ impl eframe::App for App {
             if i.modifiers.ctrl && i.modifiers.alt && i.key_pressed(egui::Key::F) { self.focus_mode = !self.focus_mode; }
             if i.modifiers.ctrl && i.key_pressed(egui::Key::Slash) { self.toggle_comment(); }
             if i.modifiers.ctrl && i.key_pressed(egui::Key::G) { show_goto = true; }
+            if i.key_pressed(egui::Key::F9) { app_or_self_debug(self); }
             if i.key_pressed(egui::Key::F2) {
                 if let Some(t) = self.active_tab() {
                     let b = t.cursor_byte.unwrap_or(0).min(t.content.len());
@@ -2893,11 +2928,19 @@ impl eframe::App for App {
                                     ui.vertical(|ui| {
                                         for i in 0..line_count {
                                             let c = if i == cur_line { theme::ACCENT } else { theme::LINE_NUM };
-                                            if ui.add(egui::Button::new(
-                                                egui::RichText::new(format!("{:>4}", i + 1))
-                                                    .color(c).size(13.0).monospace()
-                                            ).frame(false).min_size(egui::vec2(46.0, 16.0))).clicked() {
+                                            let is_bp = self.breakpoints.contains(&(i + 1));
+                                            let btxt = if is_bp { format!("{:>3} ●", i) } else { format!("{:>4}", i + 1) };
+                                            let bcol = if is_bp { theme::RED } else { c };
+                                            let r = ui.add(egui::Button::new(
+                                                egui::RichText::new(btxt)
+                                                    .color(bcol).size(13.0).monospace()
+                                            ).frame(false).min_size(egui::vec2(46.0, 16.0)));
+                                            if r.clicked() {
                                                 self.jump_to_line(i + 1);
+                                            }
+                                            if r.secondary_clicked() {
+                                                if is_bp { self.breakpoints.retain(|b| *b != i + 1); }
+                                                else { self.breakpoints.push(i + 1); self.breakpoints.sort(); }
                                             }
                                         }
                                     });
@@ -3715,6 +3758,10 @@ fn render_ai_markdown(ui: &mut egui::Ui, text: &str) {
                 ui.label(egui::RichText::new(buf).color(theme::FG_BRIGHT).size(11.0).monospace());
             });
     }
+}
+
+fn app_or_self_debug(app: &mut App) {
+    app.run_debugger();
 }
 
 fn main() -> eframe::Result<(), eframe::Error> {
