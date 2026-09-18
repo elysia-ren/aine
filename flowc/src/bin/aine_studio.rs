@@ -680,6 +680,7 @@ struct App {
     task_rx: Option<std::sync::mpsc::Receiver<TaskMsg>>,
     task_busy: Option<&'static str>, // 状态栏显示的任务标签
     revision: u64,                   // workspace.edit 修订号（协议最小闭环）
+    last_checked_rev: Option<u64>,   // 上次 check 的修订号（去抖）
     fs_root: Option<FsDir>,          // 文件树缓存
     fs_scanned_at: Option<std::time::Instant>,
     show_ai_settings: bool,
@@ -757,7 +758,7 @@ impl App {
             show_veil_preview: false,
             hover_idle: None, hover_sent_at: None,
             task_tx: None, task_rx: None, task_busy: None,
-            revision: 0,
+            revision: 0, last_checked_rev: None,
             fs_root: None, fs_scanned_at: None,
             show_ai_settings: false, ai_settings: AiSettings::default(),
             ai_chat: vec![], ai_input: String::new(),
@@ -1391,6 +1392,12 @@ impl App {
     }
 
     fn check(&mut self) {
+        // 去抖：同一修订号且无脏文件时跳过（连续编辑触发合并为一次）
+        let dirty_any = self.tabs.iter().any(|t| t.dirty);
+        if self.last_checked_rev == Some(self.revision) && !dirty_any && !self.diags.is_empty() {
+            return;
+        }
+        self.last_checked_rev = Some(self.revision);
         let Some(tab_name) = self.active_tab().map(|t| t.name.clone()) else { return };
         self.save(); // 检查磁盘上的最新内容
         let path = self.root.join("examples").join(&tab_name);
