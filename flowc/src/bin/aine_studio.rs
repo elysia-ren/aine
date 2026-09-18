@@ -273,6 +273,91 @@ fn highlight_layout(ui: &egui::Ui, text: &str, cursor_byte: Option<usize>, searc
 // ── 语言翻译 ──
 const LANGS: &[&str] = &["EN", "中文", "日本語", "Deutsch", "Français", "Русский"];
 
+// ── 统一命令注册表：菜单/快捷键/命令面板共用一表 ──
+#[derive(Clone, Copy, PartialEq)]
+enum Cmd {
+    Save, Build, Run, Check, NewFile, QuickOpen, Search, ToggleTerminal, ToggleAiPanel,
+    GotoDef, FindRefs, Format, ClearTerm, Lang(usize), FocusMode, RunTests,
+    GotoLine, ToggleComment, DuplicateLine, RenameSymbol,
+}
+
+impl Cmd {
+    fn all() -> &'static [Cmd] {
+        &[
+            Cmd::Save, Cmd::Build, Cmd::Run, Cmd::Check, Cmd::NewFile, Cmd::QuickOpen,
+            Cmd::Search, Cmd::ToggleTerminal, Cmd::ToggleAiPanel, Cmd::GotoDef, Cmd::FindRefs,
+            Cmd::Format, Cmd::ClearTerm, Cmd::Lang(0), Cmd::Lang(1), Cmd::Lang(2), Cmd::Lang(3),
+            Cmd::Lang(4), Cmd::Lang(5), Cmd::FocusMode, Cmd::RunTests, Cmd::GotoLine,
+            Cmd::ToggleComment, Cmd::DuplicateLine, Cmd::RenameSymbol,
+        ]
+    }
+    fn label(&self, lang: usize) -> &'static str {
+        let (zh, en) = match self {
+            Cmd::Save => ("保存文件", "Save File"),
+            Cmd::Build => ("构建", "Build"),
+            Cmd::Run => ("运行", "Run"),
+            Cmd::Check => ("检查", "Check"),
+            Cmd::NewFile => ("新建文件", "New File"),
+            Cmd::QuickOpen => ("快速打开文件", "Quick Open File"),
+            Cmd::Search => ("搜索替换", "Search & Replace"),
+            Cmd::ToggleTerminal => ("切换终端", "Toggle Terminal"),
+            Cmd::ToggleAiPanel => ("切换 AI 面板", "Toggle AI Panel"),
+            Cmd::GotoDef => ("转到定义", "Go to Definition"),
+            Cmd::FindRefs => ("查找引用", "Find References"),
+            Cmd::Format => ("格式化文档", "Format Document"),
+            Cmd::ClearTerm => ("清空终端", "Clear Terminal"),
+            Cmd::Lang(i) => {
+                static NAMES: [[&str; 2]; 6] = [
+                    ["EN", "EN"], ["中文", "Chinese"], ["日本語", "Japanese"],
+                    ["Deutsch", "German"], ["Français", "French"], ["Русский", "Russian"],
+                ];
+                return NAMES[*i as usize][lang.min(1)];
+            }
+            Cmd::FocusMode => ("禅模式", "Focus Mode"),
+            Cmd::RunTests => ("运行测试", "Run Tests"),
+            Cmd::GotoLine => ("转到行", "Go to Line"),
+            Cmd::ToggleComment => ("切换行注释", "Toggle Comment"),
+            Cmd::DuplicateLine => ("复制当前行", "Duplicate Line"),
+            Cmd::RenameSymbol => ("重命名符号", "Rename Symbol"),
+        };
+        if lang == 1 { zh } else { en }
+    }
+    fn shortcut(&self) -> &'static str {
+        match self {
+            Cmd::Save => "Ctrl+S", Cmd::Build => "F7", Cmd::Run => "F6", Cmd::Check => "F5",
+            Cmd::QuickOpen => "Ctrl+P", Cmd::Search => "Ctrl+F", Cmd::ToggleTerminal => "Ctrl+`",
+            Cmd::ToggleAiPanel => "Ctrl+I", Cmd::GotoDef => "F12", Cmd::FindRefs => "Shift+F12",
+            Cmd::GotoLine => "Ctrl+G", Cmd::ToggleComment => "Ctrl+/", Cmd::FocusMode => "Ctrl+Alt+F",
+            Cmd::RenameSymbol => "F2",
+            _ => "",
+        }
+    }
+    fn execute(&self, app: &mut App) {
+        match self {
+            Cmd::Save => app.save(),
+            Cmd::Build => app.build(),
+            Cmd::Run => app.run_prog(),
+            Cmd::Check => app.check(),
+            Cmd::NewFile => { let n = app.files.len() + 1; app.new_file(&format!("file_{}", n)); }
+            Cmd::QuickOpen => { app.show_quick_open = true; app.quick_open_filter.clear(); }
+            Cmd::Search => app.show_search = true,
+            Cmd::ToggleTerminal => { app.show_problems = !app.show_problems; app.bottom_tab = 2; }
+            Cmd::ToggleAiPanel => app.show_ai_panel = !app.show_ai_panel,
+            Cmd::GotoDef => app.goto_definition(),
+            Cmd::FindRefs => app.find_references(),
+            Cmd::Format => app.format_document(),
+            Cmd::ClearTerm => app.terminal_text.clear(),
+            Cmd::Lang(i) => { app.lang_idx = *i as usize; app.save_settings(); }
+            Cmd::FocusMode => app.focus_mode = !app.focus_mode,
+            Cmd::RunTests => { app.run_tests(); app.bottom_tab = 3; app.show_problems = true; }
+            Cmd::GotoLine => app.show_goto = true,
+            Cmd::ToggleComment => app.toggle_comment(),
+            Cmd::DuplicateLine => app.duplicate_line(),
+            Cmd::RenameSymbol => app.show_rename = true,
+        }
+    }
+}
+
 // ── 命令面板注册表 (Ctrl+K) ──
 const COMMANDS: &[(&str, &str)] = &[
     ("Save File", "Ctrl+S"),
@@ -1693,7 +1778,7 @@ impl eframe::App for App {
         let mut quick_filter = self.quick_open_filter.clone();
         let mut show_command_bar = self.show_command_bar;
         let mut command_filter = self.command_filter.clone();
-        let mut command_action: Option<usize> = None;
+        let mut command_action: Option<Cmd> = None;
         let show_ai_panel = self.show_ai_panel;
         let mut explain_idx: Option<usize> = None;
         let mut fix_idx: Option<usize> = None;
@@ -2427,19 +2512,20 @@ impl eframe::App for App {
                     ui.separator();
                     egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                         let filter = command_filter.to_lowercase();
-                        for (i, (name, shortcut)) in COMMANDS.iter().enumerate() {
+                        for c in Cmd::all() {
+                            let name = c.label(lang);
                             if filter.is_empty() || name.to_lowercase().contains(&filter) {
                                 ui.horizontal(|ui| {
                                     if ui.add(
-                                        egui::Button::new(egui::RichText::new(*name).size(12.0))
+                                        egui::Button::new(egui::RichText::new(name).size(12.0))
                                             .frame(false)
                                             .min_size(egui::vec2(250.0, 18.0))
                                     ).clicked() {
-                                        command_action = Some(i);
+                                        command_action = Some(*c);
                                         show_command_bar = false;
                                         command_filter.clear();
                                     }
-                                    ui.label(egui::RichText::new(*shortcut).color(theme::FG_DIM).size(11.0));
+                                    ui.label(egui::RichText::new(c.shortcut()).color(theme::FG_DIM).size(11.0));
                                 });
                             }
                         }
@@ -2610,25 +2696,7 @@ impl eframe::App for App {
 
         // ── 命令执行（UI 闭包外）──
         if let Some(cmd) = command_action {
-            match cmd {
-                0 => self.save(),
-                1 => self.build(),
-                2 => self.run_prog(),
-                3 => self.check(),
-                4 => { let n = self.files.len() + 1; self.new_file(&format!("file_{}", n)); }
-                5 => { self.show_quick_open = true; self.quick_open_filter.clear(); }
-                6 => { self.show_search = true; }
-                7 => { self.show_problems = !self.show_problems; self.bottom_tab = 2; }
-                8 => { self.show_ai_panel = !self.show_ai_panel; }
-                9 => self.goto_definition(),
-                10 => self.find_references(),
-                11 => self.format_document(),
-                12 => { self.terminal_text.clear(); }
-                13..=18 => { self.lang_idx = cmd - 13; self.save_settings(); }
-                19 => { self.focus_mode = !self.focus_mode; }
-                20 => { self.run_tests(); self.bottom_tab = 3; self.show_problems = true; }
-                _ => {}
-            }
+            cmd.execute(self);
         }
 
         // ── 中央面板 ──
