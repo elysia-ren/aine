@@ -800,6 +800,8 @@ impl App {
 
     fn load_settings(&mut self) {
         let path = self.settings_path();
+        let mut open_tabs: Vec<String> = Vec::new();
+        let mut last_active = 0usize;
         if let Ok(content) = std::fs::read_to_string(&path) {
             for line in content.lines() {
                 if let Some((k, v)) = line.split_once('=') {
@@ -815,9 +817,27 @@ impl App {
                         "side_width" => {
                             if let Ok(w) = v.trim().parse() { self.side_width = w; self.side_width_live = w; }
                         }
+                        "open_tab" => { open_tabs.push(v.trim().to_string()); }
+                        "active_tab" => {
+                            if let Ok(i) = v.trim().parse() { last_active = i; }
+                        }
                         _ => {}
                     }
                 }
+            }
+        }
+        // 恢复会话：上次打开的文件与活动标签
+        if !open_tabs.is_empty() {
+            let mut new_tabs: Vec<Tab> = Vec::new();
+            for name in &open_tabs {
+                let p = self.root.join("examples").join(name);
+                if let Ok(c) = std::fs::read_to_string(&p) {
+                    new_tabs.push(Tab { name: name.clone(), content: c, dirty: false, cursor_line: 0, cursor_col: 0, cursor_byte: None, surface: 1 });
+                }
+            }
+            if !new_tabs.is_empty() {
+                self.tabs = new_tabs;
+                self.active_tab = last_active.min(self.tabs.len() - 1);
             }
         }
     }
@@ -849,6 +869,12 @@ impl App {
             self.lang_idx,
             self.side_width_live,
         );
+        for t in &self.tabs {
+            content.push_str(&format!("open_tab={}
+", t.name));
+        }
+        content.push_str(&format!("active_tab={}
+", self.active_tab));
         let _ = std::fs::write(&path, content);
     }
 
