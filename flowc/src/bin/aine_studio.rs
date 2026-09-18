@@ -658,6 +658,8 @@ struct App {
     show_rename: bool,             // 重命名符号对话框
     rename_input: String,
     toasts: Vec<(String, std::time::Instant)>, // 右下角通知（4 秒过期）
+    side_width: f32,               // 侧栏宽度（持久化）
+    side_width_live: f32,
     lsp_stdin: Option<std::process::ChildStdin>, // aine lsp 子进程
     lsp_rx: Option<std::sync::mpsc::Receiver<(String, String, String)>>, // (uri, code, message) 逐条诊断
     lsp_res_rx: Option<std::sync::mpsc::Receiver<(i64, String)>>, // (id, 响应体)
@@ -736,7 +738,7 @@ impl App {
             focus_mode: false,
             confirm: None, pending_selection: None, show_goto: false, goto_input: String::new(),
             show_rename: false, rename_input: String::new(),
-            toasts: vec![],
+            toasts: vec![], side_width: 200.0, side_width_live: 200.0,
             lsp_stdin: None, lsp_rx: None,
             lsp_res_rx: None, lsp_wait: None, lsp_next_id: 10,
             show_completion: false, completions: vec![],
@@ -793,6 +795,9 @@ impl App {
                         "lang_idx" => {
                             if let Ok(idx) = v.trim().parse() { self.lang_idx = idx; }
                         }
+                        "side_width" => {
+                            if let Ok(w) = v.trim().parse() { self.side_width = w; self.side_width_live = w; }
+                        }
                         _ => {}
                     }
                 }
@@ -825,6 +830,7 @@ impl App {
             self.ai_settings.model,
             self.ai_settings.base_url,
             self.lang_idx,
+            self.side_width_live,
         );
         let _ = std::fs::write(&path, content);
     }
@@ -2226,7 +2232,7 @@ impl eframe::App for App {
         let proj_q = self.proj_search.clone();
         let proj_results = self.proj_results.clone();
         egui::SidePanel::left("sidebar")
-            .default_width(200.0)
+            .default_width(self.side_width)
             .resizable(true)
             .frame(egui::Frame::none().fill(theme::BG_SIDE))
             .show(ctx, |ui| {
