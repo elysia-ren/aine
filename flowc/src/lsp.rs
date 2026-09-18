@@ -5,6 +5,7 @@
 //! 传输：Content-Length 头 + JSON-RPC 2.0 body（LSP 标准）。
 
 use std::io::{BufRead, Read, Write};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use crate::lexer::Lexer;
@@ -292,6 +293,39 @@ pub fn ide_definition(src: &str, path: &str, byte_offset: usize) -> Option<(usiz
         }
     }
     None
+}
+
+/// IDE API: 全工程符号搜索（workspace symbol）：名称/类别/文件/行/列
+pub fn ide_workspace_symbols(query: &str, dir: &std::path::Path) -> Vec<(String, String, String, usize, usize)> {
+    let mut out: Vec<(String, String, String, usize, usize)> = Vec::new();
+    let q = query.to_lowercase();
+    collect_ws_symbols(dir, &q, &mut out, 0);
+    out.sort_by(|a, b| a.2.cmp(&b.2));
+    out.truncate(200);
+    out
+}
+
+fn collect_ws_symbols(dir: &std::path::Path, q: &str, out: &mut Vec<(String, String, String, usize, usize)>, depth: usize) {
+    if depth > 6 || out.len() >= 200 { return; }
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let dn = entry.file_name().to_string_lossy().to_string();
+                if dn == "target" || dn == ".git" || dn == "node_modules" { continue; }
+                collect_ws_symbols(&path, q, out, depth + 1);
+            } else if path.to_string_lossy().ends_with(".aine") {
+                if let Ok(src) = std::fs::read_to_string(&path) {
+                    let rel = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                    for (name, kind, line, col) in ide_symbols(&src, &path.to_string_lossy()) {
+                        if q.is_empty() || name.to_lowercase().contains(&q) {
+                            out.push((name, kind, rel.clone(), line, col));
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// IDE API: 文档符号大纲（Outline）：名称 / 类别 / 行 / 列（0 基行列）

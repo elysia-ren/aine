@@ -2807,15 +2807,35 @@ impl eframe::App for App {
                     ui.text_edit_singleline(&mut quick_filter);
                     ui.separator();
                     let filter = quick_filter.to_lowercase();
-                    let files_clone = self.files.clone();
-                    for (i, f) in files_clone.iter().enumerate() {
-                        if filter.is_empty() || f.to_lowercase().contains(&filter) {
-                            if ui.button(f).clicked() {
-                                self.open_file(i);
+                    if let Some(sym_q) = filter.strip_prefix('@') {
+                        // @ 前缀：全工程符号搜索（workspace symbol）
+                        let syms = aine::lsp::ide_workspace_symbols(sym_q, &self.root.join("examples"));
+                        for (name, kind, file, line, _col) in syms.iter().take(60) {
+                            if ui.add(egui::Button::new(
+                                egui::RichText::new(format!("{} {} — {}:{}", kind, name, file, line + 1))
+                                    .color(theme::FG).size(11.0)
+                            ).frame(false).min_size(egui::vec2(ui.available_width(), 18.0))).clicked() {
+                                if let Some(idx) = self.files.iter().position(|x| x == file) {
+                                    self.open_file(idx);
+                                    self.jump_to_line(line + 1);
+                                }
                                 show_quick_open = false;
-                                quick_filter.clear();
                             }
                         }
+                        if syms.is_empty() { ui.label("no symbols"); }
+                    } else {
+                        let files_clone = self.files.clone();
+                        for (i, f) in files_clone.iter().enumerate() {
+                            if filter.is_empty() || f.to_lowercase().contains(&filter) {
+                                if ui.button(f).clicked() {
+                                    self.open_file(i);
+                                    show_quick_open = false;
+                                    quick_filter.clear();
+                                }
+                            }
+                        }
+                        ui.separator();
+                        ui.label(egui::RichText::new("输入 @ 搜索全工程符号").color(theme::FG_DIM).size(10.0));
                     }
                 });
         }
