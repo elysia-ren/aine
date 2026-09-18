@@ -488,7 +488,7 @@ enum Confirm {
 // ── 后台任务层：所有子进程调用走这里，UI 永不冻结 ──
 pub enum TaskMsg {
     Checked { stderr: String, diags: Vec<Diag> }, // 检查完成
-    Built { text: String },                       // 构建输出（追加到终端）
+    Built { text: String, ok: bool },             // 构建输出（追加到终端）
     Ran { text: String },                         // 运行输出
     Git { output: String },                       // git 状态
     Term { text: String },                        // 终端命令输出
@@ -572,6 +572,7 @@ struct App {
     goto_input: String,
     show_rename: bool,             // 重命名符号对话框
     rename_input: String,
+    toasts: Vec<(String, std::time::Instant)>, // 右下角通知（4 秒过期）
     lsp_stdin: Option<std::process::ChildStdin>, // aine lsp 子进程
     lsp_rx: Option<std::sync::mpsc::Receiver<(String, String, String)>>, // (uri, code, message) 逐条诊断
     lsp_res_rx: Option<std::sync::mpsc::Receiver<(i64, String)>>, // (id, 响应体)
@@ -650,6 +651,7 @@ impl App {
             focus_mode: false,
             confirm: None, pending_selection: None, show_goto: false, goto_input: String::new(),
             show_rename: false, rename_input: String::new(),
+            toasts: vec![],
             lsp_stdin: None, lsp_rx: None,
             lsp_res_rx: None, lsp_wait: None, lsp_next_id: 10,
             show_completion: false, completions: vec![],
@@ -915,6 +917,7 @@ impl App {
                 tab.dirty = false;
             }
             self.status = format!("Saved {}", name);
+            self.toast(format!("已保存 {}", name));
             // LSP：保存即 didChange（结构化诊断推送回填）
             self.lsp_notify("textDocument/didChange", &name, &content);
             self.check();
@@ -939,7 +942,8 @@ impl App {
                 }
                 Err(e) => format!("构建错误: {}\n", e),
             };
-            let _ = tx.send(TaskMsg::Built { text });
+            let ok_flag = text.contains("构建完成");
+            let _ = tx.send(TaskMsg::Built { text, ok: ok_flag });
         });
     }
 
@@ -964,6 +968,39 @@ impl App {
             };
             let _ = tx.send(TaskMsg::Ran { text });
         });
+    }
+
+    /// 通知（右下角 toast，4 秒自动消失）
+    fn toast(&mut self, msg: impl Into<String>) {
+        self.toasts.push((msg.into(), std::time::Instant::now()));
+        if self.toasts.len() > 5 { self.toasts.remove(0); }
+    }
+
+    fn render_toasts(&mut self, ctx: &egui::Context) {
+        self.toasts.retain(|(_, t)| t.elapsed().as_secs() < 4);
+        if self.toasts.is_empty() { return; }
+        let screen = ctx.screen_rect();
+        let n = self.toasts.len();
+        for (k, (msg, _)) in self.toasts.iter().enumerate() {
+            let w = 300.0;
+            let h = 36.0;
+            let pos = egui::pos2(screen.right() - w - 12.0, screen.bottom() - 40.0 - (n as f32 - 1.0 - k as f32) * (h + 6.0));
+            let id = egui::Id::new(("toast", k, msg.len()));
+            egui::Area::new(id)
+                .fixed_pos(pos)
+                .order(egui::Order::Tooltip)
+                .show(ctx, |ui| {
+                    egui::Frame::none()
+                        .fill(theme::BG_PANEL)
+                        .stroke(egui::Stroke::new(1.0, theme::ACCENT))
+                        .rounding(egui::Rounding::same(6.0))
+                        .inner_margin(egui::Margin::same(8.0))
+                        .show(ui, |ui| {
+                            ui.set_width(w - 20.0);
+                            ui.label(egui::RichText::new(msg.as_str()).color(theme::FG).size(12.0));
+                        });
+                });
+        }
     }
 
     /// 启动 aine lsp 子进程并握手（诊断推送通道）
@@ -1188,7 +1225,12 @@ impl App {
                 self.n_warnings = self.diags.iter().filter(|d| d.severity == "warning").count();
                 self.output_text = stderr;
             }
-            TaskMsg::Built { text } | TaskMsg::Ran { text } | TaskMsg::Term { text } => {
+            TaskMsg::Built { text, ok } => {
+                self.terminal_text.push_str(&text);
+                self.bottom_tab = 2;
+                self.toast(if ok { "构建完成" } else { "构建失败" });
+            }
+            TaskMsg::Ran { text } | TaskMsg::Term { text } => {
                 self.terminal_text.push_str(&text);
                 self.bottom_tab = 2;
             }
@@ -3065,6 +3107,7 @@ impl eframe::App for App {
         self.show_model_picker = show_model_picker;
         self.model_filter = model_filter;
         if save_models_flag { self.save_models_toml(); }
+        self.render_toasts(ctx);
     }
 }
 
