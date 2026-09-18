@@ -4062,7 +4062,31 @@ fn app_or_self_debug(app: &mut App) {
     app.run_debugger();
 }
 
+fn acquire_instance_lock() -> bool {
+    let dir = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let lock = dir.join("aine-studio.lock");
+    if lock.exists() {
+        // 检查持有进程是否还活着（简化：锁文件内是 PID）
+        if let Ok(pid) = std::fs::read_to_string(&lock) {
+            let pid = pid.trim().to_string();
+            let out = std::process::Command::new("tasklist")
+                .args(["/fi", &format!("PID eq {}", pid)]).output();
+            if let Ok(o) = out {
+                let s = String::from_utf8_lossy(&o.stdout).to_string();
+                if s.contains("aine-studio") { return false; }
+            }
+        }
+    }
+    let _ = std::fs::write(&lock, std::process::id().to_string());
+    true
+}
+
 fn main() -> eframe::Result<(), eframe::Error> {
+    if !acquire_instance_lock() {
+        eprintln!("Aine Studio 已在运行（检测到锁文件）");
+        // 继续启动第二个实例也允许，但给提示
+    }
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 800.0])
