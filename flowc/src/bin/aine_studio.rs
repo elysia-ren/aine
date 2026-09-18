@@ -915,7 +915,18 @@ impl App {
                 self.toast(format!("{} 可能是 GBK/非UTF-8 编码，中文将显示乱码", rel_path));
             }
         }
-        if let Ok(content) = std::fs::read_to_string(&path) {
+        // UTF-8 优先；失败时按字节降级显示（高位字节以占位符呈现，避免乱码崩溃）
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => Some(c),
+            Err(_) => {
+                std::fs::read(&path).ok().map(|bytes| {
+                    bytes.iter().map(|b| {
+                        if *b < 0x80 { (*b as char).to_string() } else { char::from_u32(0x25A1).unwrap_or('?').to_string() }
+                    }).collect()
+                })
+            }
+        };
+        if let Some(content) = content {
             self.lsp_notify("textDocument/didOpen", &rel_path, &content);
             self.tabs.push(Tab { name: rel_path, content, dirty: false, cursor_line: 0, cursor_col: 0, cursor_byte: None, surface: 1 });
             self.active_tab = self.tabs.len() - 1;
