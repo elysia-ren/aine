@@ -278,7 +278,7 @@ const LANGS: &[&str] = &["EN", "中文", "日本語", "Deutsch", "Français", "�
 enum Cmd {
     Save, Build, Run, Check, NewFile, QuickOpen, Search, ToggleTerminal, ToggleAiPanel,
     GotoDef, FindRefs, Format, ClearTerm, Lang(usize), FocusMode, RunTests,
-    GotoLine, ToggleComment, DuplicateLine, RenameSymbol, Debug,
+    GotoLine, ToggleComment, DuplicateLine, RenameSymbol, Debug, Lens,
 }
 
 impl Cmd {
@@ -288,7 +288,7 @@ impl Cmd {
             Cmd::Search, Cmd::ToggleTerminal, Cmd::ToggleAiPanel, Cmd::GotoDef, Cmd::FindRefs,
             Cmd::Format, Cmd::ClearTerm, Cmd::Lang(0), Cmd::Lang(1), Cmd::Lang(2), Cmd::Lang(3),
             Cmd::Lang(4), Cmd::Lang(5), Cmd::FocusMode, Cmd::RunTests, Cmd::GotoLine,
-            Cmd::ToggleComment, Cmd::DuplicateLine, Cmd::RenameSymbol,
+            Cmd::ToggleComment, Cmd::DuplicateLine, Cmd::RenameSymbol, Cmd::Lens,
         ]
     }
     fn label(&self, lang: usize) -> &'static str {
@@ -320,6 +320,7 @@ impl Cmd {
             Cmd::DuplicateLine => ("复制当前行", "Duplicate Line"),
             Cmd::RenameSymbol => ("重命名符号", "Rename Symbol"),
             Cmd::Debug => ("调试运行", "Debug Run"),
+            Cmd::Lens => ("语义 Lens 视图", "Semantic Lens View"),
         };
         if lang == 1 { zh } else { en }
     }
@@ -329,7 +330,7 @@ impl Cmd {
             Cmd::QuickOpen => "Ctrl+P", Cmd::Search => "Ctrl+F", Cmd::ToggleTerminal => "Ctrl+`",
             Cmd::ToggleAiPanel => "Ctrl+I", Cmd::GotoDef => "F12", Cmd::FindRefs => "Shift+F12",
             Cmd::GotoLine => "Ctrl+G", Cmd::ToggleComment => "Ctrl+/", Cmd::FocusMode => "Ctrl+Alt+F",
-            Cmd::RenameSymbol => "F2", Cmd::Debug => "F9",
+            Cmd::RenameSymbol => "F2", Cmd::Debug => "F9", Cmd::Lens => "Ctrl+L",
             _ => "",
         }
     }
@@ -356,6 +357,7 @@ impl Cmd {
             Cmd::DuplicateLine => app.duplicate_line(),
             Cmd::RenameSymbol => app.show_rename = true,
             Cmd::Debug => app.run_debugger(),
+            Cmd::Lens => app.show_lens = !app.show_lens,
         }
     }
 }
@@ -675,6 +677,7 @@ struct App {
     show_completion: bool,          // 补全弹窗
     completions: Vec<String>,
     show_veil_preview: bool,       // Veil 双视图：canonical/表面 对照预览
+    show_lens: bool,               // T41 语义 Lens 视图
     hover_idle: Option<std::time::Instant>,
     hover_sent_at: Option<std::time::Instant>,
     hover_last_pos: Option<(usize, usize)>, // 上次已请求的光标位置（去重）
@@ -757,7 +760,7 @@ impl App {
             lsp_stdin: None, lsp_rx: None,
             lsp_res_rx: None, lsp_wait: None, lsp_next_id: 10,
             show_completion: false, completions: vec![],
-            show_veil_preview: false,
+            show_veil_preview: false, show_lens: false,
             hover_idle: None, hover_sent_at: None, hover_last_pos: None,
             task_tx: None, task_rx: None, task_busy: None,
             revision: 0, last_checked_rev: None,
@@ -942,14 +945,13 @@ impl App {
                 self.toast(format!("{} 可能是 GBK/非UTF-8 编码，中文将显示乱码", rel_path));
             }
         }
-        // UTF-8 优先；失败时按字节降级显示（高位字节以占位符呈现，避免乱码崩溃）
+        // UTF-8 优先；失败时 GBK 真解码（Windows API 936 代码页）
         let content = match std::fs::read_to_string(&path) {
             Ok(c) => Some(c),
             Err(_) => {
                 std::fs::read(&path).ok().map(|bytes| {
-                    bytes.iter().map(|b| {
-                        if *b < 0x80 { (*b as char).to_string() } else { char::from_u32(0x25A1).unwrap_or('?').to_string() }
-                    }).collect()
+                    self.toast(format!("{} 按 GBK 解码", rel_path));
+                    gbk_to_utf8(&bytes)
                 })
             }
         };
@@ -1235,7 +1237,7 @@ impl App {
         let params = if method == "textDocument/didOpen" {
             format!("{{\"textDocument\":{{\"uri\":\"{}\",\"languageId\":\"aine\",\"version\":1,\"text\":\"{}\"}}}}", uri, body_text)
         } else {
-            format!("{{\"textDocument\":{{\"uri\":\"{}\",\"version\":2}},\"contentChanges\":[{{\"text\":\"{}\"}}]}}", uri, body_text)
+            format!("{{\"textDocument\":{{\"uri\":\"{}\",\"version\":{} }},\"contentChanges\":[{{\"text\":\"{}\"}}]}}", uri, self.revision, body_text)
         };
         let msg = format!("{{\"jsonrpc\":\"2.0\",\"method\":\"{}\",\"params\":{}}}", method, params);
         let _ = write!(stdin, "Content-Length: {}\r\n\r\n{}", msg.len(), msg);
@@ -3228,6 +3230,35 @@ impl eframe::App for App {
                     });
                     ui.separator();
 
+                    // T41 语义 Lens 视图：当前文件的类型/摘要信息
+                    if self.show_lens {
+                        if let Some(t) = self.tabs.get(self.active_tab) {
+                            let name = t.name.clone();
+                            let path = self.root.join("examples").join(&name);
+                            let ps = path.to_string_lossy().to_string();
+                            let syms = aine::lsp::ide_symbols(&t.content, &ps);
+                            ui.separator();
+                            ui.horizontal(|ui| {
+                                ui.add_space(8.0);
+                                ui.label(egui::RichText::new(
+                                    if lang == 1 { "🔍 Semantic Lens — 当前文件语义视图" } else { "🔍 Semantic Lens — semantic view" }
+                                ).color(theme::ACCENT).size(10.0));
+                            });
+                            egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
+                                for (sname, kind, _l, _c) in syms.iter().take(40) {
+                                    ui.horizontal(|ui| {
+                                        ui.add_space(52.0);
+                                        let k_color = if kind.contains("Fn") { egui::Color32::from_rgb(0xdc,0xdc,0xaa) }
+                                            else if kind.contains("Struct") { egui::Color32::from_rgb(0x4e,0xc9,0xb0) }
+                                            else { theme::FG_DIM };
+                                        ui.label(egui::RichText::new(kind).color(k_color).size(10.0).monospace());
+                                        ui.label(egui::RichText::new(sname).color(theme::FG).size(11.0).monospace());
+                                    });
+                                }
+                            });
+                        }
+                    }
+
                     // Veil 双视图预览：显示层 ↔ canonical 对照
                     if self.show_veil_preview {
                         if let Some(t) = self.tabs.get(self.active_tab) {
@@ -3350,6 +3381,25 @@ impl eframe::App for App {
                                         }
                                     });
                                     ui.add_space(4.0);
+
+                                    // Code Lens：首错提示条（最多一行，有错误时显示）
+                                    if !self.diags.is_empty() {
+                                        let first_err = self.diags.iter().find(|d| d.severity == "error")
+                                            .map(|d| (d.message.clone(), d.line));
+                                        if let Some((msg, line)) = first_err {
+                                            ui.horizontal(|ui| {
+                                                ui.add_space(52.0);
+                                                ui.label(egui::RichText::new(
+                                                    format!("⛔ {} (Ln {})", msg, line)
+                                                ).color(theme::RED).size(10.0));
+                                                if ui.add(egui::Button::new(
+                                                    egui::RichText::new("跳转").size(10.0).color(theme::ACCENT)
+                                                ).frame(false)).clicked() {
+                                                    self.jump_to_line(line);
+                                                }
+                                            });
+                                        }
+                                    }
 
                                     // 编辑器（语法高亮 + 括号匹配）
                                     let (content, cur, cur_byte, cur_surface) = if let Some(t) = self.tabs.get(self.active_tab) {
@@ -4214,6 +4264,42 @@ fn render_ai_markdown(ui: &mut egui::Ui, text: &str) {
 
 fn app_or_self_debug(app: &mut App) {
     app.run_debugger();
+}
+
+/// GBK → UTF-8 解码（Windows API MultiByteToWideChar，936 代码页，零依赖）
+fn gbk_to_utf8(bytes: &[u8]) -> String {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn MultiByteToWideChar(code_page: u32, flags: u32, src: *const u8, src_len: i32, dst: *mut u16, dst_len: i32) -> i32;
+        fn WideCharToMultiByte(code_page: u32, flags: u32, src: *const u16, src_len: i32, dst: *mut u8, dst_len: i32, default: *const u8, used: *mut i32) -> i32;
+    }
+    const CP_GBK: u32 = 936;
+    let wlen = unsafe { MultiByteToWideChar(CP_GBK, 0, bytes.as_ptr(), bytes.len() as i32, std::ptr::null_mut(), 0) };
+    if wlen <= 0 { return String::from_utf8_lossy(bytes).to_string(); }
+    let mut wbuf = vec![0u16; wlen as usize];
+    unsafe { MultiByteToWideChar(CP_GBK, 0, bytes.as_ptr(), bytes.len() as i32, wbuf.as_mut_ptr(), wlen) };
+    String::from_utf16_lossy(&wbuf)
+}
+
+/// UTF-8 → GBK 编码
+fn utf8_to_gbk(text: &str) -> Vec<u8> {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn MultiByteToWideChar(code_page: u32, flags: u32, src: *const u8, src_len: i32, dst: *mut u16, dst_len: i32) -> i32;
+        fn WideCharToMultiByte(code_page: u32, flags: u32, src: *const u16, src_len: i32, dst: *mut u8, dst_len: i32, default: *const u8, used: *mut i32) -> i32;
+    }
+    const CP_UTF8: u32 = 65001;
+    const CP_GBK: u32 = 936;
+    let utf8 = text.as_bytes();
+    let wlen = unsafe { MultiByteToWideChar(CP_UTF8, 0, utf8.as_ptr(), utf8.len() as i32, std::ptr::null_mut(), 0) };
+    if wlen <= 0 { return utf8.to_vec(); }
+    let mut wbuf = vec![0u16; wlen as usize];
+    unsafe { MultiByteToWideChar(CP_UTF8, 0, utf8.as_ptr(), utf8.len() as i32, wbuf.as_mut_ptr(), wlen) };
+    let glen = unsafe { WideCharToMultiByte(CP_GBK, 0, wbuf.as_ptr(), wlen, std::ptr::null_mut(), 0, std::ptr::null(), std::ptr::null_mut()) };
+    if glen <= 0 { return utf8.to_vec(); }
+    let mut gbuf = vec![0u8; glen as usize];
+    unsafe { WideCharToMultiByte(CP_GBK, 0, wbuf.as_ptr(), wlen, gbuf.as_mut_ptr(), glen, std::ptr::null(), std::ptr::null_mut()) };
+    gbuf
 }
 
 fn acquire_instance_lock() -> bool {

@@ -98,6 +98,28 @@ pub fn transform(text: &str, idx: usize, to_canonical: bool) -> String {
     out
 }
 
+/// T51: 双向源映射 — 表面文本与 canonical 文本逐行对齐
+/// 返回 Vec<(表面行号1基, canonical行号1基)>
+pub fn source_map(surface_text: &str, canonical_text: &str) -> Vec<(usize, usize)> {
+    let s_lines: Vec<&str> = surface_text.split('\n').collect();
+    let c_lines: Vec<&str> = canonical_text.split('\n').collect();
+    let mut map = Vec::new();
+    let mut si = 0usize;
+    let mut ci = 0usize;
+    while si < s_lines.len() && ci < c_lines.len() {
+        map.push((si + 1, ci + 1));
+        let sn: String = s_lines[si].split_whitespace().collect();
+        let cn: String = c_lines[ci].split_whitespace().collect();
+        if sn == cn { si += 1; ci += 1; }
+        else if sn.is_empty() { si += 1; }
+        else if cn.is_empty() { ci += 1; }
+        else { si += 1; ci += 1; }
+    }
+    while si < s_lines.len() { si += 1; map.push((si, ci.max(1))); }
+    while ci < c_lines.len() { ci += 1; map.push((si.max(1), ci)); }
+    map
+}
+
 /// canonical → 指定表面（显示用；en 恒等）
 pub fn render_to(text: &str, idx: usize) -> String { transform(text, idx, false) }
 /// 表面 → canonical（保存/编译前调用；en 恒等）
