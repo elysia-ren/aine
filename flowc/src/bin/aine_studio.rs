@@ -1,5 +1,6 @@
 // Aine Studio — 完整 IDE v3
 use eframe::egui;
+use std::io::Write;
 use std::process::Command;
 use std::path::PathBuf;
 
@@ -571,6 +572,8 @@ struct App {
     goto_input: String,
     show_rename: bool,             // 重命名符号对话框
     rename_input: String,
+    lsp_stdin: Option<std::process::ChildStdin>, // aine lsp 子进程
+    lsp_rx: Option<std::sync::mpsc::Receiver<(String, String, String)>>, // (uri, code, message) 逐条诊断
     task_tx: Option<std::sync::mpsc::Sender<TaskMsg>>, // 后台任务通道（clone 给线程）
     task_rx: Option<std::sync::mpsc::Receiver<TaskMsg>>,
     task_busy: Option<&'static str>, // 状态栏显示的任务标签
@@ -608,7 +611,7 @@ impl App {
                     Self::collect_aine_files(base, &path, out);
                 } else if path.to_string_lossy().ends_with(".aine") {
                     if let Ok(rel) = path.strip_prefix(base) {
-                        out.push(rel.to_string_lossy().replace('\\', "/"));
+                        out.push(rel.to_string_lossy().replace("\\", "/"));
                     }
                 }
             }
@@ -642,6 +645,7 @@ impl App {
             focus_mode: false,
             confirm: None, pending_selection: None, show_goto: false, goto_input: String::new(),
             show_rename: false, rename_input: String::new(),
+            lsp_stdin: None, lsp_rx: None,
             task_tx: None, task_rx: None, task_busy: None,
             fs_root: None, fs_scanned_at: None,
             show_ai_settings: false, ai_settings: AiSettings::default(),
@@ -660,6 +664,11 @@ impl App {
         app.task_rx = Some(trx);
         app.load_settings();
         app.load_models();
+        app.lsp_start();
+        if let (Some(t0), Some(t0c)) = (app.tabs.first(), app.tabs.first()) {
+            let (n, c) = (t0.name.clone(), t0c.content.clone());
+            app.lsp_notify("textDocument/didOpen", &n, &c);
+        }
         app.check();
         app
     }
@@ -777,6 +786,7 @@ impl App {
         }
         let path = self.root.join("examples").join(&rel_path);
         if let Ok(content) = std::fs::read_to_string(&path) {
+            self.lsp_notify("textDocument/didOpen", &rel_path, &content);
             self.tabs.push(Tab { name: rel_path, content, dirty: false, cursor_line: 0, cursor_col: 0, cursor_byte: None, surface: 1 });
             self.active_tab = self.tabs.len() - 1;
             self.check();
@@ -898,6 +908,8 @@ impl App {
                 tab.dirty = false;
             }
             self.status = format!("Saved {}", name);
+            // LSP：保存即 didChange（结构化诊断推送回填）
+            self.lsp_notify("textDocument/didChange", &name, &content);
             self.check();
         }
     }
@@ -945,6 +957,117 @@ impl App {
             };
             let _ = tx.send(TaskMsg::Ran { text });
         });
+    }
+
+    /// 启动 aine lsp 子进程并握手（诊断推送通道）
+    fn lsp_start(&mut self) {
+        if self.lsp_stdin.is_some() { return; }
+        let aine = self.root.join("target").join("debug").join("aine.exe");
+        let mut child = match std::process::Command::new(&aine)
+            .arg("lsp").stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null()).spawn()
+        {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let mut stdin = child.stdin.take().unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let init = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}";
+        let inited = "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}";
+        let _ = write!(stdin, "Content-Length: {}\r\n\r\n{}", init.len(), init);
+        let _ = write!(stdin, "Content-Length: {}\r\n\r\n{}", inited.len(), inited);
+        self.lsp_stdin = Some(stdin);
+        self.lsp_rx = Some(rx);
+        std::thread::spawn(move || {
+            use std::io::Read;
+            let mut rdr = stdout;
+            loop {
+                let mut header = String::new();
+                let mut byte = [0u8; 1];
+                loop {
+                    match rdr.read(&mut byte) { Ok(1) => header.push(byte[0] as char), _ => return }
+                    if header.ends_with("\r\n\r\n") { break; }
+                    if header.len() > 200 { return; }
+                }
+                let len: usize = header.trim().split("\r\n")
+                    .find_map(|l| l.strip_prefix("Content-Length: ").and_then(|v| v.trim().parse().ok()))
+                    .unwrap_or(0);
+                if len == 0 { return; }
+                let mut buf = vec![0u8; len];
+                if rdr.read_exact(&mut buf).is_err() { return; }
+                let body = String::from_utf8_lossy(&buf).to_string();
+                if !body.contains("publishDiagnostics") { continue; }
+                let uri = json_string_field(&body, "uri");
+                for item in body.split("}, {").chain(body.split("},{")) {
+                    let line = json_num_field(item, "line").unwrap_or(0);
+                    let chara = json_num_field(item, "character").unwrap_or(0);
+                    let sev = json_num_field(item, "severity").unwrap_or(1);
+                    let msg = json_string_field(item, "message");
+                    if msg.is_empty() { continue; }
+                    let code = {
+                        let inner = msg.trim_start_matches('[');
+                        inner.split(']').next().unwrap_or("").to_string()
+                    };
+                    let severity = if sev == 1 { "error" } else { "warning" };
+                    let _ = tx.send((uri.clone(), code, format!("{}|{}|{}|{}", line, chara, severity, msg)));
+                }
+            }
+        });
+    }
+
+    /// didOpen / didChange（全文同步）
+    fn lsp_notify(&mut self, method: &str, rel: &str, text: &str) {
+        if self.lsp_stdin.is_none() { self.lsp_start(); }
+        let Some(stdin) = self.lsp_stdin.as_mut() else { return };
+        let abs = self.root.join("examples").join(rel);
+        let uri = format!("file:///{}", abs.to_string_lossy().replace("\\", "/"));
+        let body_text = json_escape(text);
+        let params = if method == "textDocument/didOpen" {
+            format!("{{\"textDocument\":{{\"uri\":\"{}\",\"languageId\":\"aine\",\"version\":1,\"text\":\"{}\"}}}}", uri, body_text)
+        } else {
+            format!("{{\"textDocument\":{{\"uri\":\"{}\",\"version\":2}},\"contentChanges\":[{{\"text\":\"{}\"}}]}}", uri, body_text)
+        };
+        let msg = format!("{{\"jsonrpc\":\"2.0\",\"method\":\"{}\",\"params\":{}}}", method, params);
+        let _ = write!(stdin, "Content-Length: {}\r\n\r\n{}", msg.len(), msg);
+    }
+
+    /// 帧首轮询 LSP 诊断（应用到当前打开的对应文件）
+    fn poll_lsp(&mut self) {
+        let Some(rx) = self.lsp_rx.as_ref() else { return };
+        // 按 uri 聚合本轮收到的诊断
+        let mut by_uri: std::collections::HashMap<String, Vec<Diag>> = std::collections::HashMap::new();
+        loop {
+            match rx.try_recv() {
+                Ok((uri, code, payload)) => {
+                    let mut parts = payload.splitn(4, '|');
+                    let _line = parts.next().and_then(|v| v.parse::<usize>().ok()).unwrap_or(0);
+                    let _char = parts.next().and_then(|v| v.parse::<usize>().ok()).unwrap_or(0);
+                    let severity = parts.next().unwrap_or("error").to_string();
+                    let msg = parts.next().unwrap_or("").to_string();
+                    by_uri.entry(uri.clone()).or_default().push(Diag {
+                        severity, code, message: msg, line: _line + 1, col: _char + 1, quick_fix: String::new(),
+                    });
+                }
+                Err(_) => break,
+            }
+        }
+        if by_uri.is_empty() { return; }
+        // 应用到对应 tab（uri 末段与 tab 名匹配）
+        for (uri, diags) in by_uri {
+            let fname = uri.rsplit('/').next().unwrap_or("").to_string();
+            if let Some(ti) = self.tabs.iter().position(|t| t.name == fname) {
+                let n_err = diags.iter().filter(|d| d.severity == "error").count();
+                let n_warn = diags.iter().filter(|d| d.severity == "warning").count();
+                if ti == self.active_tab {
+                    self.diags = diags;
+                    self.n_errors = n_err;
+                    self.n_warnings = n_warn;
+                }
+            }
+        }
+        if self.lsp_rx.is_some() { /* 保持通道 */ }
     }
 
     /// 后台执行命令，完成后经任务通道回传（UI 永不阻塞）
@@ -1432,6 +1555,7 @@ impl eframe::App for App {
         if self.ai_streaming { ctx.request_repaint(); }
         self.poll_tasks();
         if self.task_busy.is_some() { ctx.request_repaint(); }
+        self.poll_lsp();
 
         // 提前 clone 避免 borrow 冲突
         let root = self.root.clone();
