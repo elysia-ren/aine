@@ -2209,6 +2209,16 @@ impl eframe::App for App {
                             self.show_veil_preview = !self.show_veil_preview;
                             ui.close_menu();
                         }
+                        if ui.button(if lang == 1 { "导出 canonical 副本 (.en.aine)" } else { "Export canonical copy (.en.aine)" }).clicked() {
+                            if let Some(t) = self.active_tab() {
+                                let canon = aine::veil::surface_to_canonical(&t.content, t.surface);
+                                let out_name = t.name.trim_end_matches(".aine").to_string() + ".en.aine";
+                                let out_path = self.root.join("examples").join(&out_name);
+                                let _ = std::fs::write(&out_path, &canon);
+                                self.toast(format!("已导出 {}", out_name));
+                            }
+                            ui.close_menu();
+                        }
                         ui.separator();
                         // Language Veil：编辑器表面语言（仅显示层，保存恒 canonical）
                         ui.label(egui::RichText::new(if lang == 1 { "Language Veil 表面：" } else { "Language Veil surface:" }).color(theme::FG_DIM).size(11.0));
