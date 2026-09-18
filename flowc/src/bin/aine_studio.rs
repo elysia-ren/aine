@@ -592,6 +592,7 @@ struct Tab {
     cursor_col: usize,
     cursor_byte: Option<usize>, // byte offset for bracket matching
     surface: usize,             // Language Veil: 0=zh 1=en 2=ja 3=de 4=fr 5=ru
+    encoding: String,           // "UTF-8" | "GBK"
 }
 
 // ── AI 设置 ──
@@ -738,7 +739,7 @@ impl App {
         files.sort();
         let content = if files.is_empty() { String::new() }
             else { std::fs::read_to_string(examples_dir.join(&files[0])).unwrap_or_default() };
-        let tab = Tab { name: files.first().cloned().unwrap_or_default(), content, dirty: false, cursor_line: 0, cursor_col: 0, cursor_byte: None, surface: 1 };
+        let tab = Tab { name: files.first().cloned().unwrap_or_default(), content, dirty: false, cursor_line: 0, cursor_col: 0, cursor_byte: None, surface: 1, encoding: "UTF-8".to_string() };
         let mut app = App {
             root, files, tabs: vec![tab], active_tab: 0,
             n_errors: 0, n_warnings: 0, lang_idx: 0,
@@ -840,7 +841,7 @@ impl App {
             for name in &open_tabs {
                 let p = self.root.join("examples").join(name);
                 if let Ok(c) = std::fs::read_to_string(&p) {
-                    new_tabs.push(Tab { name: name.clone(), content: c, dirty: false, cursor_line: 0, cursor_col: 0, cursor_byte: None, surface: 1 });
+                    new_tabs.push(Tab { name: name.clone(), content: c, dirty: false, cursor_line: 0, cursor_col: 0, cursor_byte: None, surface: 1, encoding: "UTF-8".to_string() });
                 }
             }
             if !new_tabs.is_empty() {
@@ -961,7 +962,7 @@ impl App {
         };
         if let Some(content) = content {
             self.lsp_notify("textDocument/didOpen", &rel_path, &content);
-            self.tabs.push(Tab { name: rel_path, content, dirty: false, cursor_line: 0, cursor_col: 0, cursor_byte: None, surface: 1 });
+            self.tabs.push(Tab { name: rel_path, content, dirty: false, cursor_line: 0, cursor_col: 0, cursor_byte: None, surface: 1, encoding: "UTF-8".to_string() });
             self.active_tab = self.tabs.len() - 1;
             self.check();
         }
