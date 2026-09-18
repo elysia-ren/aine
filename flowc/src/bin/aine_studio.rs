@@ -3103,6 +3103,18 @@ impl eframe::App for App {
                                     ui.vertical(|ui| {
                                         for i in 0..line_count {
                                             let c = if i == cur_line { theme::ACCENT } else { theme::LINE_NUM };
+                                            // 错误/警告标记（优先错误）
+                                            let mark = {
+                                                let e = self.diags.iter().any(|d| d.line == i + 1 && d.severity == "error");
+                                                let w = self.diags.iter().any(|d| d.line == i + 1 && d.severity == "warning");
+                                                if e { "⛔" } else if w { "⚠" } else { " " }
+                                            };
+                                            let mark_w = if mark.trim().is_empty() { 0.0 } else { 14.0 };
+                                            if !mark.trim().is_empty() {
+                                                ui.label(egui::RichText::new(mark).size(10.0));
+                                            } else {
+                                                ui.add_space(mark_w);
+                                            }
                                             let is_bp = self.breakpoints.contains(&(i + 1));
                                             let btxt = if is_bp { format!("{:>3} ●", i) } else { format!("{:>4}", i + 1) };
                                             let bcol = if is_bp { theme::RED } else { c };
