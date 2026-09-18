@@ -677,6 +677,7 @@ struct App {
     show_veil_preview: bool,       // Veil 双视图：canonical/表面 对照预览
     hover_idle: Option<std::time::Instant>,
     hover_sent_at: Option<std::time::Instant>,
+    hover_last_pos: Option<(usize, usize)>, // 上次已请求的光标位置（去重）
     task_tx: Option<std::sync::mpsc::Sender<TaskMsg>>, // 后台任务通道（clone 给线程）
     task_rx: Option<std::sync::mpsc::Receiver<TaskMsg>>,
     task_busy: Option<&'static str>, // 状态栏显示的任务标签
@@ -757,7 +758,7 @@ impl App {
             lsp_res_rx: None, lsp_wait: None, lsp_next_id: 10,
             show_completion: false, completions: vec![],
             show_veil_preview: false,
-            hover_idle: None, hover_sent_at: None,
+            hover_idle: None, hover_sent_at: None, hover_last_pos: None,
             task_tx: None, task_rx: None, task_busy: None,
             revision: 0, last_checked_rev: None,
             fs_root: None, fs_scanned_at: None,
@@ -1261,8 +1262,8 @@ impl App {
 
     /// 请求光标处 hover（LSP 精确类型提示，替代指针估算）
     fn lsp_hover(&mut self) {
-        let Some(t) = self.active_tab() else { return };
-        let (line, col) = (t.cursor_line, t.cursor_col);
+        let pos = self.active_tab().map(|t| (t.cursor_line, t.cursor_col));
+        self.hover_last_pos = pos;
         let uri = format!("file:///{}", self.root.join("examples").join(&t.name).to_string_lossy().replace("\\", "/"));
         let params = format!("{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":{},\"character\":{}}}}}", uri, line, col);
         self.lsp_request("hover", "textDocument/hover", params);
@@ -2036,11 +2037,15 @@ impl eframe::App for App {
                         false
                     };
                     let _ = (l, c, n);
+                    let pos = (l, c);
+                    let moved = self.hover_last_pos != Some(pos);
+                    if moved { self.hover_sent_at = None; }
                     if self.hover_sent_at.is_none()
                         && self.lsp_wait.is_none()
                         && t0.elapsed().as_millis() > 800
                     {
                         self.hover_sent_at = Some(std::time::Instant::now());
+                        self.hover_last_pos = Some(pos);
                         self.lsp_hover();
                     }
                 }
