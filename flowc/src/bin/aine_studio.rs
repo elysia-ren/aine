@@ -574,6 +574,11 @@ struct App {
     rename_input: String,
     lsp_stdin: Option<std::process::ChildStdin>, // aine lsp 子进程
     lsp_rx: Option<std::sync::mpsc::Receiver<(String, String, String)>>, // (uri, code, message) 逐条诊断
+    lsp_res_rx: Option<std::sync::mpsc::Receiver<(i64, String)>>, // (id, 响应体)
+    lsp_wait: Option<(i64, &'static str)>, // 在途请求 (id, kind)
+    lsp_next_id: i64,
+    show_completion: bool,          // 补全弹窗
+    completions: Vec<String>,
     task_tx: Option<std::sync::mpsc::Sender<TaskMsg>>, // 后台任务通道（clone 给线程）
     task_rx: Option<std::sync::mpsc::Receiver<TaskMsg>>,
     task_busy: Option<&'static str>, // 状态栏显示的任务标签
@@ -646,6 +651,8 @@ impl App {
             confirm: None, pending_selection: None, show_goto: false, goto_input: String::new(),
             show_rename: false, rename_input: String::new(),
             lsp_stdin: None, lsp_rx: None,
+            lsp_res_rx: None, lsp_wait: None, lsp_next_id: 10,
+            show_completion: false, completions: vec![],
             task_tx: None, task_rx: None, task_busy: None,
             fs_root: None, fs_scanned_at: None,
             show_ai_settings: false, ai_settings: AiSettings::default(),
@@ -974,6 +981,8 @@ impl App {
         let mut stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
+        let (tx2, rx2) = std::sync::mpsc::channel();
+        self.lsp_res_rx = Some(rx2);
         let init = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}";
         let inited = "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}";
         let _ = write!(stdin, "Content-Length: {}\r\n\r\n{}", init.len(), init);
@@ -998,6 +1007,12 @@ impl App {
                 let mut buf = vec![0u8; len];
                 if rdr.read_exact(&mut buf).is_err() { return; }
                 let body = String::from_utf8_lossy(&buf).to_string();
+                if body.contains("\"id\":") && body.contains("\"result\"") {
+                    // 请求响应：提取 id 后整包转交
+                    let id = json_num_field(&body, "id").unwrap_or(0);
+                    let _ = tx2.send((id as i64, body));
+                    continue;
+                }
                 if !body.contains("publishDiagnostics") { continue; }
                 let uri = json_string_field(&body, "uri");
                 for item in body.split("}, {").chain(body.split("},{")) {
@@ -1033,6 +1048,34 @@ impl App {
         let _ = write!(stdin, "Content-Length: {}\r\n\r\n{}", msg.len(), msg);
     }
 
+    /// 发送请求并挂起等待响应（响应在 poll_lsp 中按 id 匹配）
+    fn lsp_request(&mut self, tag: &'static str, method: &str, params: String) {
+        let Some(stdin) = self.lsp_stdin.as_mut() else { return };
+        self.lsp_next_id += 1;
+        let id = self.lsp_next_id;
+        let msg = format!("{{\"jsonrpc\":\"2.0\",\"id\":{},\"method\":\"{}\",\"params\":{}}}", id, method, params);
+        let _ = write!(stdin, "Content-Length: {}\r\n\r\n{}", msg.len(), msg);
+        self.lsp_wait = Some((id, tag));
+    }
+
+    /// 请求光标处 definition（LSP 精确跳转）
+    fn lsp_goto_definition(&mut self) {
+        let Some(t) = self.active_tab() else { return };
+        let (line, col) = (t.cursor_line, t.cursor_col);
+        let uri = format!("file:///{}", self.root.join("examples").join(&t.name).to_string_lossy().replace("\\", "/"));
+        let params = format!("{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":{},\"character\":{}}}}}", uri, line, col);
+        self.lsp_request("definition", "textDocument/definition", params);
+    }
+
+    /// 请求光标处补全
+    fn lsp_completion(&mut self) {
+        let Some(t) = self.active_tab() else { return };
+        let (line, col) = (t.cursor_line, t.cursor_col);
+        let uri = format!("file:///{}", self.root.join("examples").join(&t.name).to_string_lossy().replace("\\", "/"));
+        let params = format!("{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":{},\"character\":{}}}}}", uri, line, col);
+        self.lsp_request("completion", "textDocument/completion", params);
+    }
+
     /// 帧首轮询 LSP 诊断（应用到当前打开的对应文件）
     fn poll_lsp(&mut self) {
         let Some(rx) = self.lsp_rx.as_ref() else { return };
@@ -1051,6 +1094,46 @@ impl App {
                     });
                 }
                 Err(_) => break,
+            }
+        }
+        // 请求响应（hover/definition/completion 按 id 匹配）
+        if let (Some((wid, tag)), Some(rx2)) = (self.lsp_wait, self.lsp_res_rx.as_ref()) {
+            if let Ok((rid, body)) = rx2.try_recv() {
+                if rid == wid {
+                    self.lsp_wait = None;
+                    match tag {
+                        "definition" => {
+                            // 首个 range.start.line/character → 跳转
+                            let dl = json_num_field(&body, "line").unwrap_or(0) as usize;
+                            let dc = json_num_field(&body, "character").unwrap_or(0) as usize;
+                            if let Some(t) = self.active_tab() {
+                                let content = t.content.clone();
+                                let char_idx = content.split('\n').take(dl)
+                                    .map(|l| l.chars().count() + 1).sum::<usize>()
+                                    .saturating_sub(1) + dc;
+                                self.pending_cursor_chars = Some(char_idx);
+                            }
+                            self.status = format!("跳转到 {} 行 {} 列", dl + 1, dc + 1);
+                        }
+                        "completion" => {
+                            self.completions.clear();
+                            let mut rest = body.as_str();
+                            while let Some(pos) = rest.find("\"label\":\"") {
+                                let tail = &rest[pos + 9..];
+                                let end = tail.find('"').unwrap_or(0);
+                                if end == 0 { break; }
+                                let label = &tail[..end];
+                                if !label.is_empty() && !self.completions.contains(&label.to_string()) {
+                                    self.completions.push(label.to_string());
+                                }
+                                rest = &tail[end..];
+                                if self.completions.len() >= 60 { break; }
+                            }
+                            if !self.completions.is_empty() { self.show_completion = true; }
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
         if by_uri.is_empty() { return; }
@@ -1582,6 +1665,9 @@ impl eframe::App for App {
         let mut goto_input = self.goto_input.clone();
         let mut show_rename = self.show_rename;
         let mut rename_input = self.rename_input.clone();
+        let mut show_completion = self.show_completion;
+        let mut completions = self.completions.clone();
+        let mut dropped_check = false;
         let mut confirm_yes = false;
         let mut cancel_confirm = false;
         let mut show_model_picker = self.show_model_picker;
@@ -1600,7 +1686,11 @@ impl eframe::App for App {
             if i.key_pressed(egui::Key::F5) { self.check(); }
             if i.key_pressed(egui::Key::F6) { self.run_prog(); }
             if i.key_pressed(egui::Key::F7) { self.build(); }
-            if i.key_pressed(egui::Key::F12) { self.goto_definition(); }
+            if i.key_pressed(egui::Key::F12) {
+                if self.lsp_stdin.is_some() { self.lsp_goto_definition(); }
+                else { self.goto_definition(); }
+            }
+            if i.modifiers.ctrl && i.key_pressed(egui::Key::Space) { self.lsp_completion(); }
             if i.modifiers.shift && i.key_pressed(egui::Key::F12) { self.find_references(); }
             if i.modifiers.ctrl && i.key_pressed(egui::Key::Backtick) { self.show_problems = !self.show_problems; self.bottom_tab = 2; }
             if i.modifiers.ctrl && i.key_pressed(egui::Key::I) { self.show_ai_panel = !self.show_ai_panel; }
@@ -1628,6 +1718,7 @@ impl eframe::App for App {
                 self.show_command_bar = false;
                 self.show_goto = false;
                 self.confirm = None;
+                self.show_completion = false;
             }
         });
 
@@ -2374,6 +2465,33 @@ impl eframe::App for App {
                 });
         }
 
+        // ── 补全弹窗（LSP completion）──
+        if show_completion && !completions.is_empty() {
+            egui::Window::new("Completion")
+                .anchor(egui::Align2::CENTER_TOP, [0.0, 60.0])
+                .default_width(260.0)
+                .show(ctx, |ui| {
+                    ui.label(egui::RichText::new("Ctrl+Space — LSP completions").color(theme::FG_DIM).size(10.0));
+                    ui.separator();
+                    egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+                        for c in &completions {
+                            if ui.add(egui::Button::new(egui::RichText::new(c).size(12.0).monospace())
+                                .frame(false).min_size(egui::vec2(ui.available_width(), 18.0))).clicked() {
+                                // 在光标处插入
+                                if let Some(t) = self.active_tab_mut() {
+                                    let b = t.cursor_byte.unwrap_or(0).min(t.content.len());
+                                    t.content.insert_str(b, c);
+                                    t.dirty = true;
+                                    dropped_check = true;
+                                }
+                                show_completion = false;
+                            }
+                        }
+                    });
+                    if ui.button("Esc close").clicked() { show_completion = false; }
+                });
+        }
+
         // ── 重命名符号 (F2，ide_rename 后端) ──
         if show_rename {
             egui::Window::new(if lang == 1 { "重命名符号" } else { "Rename Symbol" })
@@ -2918,6 +3036,7 @@ impl eframe::App for App {
         if let Some(i) = explain_idx.take() { self.ai_explain_diag(i); }
         if let Some(i) = fix_idx.take() { self.ai_fix_diag(i); }
         if test_now { self.run_tests(); }
+        if dropped_check { self.check(); }
         if find_next_now { self.find_next(); }
         if confirm_yes {
             if let Some(c) = self.confirm.take() {
@@ -2939,6 +3058,8 @@ impl eframe::App for App {
         self.goto_input = goto_input;
         self.show_rename = show_rename;
         self.rename_input = rename_input;
+        self.show_completion = show_completion;
+        self.completions = completions;
         self.show_ai_settings = show_ai_settings;
         self.show_search = show_search;
         self.show_model_picker = show_model_picker;
