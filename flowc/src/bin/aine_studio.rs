@@ -860,7 +860,7 @@ impl App {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let content = format!(
+        let mut content = format!(
             "provider={}\napi_key={}\nmodel={}\nbase_url={}\nlang_idx={}\nside_width={}\n",
             self.ai_settings.provider,
             self.ai_settings.api_key,
