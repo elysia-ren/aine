@@ -2114,7 +2114,8 @@ impl eframe::App for App {
             if i.modifiers.ctrl && i.modifiers.alt && i.key_pressed(egui::Key::F) { self.focus_mode = !self.focus_mode; }
             if i.key_pressed(egui::Key::Tab) && self.focus_in_editor() {
                 if let Some(t) = self.active_tab_mut() {
-                    t.content.push_str("  ");
+                    let b = t.cursor_byte.unwrap_or(0).min(t.content.len());
+                    t.content.insert_str(b, "  ");
                     t.dirty = true;
                 }
             }
