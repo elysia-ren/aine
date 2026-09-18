@@ -2707,22 +2707,59 @@ impl eframe::App for App {
                     ui.separator();
                     egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                         let filter = command_filter.to_lowercase();
+                        // 模糊匹配打分：子序列命中为基础，连续/词首命中加分
+                        fn fuzzy_score(name: &str, pat: &str) -> Option<i32> {
+                            if pat.is_empty() { return Some(0); }
+                            let name_l = name.to_lowercase();
+                            let pat_l = pat.to_lowercase();
+                            let mut score = 0;
+                            let mut ni = 0usize;
+                            let mut prev_hit = false;
+                            for pc in pat_l.chars() {
+                                let mut found = false;
+                                while ni < name_l.len() {
+                                    let nc = name_l[ni..].chars().next().unwrap();
+                                    if nc == pc {
+                                        score += if prev_hit { 3 } else { 1 };
+                                        // 词首命中加分
+                                        if ni == 0 || !name_l[ni-1..ni].chars().next().unwrap().is_alphanumeric() {
+                                            score += 2;
+                                        }
+                                        prev_hit = true;
+                                        ni += 1;
+                                        found = true;
+                                        break;
+                                    }
+                                    prev_hit = false;
+                                    ni += 1;
+                                }
+                                if !found { return None; }
+                            }
+                            Some(score - (name_l.len() as i32 - pat_l.len() as i32) / 8)
+                        }
+                        let mut scored: Vec<(i32, &Cmd)> = Vec::new();
                         for c in Cmd::all() {
                             let name = c.label(lang);
-                            if filter.is_empty() || name.to_lowercase().contains(&filter) {
-                                ui.horizontal(|ui| {
-                                    if ui.add(
-                                        egui::Button::new(egui::RichText::new(name).size(12.0))
-                                            .frame(false)
-                                            .min_size(egui::vec2(250.0, 18.0))
-                                    ).clicked() {
-                                        command_action = Some(*c);
-                                        show_command_bar = false;
-                                        command_filter.clear();
-                                    }
-                                    ui.label(egui::RichText::new(c.shortcut()).color(theme::FG_DIM).size(11.0));
-                                });
+                            match if filter.is_empty() { Some(0) } else { fuzzy_score(name, &filter) } {
+                                Some(sc) => scored.push((sc, c)),
+                                None => {}
                             }
+                        }
+                        scored.sort_by(|a, b| b.0.cmp(&a.0));
+                        for (_sc, c) in scored.iter().take(30) {
+                            let name = c.label(lang);
+                            ui.horizontal(|ui| {
+                                if ui.add(
+                                    egui::Button::new(egui::RichText::new(name).size(12.0))
+                                        .frame(false)
+                                        .min_size(egui::vec2(250.0, 18.0))
+                                ).clicked() {
+                                    command_action = Some(**c);
+                                    show_command_bar = false;
+                                    command_filter.clear();
+                                }
+                                ui.label(egui::RichText::new(c.shortcut()).color(theme::FG_DIM).size(11.0));
+                            });
                         }
                     });
                 });
