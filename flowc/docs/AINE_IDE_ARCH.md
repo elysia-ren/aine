@@ -649,3 +649,43 @@ S4  Aine 化收尾 ⬜(每步换进程不换协议):
 - F 组:64 依赖 E1 经验与 A1 契约;65 依赖 E3 工程需求;66(编辑器自绘)依赖 T21b 控件面。
 - 注: T15 原生化遗留(C 侧 JSON 嵌套 AVal 化)不阻塞 B(同进程直调绕开 JSON 文本);
   S2 原生 http 决策(AI Runtime 解释器跑 vs C 侧 TLS)在 S2 开工时拍板。
+
+
+---
+
+## 10. 实现进度快照 v3.7（2026-09-19，Aine Studio IDE）
+
+> 上一份快照为 v3.6 头部。本快照反映 Aine Studio IDE（Rust/egui 实现）的**实际完成状态**。
+> 详细逐项状态见 `docs/AINE_STUDIO_STATUS.md`。
+
+### 已完成（较 v3.6 新增）
+
+| 里程碑 | 内容 | 实现方式 |
+|---|---|---|
+| S1d IDE 壳 v0 | 编辑器/文件树/搜索/Git/大纲/任务系统/终端/测试面板 | Rust/egui（暂代 Aine 自绘，接口不变） |
+| S2 AI 接入 (T31-T39) | 多厂商 Deployment/5 协议/能力路由/catalog 选择器/真流式/思维链/用量/审批闭环/Model Center | Umber Runtime (umber_ffi.dll) C ABI |
+| S2 T53 Veil IDE 接入 | 编辑器 6 语言表面切换/双视图预览/canonical 导出/源映射 | Rust veil.rs 镜像 alrender.aine |
+| T40 符号导航 | Go to Def (F12/Ctrl+右键/LSP)、Find Refs (Shift+F12)、hover (LSP)、Outline | ide_definition/ide_references/ide_symbols/ide_hover |
+| T43 Tests/Debug | 测试面板(aine test 聚合)、调试器(aine debug 断点+报告) | 后台任务 |
+| T29 Command Bar | Ctrl+K 命令面板，模糊匹配+Enter 执行，Cmd enum 单源 | Rust |
+| T30 设置+语言 | settings 持久化(Provider/Key/Model/语言/侧栏宽/会话恢复)，6 语言 UI 翻译(50 键×6 表) | Rust |
+| LSP 接入 | 内嵌 aine lsp 子进程：initialize/didOpen/didChange/publishDiagnostics/hover/completion/definition | JSON-RPC over stdio |
+| workspace.edit 闭环 | 统一写盘入口 workspace_edit() + revision 递增 + 状态栏 Rx | Rust |
+| 任务系统 | 活动栏 ⚙ 视图：aine_tasks.json 自定义任务点击执行 | Rust |
+| 通知 toast | 右下角 4 秒过期 | Rust |
+| 编码检测 | BOM/UTF-16 拒绝/GBK 真解码（Win32 API 936 代码页） | Rust |
+| 架构修复 | 异步任务层(UI 零冻结)/check 去抖/统一 Cmd/命令面板模糊匹配/文件树缓存/double-instance 检测 | Rust |
+| Bug 修复 | Vec.push 链式语义恢复 / N0001 UI组件冲突警告 / Option.unwrap 确认 / 首错跳转 / Code Lens / gutter 标记 / 状态栏可点 | Rust |
+
+### 尚未开始（同 v3.6 缺口）
+
+| 缺口 | 归属 |
+|---|---|
+| 编辑器自绘内核（折叠/多光标/缩放/Code Lens 行内） | 需替换 egui TextEdit |
+| T42 AI Task 步骤 UI | S3 |
+| 调试器单步/变量窗 | S3 |
+| 架构图渲染 (T41) | S3 |
+| LSP 增量诊断（区间 didChange） | S3 |
+| E1 FFI / E3 多语言工程 | S0.5/S0.7 |
+| 全 Aine 化 (T64-68) | S4 |
+| accesskit 无障碍 | 低优先 |

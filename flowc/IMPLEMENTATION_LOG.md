@@ -1848,3 +1848,36 @@ host 31 + fixpoint + cargo 177 + 9 程序 build 全绿。
   3. 分块实现, 每块单独编译验证
   4. `'{'` 在 char 字面量中被 Python 计数器误判 — 用正确方法计括号
 - 验证: cargo test 180 全绿; 截图确认 VSCode 风格布局+真实内容+全交互
+
+## 2026-09-19 Aine Studio IDE 大规模迭代
+
+### 编译器修复
+- Vec.push 恢复返回容器（continue 修复误改返回 Unit）
+- N0001 诊断：枚举变体与 UI 内建组件名冲突时 check 警告
+- Option.unwrap 确认正常（旧 exe 问题）
+
+### AI 接入
+- AI 后端从手写 HTTP 切换到 Umber Runtime (umber_ffi.dll C ABI)
+- 多厂商 Deployment 并存、5 协议透传、真流式、思维链、token 用量
+- catalog.json 9624 模型选择器、runtime_status、Demo 模式、停止按钮
+- 系统提示+当前文件上下文、Markdown 渲染、审批闭环
+
+### Language Veil
+- veil.rs 六语言词表镜像 alrender.aine（含 import 修正）
+- 编辑器表面切换/双视图预览/canonical 导出/高亮覆盖
+- T51 源映射 source_map()
+
+### 架构
+- 异步任务层（check/build/run/git/终端全后台化）
+- 统一命令注册表 Cmd enum
+- LSP 客户端（诊断推送/hover/completion/definition）
+- 文件树缓存、编码检测(GBK Win32 API)、双实例检测、check 去抖
+- 通知 toast、会话恢复、布局持久化
+
+### UI
+- Dark Modern 主题、活动栏 5 视图、面板 Enter、Tab 光标插入
+- 命令面板模糊匹配+Enter、PROBLEMS BP/Debug 按钮、首错自动跳转
+- 大纲视图+引用计数、任务系统、Code Lens 首错条、状态栏可点+Rx
+
+### 详细状态
+- 见 docs/AINE_STUDIO_STATUS.md
