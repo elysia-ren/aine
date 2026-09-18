@@ -1363,6 +1363,8 @@ impl App {
         if self.lsp_rx.is_some() { /* 保持通道 */ }
     }
 
+    fn focus_in_editor(&self) -> bool { true }
+
     /// workspace.edit 统一写盘入口（Tooling Protocol 最小闭环）：
     /// revision 随每次外部可观察写盘递增，未来 LSP/任务系统可订阅
     fn workspace_edit(&mut self, rel: &str, content: &str) {
@@ -2110,6 +2112,12 @@ impl eframe::App for App {
             if i.modifiers.ctrl && i.key_pressed(egui::Key::Backtick) { self.show_problems = !self.show_problems; self.bottom_tab = 2; }
             if i.modifiers.ctrl && i.key_pressed(egui::Key::I) { self.show_ai_panel = !self.show_ai_panel; }
             if i.modifiers.ctrl && i.modifiers.alt && i.key_pressed(egui::Key::F) { self.focus_mode = !self.focus_mode; }
+            if i.key_pressed(egui::Key::Tab) && self.focus_in_editor() {
+                if let Some(t) = self.active_tab_mut() {
+                    t.content.push_str("  ");
+                    t.dirty = true;
+                }
+            }
             if i.modifiers.ctrl && i.key_pressed(egui::Key::Slash) { self.toggle_comment(); }
             if i.modifiers.ctrl && i.key_pressed(egui::Key::G) { show_goto = true; }
             if i.key_pressed(egui::Key::F9) { app_or_self_debug(self); }
