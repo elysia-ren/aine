@@ -2409,7 +2409,18 @@ impl eframe::App for App {
                     let (w_color, w_text) = if n_err > 0 { (theme::RED, format!("x {}  ! {}", n_err, n_warn)) }
                         else if n_warn > 0 { (theme::YELLOW, format!("⚠ {}", n_warn)) }
                         else { (theme::GREEN, format!("√ {}", if lang == 1 { "无问题" } else { "OK" })) };
-                    ui.label(egui::RichText::new(w_text).color(w_color).size(12.0));
+                    let w_resp = ui.add(egui::Button::new(
+                        egui::RichText::new(w_text).color(w_color).size(12.0)
+                    ).frame(false));
+                    if w_resp.clicked() {
+                        self.show_problems = true;
+                        self.bottom_tab = 0;
+                        if n_err > 0 {
+                            if let Some(d) = self.diags.iter().find(|d| d.severity == "error") {
+                                self.jump_to_line(d.line);
+                            }
+                        }
+                    }
                     // 后台任务忙碌指示
                     if let Some(task) = self.task_busy {
                         ui.add_space(16.0);
