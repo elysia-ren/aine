@@ -1262,9 +1262,10 @@ impl App {
 
     /// 请求光标处 hover（LSP 精确类型提示，替代指针估算）
     fn lsp_hover(&mut self) {
-        let pos = self.active_tab().map(|t| (t.cursor_line, t.cursor_col));
-        self.hover_last_pos = pos;
-        let uri = format!("file:///{}", self.root.join("examples").join(&t.name).to_string_lossy().replace("\\", "/"));
+        let Some(t) = self.active_tab() else { return };
+        let (line, col, name) = (t.cursor_line, t.cursor_col, t.name.clone());
+        self.hover_last_pos = Some((line, col));
+        let uri = format!("file:///{}", self.root.join("examples").join(&name).to_string_lossy().replace("\\", "/"));
         let params = format!("{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":{},\"character\":{}}}}}", uri, line, col);
         self.lsp_request("hover", "textDocument/hover", params);
     }
