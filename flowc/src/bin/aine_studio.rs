@@ -896,6 +896,19 @@ impl App {
             return;
         }
         let path = self.root.join("examples").join(&rel_path);
+        // 编码检测：BOM / 非法 UTF-8 提示（暂不自动转换）
+        if let Ok(bytes) = std::fs::read(&path) {
+            let bom_utf8 = bytes.starts_with(&[0xEF, 0xBB, 0xBF]);
+            let bom_utf16le = bytes.starts_with(&[0xFF, 0xFE]);
+            let bom_utf16be = bytes.starts_with(&[0xFE, 0xFF]);
+            if bom_utf16le || bom_utf16be {
+                self.toast(format!("{} 是 UTF-16 编码，暂不支持", rel_path));
+                return;
+            }
+            if !bom_utf8 && std::str::from_utf8(&bytes).is_err() {
+                self.toast(format!("{} 可能是 GBK/非UTF-8 编码，中文将显示乱码", rel_path));
+            }
+        }
         if let Ok(content) = std::fs::read_to_string(&path) {
             self.lsp_notify("textDocument/didOpen", &rel_path, &content);
             self.tabs.push(Tab { name: rel_path, content, dirty: false, cursor_line: 0, cursor_col: 0, cursor_byte: None, surface: 1 });
