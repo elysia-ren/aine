@@ -3322,6 +3322,37 @@ impl eframe::App for App {
                                         .layouter(&mut layouter)
                                         .show(ui);
                                     let resp = output.response.clone();
+                                    // 右键点击 = 跳到该位置符号的定义（LSP 或本地分析）
+                                    if resp.secondary_clicked() {
+                                        if let Some(pos) = resp.interact_pointer_pos() {
+                                            // 位置→行列（沿用 hover 路径的几何估算）
+                                            let line_h = 16.0f32;
+                                            let char_w = 7.8f32;
+                                            let line = ((pos.y - resp.rect.top()) / line_h).max(0.0) as usize;
+                                            let col = ((pos.x - resp.rect.left()) / char_w).max(0.0) as usize;
+                                            let byte = {
+                                                let mut acc = 0usize;
+                                                for (li, l) in display.split('\n').enumerate() {
+                                                    if li == line {
+                                                        let cc = l.chars().count().min(col);
+                                                        acc += l.chars().take(cc).map(|c| c.len_utf8()).sum::<usize>();
+                                                        break;
+                                                    }
+                                                    acc += l.len() + 1;
+                                                }
+                                                acc.min(display.len())
+                                            };
+                                            let path = self.root.join("examples").join(
+                                                self.active_tab().map(|t| t.name.clone()).unwrap_or_default());
+                                            let ps = path.to_string_lossy().to_string();
+                                            if let Some((dl, _dc)) = aine::lsp::ide_definition(&display, &ps, byte) {
+                                                self.jump_to_line(dl + 1);
+                                                self.toast(format!("跳到定义: 第 {} 行", dl + 1));
+                                            } else {
+                                                self.toast("未找到定义");
+                                            }
+                                        }
+                                    }
                                     // ── 真实光标追踪（下一帧用于行号/状态栏/括号匹配）──
                                     // egui CCursor.index 是字符索引，转字节偏移
                                     if let Some(cr) = output.cursor_range {
