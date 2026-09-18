@@ -2599,11 +2599,10 @@ impl eframe::App for App {
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if ui.add(egui::Button::new(egui::RichText::new("✏").size(12.0))
                                     .frame(false)).on_hover_text(if lang == 1 { "重命名文件" } else { "Rename" }).clicked() {
-                                    if let Some(t) = self.active_tab() {
-                                        self.file_rename_old = t.name.clone();
-                                        self.file_rename_input = t.name.clone();
-                                        self.show_file_rename = true;
-                                    }
+                                    let cur_name = self.active_tab().map(|t| t.name.clone()).unwrap_or_default();
+                                    self.file_rename_old = cur_name.clone();
+                                    self.file_rename_input = cur_name;
+                                    self.show_file_rename = true;
                                 }
                                 if ui.add(egui::Button::new(egui::RichText::new("📄").size(12.0))
                                     .frame(false)).on_hover_text(tr("new_file_tip", lang)).clicked() {
