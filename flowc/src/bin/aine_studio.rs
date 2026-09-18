@@ -1372,6 +1372,7 @@ impl App {
         match msg {
             TaskMsg::Checked { stderr, diags } => {
                 self.diags = diags;
+                self.refresh_outline(); // 诊断变化后大纲同步
                 self.n_errors = self.diags.iter().filter(|d| d.severity == "error").count();
                 self.n_warnings = self.diags.iter().filter(|d| d.severity == "warning").count();
                 self.output_text = stderr;
