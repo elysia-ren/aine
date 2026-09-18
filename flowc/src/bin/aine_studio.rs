@@ -653,6 +653,7 @@ struct App {
     proj_results: Vec<(String, usize, String)>, // (file, line, text)
     test_output: String,           // aine test results
     breakpoints: Vec<usize>,       // 断点行号（1 基，当前文件）
+    git_commit_msg: String,        // git commit 消息草稿
     debug_output: String,          // aine debug 报告
     models: Vec<ModelEntry>,       // models.toml routing table
     focus_mode: bool,              // 禅模式：隐藏所有面板只留编辑器
@@ -742,7 +743,7 @@ impl App {
             sidebar_view: 0, proj_search: String::new(), proj_results: vec![],
             outline: vec![],
             test_output: String::new(),
-            breakpoints: vec![], debug_output: String::new(),
+            breakpoints: vec![], debug_output: String::new(), git_commit_msg: String::new(),
             models: Vec::new(),
             focus_mode: false,
             confirm: None, pending_selection: None, show_goto: false, goto_input: String::new(),
@@ -1609,6 +1610,41 @@ impl App {
         });
     }
 
+    /// git stage 全部变更
+    fn git_stage_all(&mut self) {
+        let root = self.root.clone();
+        self.spawn_task("Git", move |tx| {
+            let out = std::process::Command::new("git").args(["add", "-A"]).current_dir(&root).output();
+            let text = match out {
+                Ok(o) if o.status.success() => "staged all changes\n".to_string(),
+                Ok(o) => format!("stage error: {}\n", String::from_utf8_lossy(&o.stderr)),
+                Err(e) => format!("git error: {}\n", e),
+            };
+            let _ = tx.send(TaskMsg::Term { text });
+        });
+        self.toast("git add -A");
+    }
+
+    /// git commit（UI 输入消息，后台执行）
+    fn git_commit(&mut self, msg: &str) {
+        let root = self.root.clone();
+        let m = msg.trim().to_string();
+        if m.is_empty() { self.toast("commit 消息为空"); return; }
+        self.spawn_task("Git", move |tx| {
+            let out = std::process::Command::new("git").args(["commit", "-m", &m]).current_dir(&root).output();
+            let text = match out {
+                Ok(o) => {
+                    let mut t = String::from_utf8_lossy(&o.stdout).to_string();
+                    t.push_str(&String::from_utf8_lossy(&o.stderr));
+                    t
+                }
+                Err(e) => format!("git error: {}\n", e),
+            };
+            let _ = tx.send(TaskMsg::Term { text });
+        });
+        self.toast("git commit");
+    }
+
     /// 调试：aine debug 当前文件 + 断点行
     fn run_debugger(&mut self) {
         let Some(tab_name) = self.active_tab().map(|t| t.name.clone()) else { return };
@@ -1887,6 +1923,7 @@ impl eframe::App for App {
         let mut rename_input = self.rename_input.clone();
         let mut show_completion = self.show_completion;
         let mut completions = self.completions.clone();
+        let mut commit_msg = self.git_commit_msg.clone();
         let mut dropped_check = false;
         let mut confirm_yes = false;
         let mut cancel_confirm = false;
@@ -2437,6 +2474,28 @@ impl eframe::App for App {
                                 self.show_problems = true;
                             }
                         });
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            ui.add_space(4.0);
+                            if ui.small_button("+ Stage All").clicked() { self.git_stage_all(); git_now = true; }
+                        });
+                        ui.horizontal(|ui| {
+                            ui.add_space(4.0);
+                            ui.label("msg:");
+                            ui.add(egui::TextEdit::singleline(&mut commit_msg).desired_width(ui.available_width() - 70.0)
+                                .hint_text("commit message..."));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.add_space(4.0);
+                            let can = !commit_msg.trim().is_empty();
+                            if ui.add_enabled(can, egui::Button::new(egui::RichText::new("Commit").color(theme::FG_BRIGHT))).clicked() {
+                                let m = commit_msg.trim().to_string();
+                                self.git_commit(&m);
+                                commit_msg.clear();
+                                git_now = true;
+                            }
+                        });
+                        ui.separator();
                         ui.separator();
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.label(egui::RichText::new(&self.output_text).color(theme::FG).size(10.0).monospace());
@@ -3301,6 +3360,7 @@ impl eframe::App for App {
         self.rename_input = rename_input;
         self.show_completion = show_completion;
         self.completions = completions;
+        self.git_commit_msg = commit_msg;
         self.show_ai_settings = show_ai_settings;
         self.show_search = show_search;
         self.show_model_picker = show_model_picker;
