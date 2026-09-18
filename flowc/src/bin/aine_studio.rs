@@ -649,6 +649,7 @@ struct App {
     fixing_reason: Option<String>, // ai/fix in flight: diagnostic summary
     sidebar_view: usize,           // 0=Explorer 1=Search 2=Git 3=Outline
     outline: Vec<(String, String, usize, usize)>, // (name, kind, line0, col0)
+    outline_refs_cache: Option<Vec<(String, usize)>>, // 符号引用计数缓存
     proj_search: String,           // project-wide search query
     proj_results: Vec<(String, usize, String)>, // (file, line, text)
     test_output: String,           // aine test results
@@ -744,7 +745,7 @@ impl App {
             diags: vec![], pending_diff: None, ai_explaining: false,
             fixing_file: None, fixing_old: None, fixing_reason: None,
             sidebar_view: 0, proj_search: String::new(), proj_results: vec![],
-            outline: vec![],
+            outline: vec![], outline_refs_cache: None,
             test_output: String::new(),
             breakpoints: vec![], debug_output: String::new(), git_commit_msg: String::new(),
             models: Vec::new(),
@@ -1606,6 +1607,26 @@ impl App {
                 }
             }
         }
+    }
+
+    /// 计算大纲各符号引用次数（Code Lens 预研 MVP）
+    fn compute_outline_refs(&mut self) {
+        let (content, name) = match self.active_tab().map(|t| (t.content.clone(), t.name.clone())) {
+            Some(x) => x, None => { self.outline_refs_cache = Some(vec![]); return; }
+        };
+        let path = self.root.join("examples").join(&name);
+        let ps = path.to_string_lossy().to_string();
+        let mut out: Vec<(String, usize)> = Vec::new();
+        for (n, _k, _l, _c) in self.outline.clone() {
+            if let Some((byte, _)) = content.find(&n).map(|b| (b, ())) {
+                if let Some(refs) = aine::lsp::ide_references(&content, &ps, byte + n.len() / 2) {
+                    out.push((n, refs.len()));
+                    continue;
+                }
+            }
+            out.push((n, 0));
+        }
+        self.outline_refs_cache = Some(out);
     }
 
     /// 大纲：当前文件符号（函数/struct/enum 等）
@@ -2548,12 +2569,18 @@ impl eframe::App for App {
                         });
                         ui.separator();
                         if self.outline.is_empty() { self.refresh_outline(); }
+                        ui.horizontal(|ui| {
+                            ui.add_space(8.0);
+                            ui.label(egui::RichText::new(format!("{} symbols", self.outline.len())).color(theme::FG_DIM).size(10.0));
+                        });
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             let entries = self.outline.clone();
+                            let refs = self.outline_refs_cache.clone().unwrap_or_default();
                             for (name, kind, line, _col) in entries {
                                 let icon = if kind.contains("Fn") { "ƒ" } else if kind.contains("Struct") { "S" } else if kind.contains("Enum") { "E" } else { "·" };
+                                let refc = refs.iter().find(|(n, _)| n == &name).map(|(_, c)| *c).unwrap_or(0);
                                 if ui.add(egui::Button::new(
-                                    egui::RichText::new(format!("{} {}  {}", icon, name, kind))
+                                    egui::RichText::new(format!("{} {}  {} · {} refs", icon, name, kind, refc))
                                         .color(theme::FG).size(11.0)
                                 ).frame(false).min_size(egui::vec2(ui.available_width(), 18.0))).clicked() {
                                     self.jump_to_line(line + 1);
