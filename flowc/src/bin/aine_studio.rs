@@ -1376,6 +1376,13 @@ impl App {
                 self.n_errors = self.diags.iter().filter(|d| d.severity == "error").count();
                 self.n_warnings = self.diags.iter().filter(|d| d.severity == "warning").count();
                 self.output_text = stderr;
+                // 首错自动跳转
+                if self.n_errors > 0 {
+                    if let Some(d) = self.diags.iter().find(|d| d.severity == "error") {
+                        let l = d.line;
+                        self.jump_to_line(l);
+                    }
+                }
             }
             TaskMsg::Built { text, ok } => {
                 self.terminal_text.push_str(&text);
