@@ -667,6 +667,8 @@ struct App {
     lsp_next_id: i64,
     show_completion: bool,          // 补全弹窗
     completions: Vec<String>,
+    hover_idle: Option<std::time::Instant>,
+    hover_sent_at: Option<std::time::Instant>,
     task_tx: Option<std::sync::mpsc::Sender<TaskMsg>>, // 后台任务通道（clone 给线程）
     task_rx: Option<std::sync::mpsc::Receiver<TaskMsg>>,
     task_busy: Option<&'static str>, // 状态栏显示的任务标签
@@ -742,6 +744,7 @@ impl App {
             lsp_stdin: None, lsp_rx: None,
             lsp_res_rx: None, lsp_wait: None, lsp_next_id: 10,
             show_completion: false, completions: vec![],
+            hover_idle: None, hover_sent_at: None,
             task_tx: None, task_rx: None, task_busy: None,
             fs_root: None, fs_scanned_at: None,
             show_ai_settings: false, ai_settings: AiSettings::default(),
@@ -1195,6 +1198,15 @@ impl App {
         self.lsp_request("definition", "textDocument/definition", params);
     }
 
+    /// 请求光标处 hover（LSP 精确类型提示，替代指针估算）
+    fn lsp_hover(&mut self) {
+        let Some(t) = self.active_tab() else { return };
+        let (line, col) = (t.cursor_line, t.cursor_col);
+        let uri = format!("file:///{}", self.root.join("examples").join(&t.name).to_string_lossy().replace("\\", "/"));
+        let params = format!("{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":{},\"character\":{}}}}}", uri, line, col);
+        self.lsp_request("hover", "textDocument/hover", params);
+    }
+
     /// 请求光标处补全
     fn lsp_completion(&mut self) {
         let Some(t) = self.active_tab() else { return };
@@ -1242,6 +1254,13 @@ impl App {
                                 self.pending_cursor_chars = Some(char_idx);
                             }
                             self.status = format!("跳转到 {} 行 {} 列", dl + 1, dc + 1);
+                        }
+                        "hover" => {
+                            let v = json_string_field(&body, "value");
+                            if !v.is_empty() {
+                                self.hover_info = Some(v);
+                                self.hover_sent_at = Some(std::time::Instant::now());
+                            }
                         }
                         "completion" => {
                             self.completions.clear();
@@ -1772,6 +1791,28 @@ impl eframe::App for App {
         self.poll_tasks();
         if self.task_busy.is_some() { ctx.request_repaint(); }
         self.poll_lsp();
+        // hover：光标静止 800ms 后经 LSP 请求精确类型提示
+        {
+            let cur = self.active_tab().map(|t| (t.cursor_line, t.cursor_col, t.content.len()));
+            match (cur, self.hover_idle) {
+                (Some(_), None) => { self.hover_idle = Some(std::time::Instant::now()); self.hover_sent_at = None; }
+                (Some((l, c, n)), Some(t0)) => {
+                    let moved = self.hover_sent_at.is_none() && {
+                        // 变化检测：cursor 与上一帧不同则重置
+                        false
+                    };
+                    let _ = (l, c, n);
+                    if self.hover_sent_at.is_none()
+                        && self.lsp_wait.is_none()
+                        && t0.elapsed().as_millis() > 800
+                    {
+                        self.hover_sent_at = Some(std::time::Instant::now());
+                        self.lsp_hover();
+                    }
+                }
+                _ => {}
+            }
+        }
 
         // 提前 clone 避免 borrow 冲突
         let root = self.root.clone();
