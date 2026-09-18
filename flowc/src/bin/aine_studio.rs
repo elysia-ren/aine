@@ -679,6 +679,7 @@ struct App {
     task_tx: Option<std::sync::mpsc::Sender<TaskMsg>>, // 后台任务通道（clone 给线程）
     task_rx: Option<std::sync::mpsc::Receiver<TaskMsg>>,
     task_busy: Option<&'static str>, // 状态栏显示的任务标签
+    revision: u64,                   // workspace.edit 修订号（协议最小闭环）
     fs_root: Option<FsDir>,          // 文件树缓存
     fs_scanned_at: Option<std::time::Instant>,
     show_ai_settings: bool,
@@ -756,6 +757,7 @@ impl App {
             show_veil_preview: false,
             hover_idle: None, hover_sent_at: None,
             task_tx: None, task_rx: None, task_busy: None,
+            revision: 0,
             fs_root: None, fs_scanned_at: None,
             show_ai_settings: false, ai_settings: AiSettings::default(),
             ai_chat: vec![], ai_input: String::new(),
@@ -923,6 +925,7 @@ impl App {
     fn delete_file(&mut self, rel: &str) {
         let path = self.root.join("examples").join(rel);
         let _ = std::fs::remove_file(&path);
+        self.revision += 1;
         self.files.retain(|f| *f != rel);
         if let Some(ti) = self.tabs.iter().position(|t| t.name == rel) {
             self.close_tab(ti);
@@ -1028,11 +1031,7 @@ impl App {
         let name = self.active_tab().map(|t| t.name.clone()).unwrap_or_default();
         let content = self.active_tab().map(|t| t.content.clone()).unwrap_or_default();
         if dirty {
-            let path = self.root.join("examples").join(&name);
-            let _ = std::fs::write(&path, &content);
-            if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-                tab.dirty = false;
-            }
+            self.workspace_edit(&name, &content);
             self.status = format!("Saved {}", name);
             self.toast(format!("已保存 {}", name));
             // LSP：保存即 didChange（结构化诊断推送回填）
@@ -1321,6 +1320,24 @@ impl App {
             }
         }
         if self.lsp_rx.is_some() { /* 保持通道 */ }
+    }
+
+    /// workspace.edit 统一写盘入口（Tooling Protocol 最小闭环）：
+    /// revision 随每次外部可观察写盘递增，未来 LSP/任务系统可订阅
+    fn workspace_edit(&mut self, rel: &str, content: &str) {
+        let path = self.root.join("examples").join(rel);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match std::fs::write(&path, content) {
+            Ok(()) => {
+                self.revision += 1;
+                if let Some(ti) = self.tabs.iter().position(|t| t.name == rel) {
+                    self.tabs[ti].dirty = false;
+                }
+            }
+            Err(e) => self.toast(format!("写入失败 {}: {}", rel, e)),
+        }
     }
 
     /// 后台执行命令，完成后经任务通道回传（UI 永不阻塞）
@@ -2315,6 +2332,8 @@ impl eframe::App for App {
                         ui.label(egui::RichText::new(format!("{} {}", n_lines, tr("lines_unit", lang))).color(theme::FG_STATUS).size(12.0));
                         ui.add_space(16.0);
                         ui.label(egui::RichText::new("UTF-8").color(theme::FG_STATUS).size(12.0));
+                        ui.add_space(16.0);
+                        ui.label(egui::RichText::new(format!("R{}", self.revision)).color(theme::FG_DIM).size(12.0));
                         ui.add_space(16.0);
                         let (l, c) = self.active_tab()
                             .map(|t| (t.cursor_line, t.cursor_col))
