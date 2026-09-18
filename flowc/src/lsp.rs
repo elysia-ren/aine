@@ -294,6 +294,22 @@ pub fn ide_definition(src: &str, path: &str, byte_offset: usize) -> Option<(usiz
     None
 }
 
+/// IDE API: 文档符号大纲（Outline）：名称 / 类别 / 行 / 列（0 基行列）
+pub fn ide_symbols(src: &str, path: &str) -> Vec<(String, String, usize, usize)> {
+    let a = analyze(src, path);
+    let idx = LineIndex::new(src);
+    let mut out: Vec<(String, String, usize, usize)> = a
+        .symbols
+        .iter()
+        .map(|(name, kind, start, _end)| {
+            let (line, col) = idx.to_pos(*start);
+            (name.clone(), kind.clone(), line as usize, col as usize)
+        })
+        .collect();
+    out.sort_by_key(|x| (x.2, x.3));
+    out
+}
+
 /// IDE API: find all references of symbol at byte offset. Returns (line, col) list 0-based.
 pub fn ide_references(src: &str, path: &str, byte_offset: usize) -> Option<Vec<(usize, usize)>> {
     let a = analyze(src, path);

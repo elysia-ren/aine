@@ -645,7 +645,8 @@ struct App {
     fixing_file: Option<String>,   // ai/fix in flight: target file
     fixing_old: Option<String>,    // ai/fix in flight: original content
     fixing_reason: Option<String>, // ai/fix in flight: diagnostic summary
-    sidebar_view: usize,           // 0=Explorer 1=Search 2=Git
+    sidebar_view: usize,           // 0=Explorer 1=Search 2=Git 3=Outline
+    outline: Vec<(String, String, usize, usize)>, // (name, kind, line0, col0)
     proj_search: String,           // project-wide search query
     proj_results: Vec<(String, usize, String)>, // (file, line, text)
     test_output: String,           // aine test results
@@ -735,6 +736,7 @@ impl App {
             diags: vec![], pending_diff: None, ai_explaining: false,
             fixing_file: None, fixing_old: None, fixing_reason: None,
             sidebar_view: 0, proj_search: String::new(), proj_results: vec![],
+            outline: vec![],
             test_output: String::new(),
             models: Vec::new(),
             focus_mode: false,
@@ -1553,6 +1555,16 @@ impl App {
         }
     }
 
+    /// 大纲：当前文件符号（函数/struct/enum 等）
+    fn refresh_outline(&mut self) {
+        if let Some(t) = self.active_tab() {
+            let (content, name) = (t.content.clone(), t.name.clone());
+            let path = self.root.join("examples").join(&name);
+            let ps = path.to_string_lossy().to_string();
+            self.outline = aine::lsp::ide_symbols(&content, &ps);
+        }
+    }
+
     /// 全工程搜索（当前打开文件集 = examples 下所有 .aine）
     fn project_search(&mut self) {
         self.proj_results.clear();
@@ -2234,6 +2246,7 @@ impl eframe::App for App {
                     ("📁", tr("explorer", lang)),
                     ("🔍", tr("search", lang)),
                     ("🌿", "Git"),
+                    ("📋", if lang == 1 { "大纲" } else { "Outline" }),
                 ];
                 for (i, (icon, tip)) in tips.iter().enumerate() {
                     let is_sel = self.sidebar_view == i;
@@ -2245,6 +2258,7 @@ impl eframe::App for App {
                     if resp.clicked() {
                         self.sidebar_view = i;
                         if i == 2 { self.git_refresh(); }
+                        if i == 3 { self.refresh_outline(); }
                     }
                     if is_sel {
                         ui.painter().rect_filled(
@@ -2346,6 +2360,33 @@ impl eframe::App for App {
                             }
                         });
                         let _ = proj_q;
+                    }
+                    3 => { // Outline（符号大纲，点击跳行）
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.add_space(8.0);
+                            ui.label(egui::RichText::new(
+                                if lang == 1 { "大纲" } else { "OUTLINE" }
+                            ).color(theme::FG_DIM).size(11.0).strong());
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.add(egui::Button::new(egui::RichText::new("🔄").size(12.0))
+                                    .frame(false)).clicked() { self.refresh_outline(); }
+                            });
+                        });
+                        ui.separator();
+                        if self.outline.is_empty() { self.refresh_outline(); }
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            let entries = self.outline.clone();
+                            for (name, kind, line, _col) in entries {
+                                let icon = if kind.contains("Fn") { "ƒ" } else if kind.contains("Struct") { "S" } else if kind.contains("Enum") { "E" } else { "·" };
+                                if ui.add(egui::Button::new(
+                                    egui::RichText::new(format!("{} {}  {}", icon, name, kind))
+                                        .color(theme::FG).size(11.0)
+                                ).frame(false).min_size(egui::vec2(ui.available_width(), 18.0))).clicked() {
+                                    self.jump_to_line(line + 1);
+                                }
+                            }
+                        });
                     }
                     2 => { // Git
                         ui.add_space(8.0);
