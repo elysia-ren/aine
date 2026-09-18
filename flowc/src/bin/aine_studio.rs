@@ -657,6 +657,9 @@ struct App {
     test_output: String,           // aine test results
     breakpoints: Vec<usize>,       // 断点行号（1 基，当前文件）
     git_commit_msg: String,        // git commit 消息草稿
+    show_file_rename: bool,        // 文件重命名对话框
+    file_rename_old: String,       // 原文件名
+    file_rename_input: String,     // 新文件名输入
     debug_output: String,          // aine debug 报告
     models: Vec<ModelEntry>,       // models.toml routing table
     focus_mode: bool,              // 禅模式：隐藏所有面板只留编辑器
@@ -752,6 +755,7 @@ impl App {
             outline: vec![], outline_refs_cache: None,
             test_output: String::new(),
             breakpoints: vec![], debug_output: String::new(), git_commit_msg: String::new(),
+            show_file_rename: false, file_rename_old: String::new(), file_rename_input: String::new(),
             models: Vec::new(),
             focus_mode: false,
             confirm: None, pending_selection: None, show_goto: false, goto_input: String::new(),
@@ -961,6 +965,27 @@ impl App {
             self.active_tab = self.tabs.len() - 1;
             self.check();
         }
+    }
+
+    /// 文件重命名（磁盘+文件列表+标签同步）
+    fn rename_file(&mut self, old: &str, new: &str) {
+        if new.is_empty() || new == old { return; }
+        let new_name = if new.ends_with(".aine") { new.to_string() } else { format!("{}.aine", new) };
+        let old_path = self.root.join("examples").join(old);
+        let new_path = self.root.join("examples").join(&new_name);
+        if new_path.exists() { self.toast(format!("{} 已存在", new_name)); return; }
+        if let Err(e) = std::fs::rename(&old_path, &new_path) {
+            self.toast(format!("重命名失败: {}", e));
+            return;
+        }
+        for i in 0..self.files.len() {
+            if self.files[i] == old { self.files[i] = new_name.clone(); }
+        }
+        for t in self.tabs.iter_mut() {
+            if t.name == old { t.name = new_name.clone(); }
+        }
+        self.fs_scanned_at = None;
+        self.toast(format!("已重命名 {} → {}", old, new_name));
     }
 
     /// 真删除文件（从磁盘移除 + 从文件列表/标签移除）
@@ -2083,6 +2108,9 @@ impl eframe::App for App {
         let mut goto_input = self.goto_input.clone();
         let mut show_rename = self.show_rename;
         let mut rename_input = self.rename_input.clone();
+        let mut show_file_rename = self.show_file_rename;
+        let mut file_rename_old = self.file_rename_old.clone();
+        let mut file_rename_input = self.file_rename_input.clone();
         let mut show_completion = self.show_completion;
         let mut completions = self.completions.clone();
         let mut commit_msg = self.git_commit_msg.clone();
@@ -2569,6 +2597,14 @@ impl eframe::App for App {
                                 format!("{}", tr("explorer", lang))
                             ).color(theme::FG_DIM).size(11.0).strong());
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.add(egui::Button::new(egui::RichText::new("✏").size(12.0))
+                                    .frame(false)).on_hover_text(if lang == 1 { "重命名文件" } else { "Rename" }).clicked() {
+                                    if let Some(t) = self.active_tab() {
+                                        self.file_rename_old = t.name.clone();
+                                        self.file_rename_input = t.name.clone();
+                                        self.show_file_rename = true;
+                                    }
+                                }
                                 if ui.add(egui::Button::new(egui::RichText::new("📄").size(12.0))
                                     .frame(false)).on_hover_text(tr("new_file_tip", lang)).clicked() {
                                     let n = self.files.len() + 1;
@@ -3135,6 +3171,30 @@ impl eframe::App for App {
                             }
                             show_rename = false;
                             rename_input.clear();
+                        }
+                    });
+                });
+        }
+
+        // ── 文件重命名对话框 ──
+        if show_file_rename {
+            egui::Window::new(if lang == 1 { "重命名文件" } else { "Rename File" })
+                .anchor(egui::Align2::CENTER_TOP, [0.0, 100.0])
+                .default_width(280.0)
+                .show(ctx, |ui| {
+                    ui.label(egui::RichText::new(&file_rename_old).color(theme::FG_DIM).size(11.0));
+                    ui.horizontal(|ui| {
+                        ui.label(if lang == 1 { "新名称:" } else { "New:" });
+                        let resp = ui.add(egui::TextEdit::singleline(&mut file_rename_input)
+                            .desired_width(160.0));
+                        let go = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        if go || ui.button(tr("confirm_ok", lang)).clicked() {
+                            let nn = file_rename_input.trim().to_string();
+                            if !nn.is_empty() && nn != file_rename_old {
+                                let old = file_rename_old.clone();
+                                self.rename_file(&old, &nn);
+                            }
+                            show_file_rename = false;
                         }
                     });
                 });
@@ -3800,6 +3860,9 @@ impl eframe::App for App {
         self.goto_input = goto_input;
         self.show_rename = show_rename;
         self.rename_input = rename_input;
+        self.show_file_rename = show_file_rename;
+        self.file_rename_old = file_rename_old;
+        self.file_rename_input = file_rename_input;
         self.show_completion = show_completion;
         self.completions = completions;
         self.git_commit_msg = commit_msg;
