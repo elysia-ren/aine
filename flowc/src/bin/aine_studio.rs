@@ -1657,6 +1657,53 @@ impl App {
         });
     }
 
+    /// 任务系统：aine_tasks.json 自定义任务（label + args 数组，工作目录=项目根）
+    fn load_tasks(&mut self) -> Vec<(String, Vec<String>)> {
+        let path = self.root.join("aine_tasks.json");
+        let mut tasks: Vec<(String, Vec<String>)> = Vec::new();
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            // 极简解析："label": "...", "cmd": ["a","b"]
+            let mut label = String::new();
+            for line in text.lines() {
+                let line = line.trim();
+                if line.starts_with("\"label\"") {
+                    label = json_string_field(line, "label");
+                } else if line.starts_with("\"cmd\"") {
+                    let inner = line.trim_start_matches("\"cmd\":").trim();
+                    let args: Vec<String> = inner
+                        .trim_start_matches('[').trim_end_matches(']')
+                        .split(',')
+                        .map(|x| x.trim().trim_matches('"').to_string())
+                        .filter(|x| !x.is_empty())
+                        .collect();
+                    if !label.is_empty() && !args.is_empty() {
+                        tasks.push((label.clone(), args));
+                    }
+                    label.clear();
+                }
+            }
+        }
+        tasks
+    }
+
+    fn run_task(&mut self, args: &[String]) {
+        let root = self.root.clone();
+        let argv: Vec<String> = args.to_vec();
+        self.spawn_task("任务", move |tx| {
+            let out = std::process::Command::new(&argv[0]).args(&argv[1..]).current_dir(&root).output();
+            let text = match out {
+                Ok(o) => {
+                    let mut t = String::from_utf8_lossy(&o.stdout).to_string();
+                    t.push_str(&String::from_utf8_lossy(&o.stderr));
+                    t
+                }
+                Err(e) => format!("task error: {}
+", e),
+            };
+            let _ = tx.send(TaskMsg::Term { text });
+        });
+    }
+
     /// git stage 全部变更
     fn git_stage_all(&mut self) {
         let root = self.root.clone();
@@ -2372,6 +2419,7 @@ impl eframe::App for App {
                     ("🔍", tr("search", lang)),
                     ("🌿", "Git"),
                     ("📋", if lang == 1 { "大纲" } else { "Outline" }),
+                    ("⚙", if lang == 1 { "任务" } else { "Tasks" }),
                 ];
                 for (i, (icon, tip)) in tips.iter().enumerate() {
                     let is_sel = self.sidebar_view == i;
@@ -2509,6 +2557,41 @@ impl eframe::App for App {
                                         .color(theme::FG).size(11.0)
                                 ).frame(false).min_size(egui::vec2(ui.available_width(), 18.0))).clicked() {
                                     self.jump_to_line(line + 1);
+                                }
+                            }
+                        });
+                    }
+                    4 => { // Tasks（aine_tasks.json 自定义任务）
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new("  TASKS").color(theme::FG_DIM).size(11.0).strong());
+                        ui.add_space(4.0);
+                        ui.separator();
+                        let tasks = self.load_tasks();
+                        if tasks.is_empty() {
+                            ui.label(egui::RichText::new("  aine_tasks.json 无任务").color(theme::FG_DIM).size(11.0));
+                        }
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            for (label, args) in &tasks {
+                                if ui.add(egui::Button::new(
+                                    egui::RichText::new(format!("▶ {}", label)).color(theme::FG).size(11.0)
+                                ).frame(false).min_size(egui::vec2(ui.available_width(), 18.0))).clicked() {
+                                    let a = args.clone();
+                                    let root2 = self.root.clone();
+                                    self.spawn_task("任务", move |tx| {
+                                        let out = std::process::Command::new(&a[0]).args(&a[1..])
+                                            .current_dir(&root2).output();
+                                        let text = match out {
+                                            Ok(o) => {
+                                                let mut t = String::from_utf8_lossy(&o.stdout).to_string();
+                                                t.push_str(&String::from_utf8_lossy(&o.stderr));
+                                                t
+                                            }
+                                            Err(e) => format!("task error: {}
+", e),
+                                        };
+                                        let _ = tx.send(TaskMsg::Term { text });
+                                    });
+                                    self.bottom_tab = 1;
                                 }
                             }
                         });
