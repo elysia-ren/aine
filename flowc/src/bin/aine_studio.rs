@@ -1478,20 +1478,23 @@ impl App {
         self.last_checked_rev = Some(self.revision);
         let Some(tab_name) = self.active_tab().map(|t| t.name.clone()) else { return };
         self.save(); // 检查磁盘上的最新内容
+        // 进程内全流水线检查（零子进程，即时返回）
+        let content = self.active_tab().map(|t| t.content.clone()).unwrap_or_default();
         let path = self.root.join("examples").join(&tab_name);
-        let aine = self.root.join("target").join("debug").join("aine.exe");
-        self.spawn_task("检查中", move |tx| {
-            let out = std::process::Command::new(&aine).args(["check", &path.to_string_lossy()]).output();
-            let (stderr, diags) = match out {
-                Ok(o) => {
-                    let s = String::from_utf8_lossy(&o.stderr).to_string();
-                    let diags = parse_diagnostics(&s);
-                    (s, diags)
-                }
-                Err(e) => (format!("aine check 启动失败: {}", e), Vec::new()),
-            };
-            let _ = tx.send(TaskMsg::Checked { stderr, diags });
-        });
+        let ps = path.to_string_lossy().to_string();
+        let results = aine::lsp::ide_check(&content, &ps);
+        self.diags = results.iter().map(|(sev, code, line, col, msg)| {
+            Diag { severity: sev.clone(), code: code.clone(), line: *line, col: *col, message: msg.clone(), quick_fix: String::new() }
+        }).collect();
+        self.n_errors = self.diags.iter().filter(|d| d.severity == "error").count();
+        self.n_warnings = self.diags.iter().filter(|d| d.severity == "warning").count();
+        self.output_text = format!("check: {} errors, {} warnings (in-process)", self.n_errors, self.n_warnings);
+        self.refresh_outline();
+        if self.n_errors > 0 {
+            if let Some(d) = self.diags.iter().find(|d| d.severity == "error") {
+                self.jump_to_line(d.line);
+            }
+        }
     }
 
     /// T34 Router：跨全部已配置厂商按任务能力选路（key 为空的跳过）

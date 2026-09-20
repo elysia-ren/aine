@@ -68,16 +68,16 @@ fn json_escape(s: &str) -> String {
 }
 
 /// 一次分析的结果（诊断 + 符号表 + 类型 + 摘要）
-struct Analysis {
-    diagnostics: Vec<(String, u32, u32, Option<(usize, usize)>, String, String)>,
-    symbols: Vec<(String, String, usize, usize)>, // name, kind, start, end
-    types: std::collections::HashMap<usize, String>,
-    summaries: Vec<String>,
-    idents: Vec<(usize, usize, usize)>, // span.start, span.end, symbol index
-    bindings: Vec<(usize, usize, usize)>, // def span → symbol index
+pub struct Analysis {
+    pub diagnostics: Vec<(String, u32, u32, Option<(usize, usize)>, String, String)>,
+    pub symbols: Vec<(String, String, usize, usize)>, // name, kind, start, end
+    pub types: std::collections::HashMap<usize, String>,
+    pub summaries: Vec<String>,
+    pub idents: Vec<(usize, usize, usize)>, // span.start, span.end, symbol index
+    pub bindings: Vec<(usize, usize, usize)>, // def span → symbol index
 }
 
-fn analyze(src: &str, path: &str) -> Analysis {
+pub fn analyze(src: &str, path: &str) -> Analysis {
     let mut diags = Vec::new();
     let lexed = Lexer::new(src).lex();
     for d in &lexed.diagnostics.diagnostics {
@@ -326,6 +326,16 @@ fn collect_ws_symbols(dir: &std::path::Path, q: &str, out: &mut Vec<(String, Str
             }
         }
     }
+}
+
+/// IDE API: 进程内全流水线检查（零子进程），返回 (severity, code, line1, col1, message)
+pub fn ide_check(src: &str, path: &str) -> Vec<(String, String, usize, usize, String)> {
+    let a = analyze(src, path);
+    a.diagnostics.iter().map(|(code, line, col, _span, term, msg)| {
+        let severity = if code.starts_with('F') || code.starts_with('W') { "error" } else { "warning" };
+        (severity.to_string(), code.clone(), *line as usize, *col as usize,
+         format!("[{}] {} — {}", code, term, msg))
+    }).collect()
 }
 
 /// IDE API: 文档符号大纲（Outline）：名称 / 类别 / 行 / 列（0 基行列）
