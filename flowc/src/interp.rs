@@ -1838,6 +1838,32 @@ impl Interp {
                 let items: Vec<Value> = out.iter().map(|b| Value::Int(*b as i64)).collect();
                 Ok(Value::Vec(items.into()))
             }
+            "to_bytes" => {
+                // 字符串 → UTF-8 字节 Vec<Int>
+                let text = args.first().map(|v| v.display()).unwrap_or_default();
+                let items: Vec<Value> = text.bytes().map(|b| Value::Int(b as i64)).collect();
+                Ok(Value::Vec(items.into()))
+            }
+            "bytes_to_string" => {
+                // 字节 Vec<Int> → 字符串
+                let data = args.first().and_then(|v| {
+                    if let Value::Vec(arc) = v {
+                        let mut bytes = Vec::new();
+                        for item in arc.iter() {
+                            if let Value::Int(i) = item { bytes.push(*i as u8); }
+                        }
+                        Some(bytes)
+                    } else { None }
+                });
+                match data {
+                    Some(bytes) => match String::from_utf8(bytes) {
+                        Ok(s) => Ok(Value::Str(s.into())),
+                        Err(e) => Ok(Value::Str(format!("[bytes_to_string error: {}]", e).into())),
+                    },
+                    None => Ok(Value::Str("".into())),
+                }
+            }
+            // Vec.concat: 追加在 Vec 方法区
             // 值语义内建（B5-M29）：move/clone 的解释器侧
             //（interp Vec 为持久化结构，clone 即共享引用，语义与 C 深拷贝一致）
             "al_vec_clone" => {
@@ -2013,6 +2039,16 @@ impl Interp {
                     Ok(Value::Vec(new_items.into()))
                 }
                 "iter" => Ok(Value::Vec(items.clone())),
+                "concat" => {
+                    // O(n) 一次分配拼接
+                    let mut new_items: Vec<Value> = items.iter().cloned().collect();
+                    if let Some(Value::Vec(other)) = args.first() {
+                        for item in other.iter() {
+                            new_items.push(item.clone());
+                        }
+                    }
+                    Ok(Value::Vec(new_items.into()))
+                }
                 "map" => {
                     let mut out = Vec::new();
                     for item in items.iter() {
