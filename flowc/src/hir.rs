@@ -170,6 +170,7 @@ impl Resolution {
 pub const BUILTIN_GLOBALS: &[&str] = &[
     // I/O and runtime
     "print", "now", "run_ui", "db", "http", "read_file", "write_file", "append_file", "file_exists",
+    "read_bytes", "write_bytes", "base64_encode", "base64_decode",
     // Std API (docs/STD_API_SPEC.md): 服务化档
     "read_line", "env", "sleep", "json_encode", "json_decode", "http_request", "file_list",
     "edit_new", "listbox_ondblclick", "listbox_get",

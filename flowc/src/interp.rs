@@ -1755,6 +1755,89 @@ impl Interp {
                 let path = args.first().map(|v| v.display()).unwrap_or_default();
                 Ok(Value::Bool(std::path::Path::new(&path).exists()))
             }
+            "read_bytes" => {
+                let path = args.first().map(|v| v.display()).unwrap_or_default();
+                match std::fs::read(&path) {
+                    Ok(bytes) => {
+                        let items: Vec<Value> = bytes.iter().map(|b| Value::Int(*b as i64)).collect();
+                        Ok(Value::Vec(items.into()))
+                    }
+                    Err(e) => Ok(Value::Str(format!("[read_bytes error: {}]", e).into())),
+                }
+            }
+            "write_bytes" => {
+                let path = args.first().map(|v| v.display()).unwrap_or_default();
+                // 接受 Vec<Int>（0-255）写原始字节
+                let data = args.get(1).and_then(|v| {
+                    if let Value::Vec(arc) = v {
+                        let mut bytes = Vec::new();
+                        for item in arc.iter() {
+                            if let Value::Int(i) = item {
+                                bytes.push(*i as u8);
+                            }
+                        }
+                        Some(bytes)
+                    } else { None }
+                });
+                match data {
+                    Some(bytes) => match std::fs::write(&path, &bytes) {
+                        Ok(_) => Ok(Value::Bool(true)),
+                        Err(_) => Ok(Value::Bool(false)),
+                    },
+                    None => Ok(Value::Bool(false)),
+                }
+            }
+            // base64 编解码（传二进制到 AI 接口用）
+            "base64_encode" => {
+                let data = args.first().and_then(|v| {
+                    if let Value::Vec(arc) = v {
+                        let mut bytes = Vec::new();
+                        for item in arc.iter() {
+                            if let Value::Int(i) = item { bytes.push(*i as u8); }
+                        }
+                        Some(bytes)
+                    } else if let Value::Str(st) = v {
+                        Some(st.as_bytes().to_vec())
+                    } else { None }
+                });
+                match data {
+                    Some(bytes) => {
+                        const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+                        let mut out = String::new();
+                        for chunk in bytes.chunks(3) {
+                            let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+                            out.push(CHARS[(b[0] >> 2) as usize] as char);
+                            out.push(CHARS[(((b[0] & 0x03) << 4) | (b[1] >> 4)) as usize] as char);
+                            out.push(if chunk.len() > 1 { CHARS[(((b[1] & 0x0F) << 2) | (b[2] >> 6)) as usize] as char } else { '=' });
+                            out.push(if chunk.len() > 2 { CHARS[(b[2] & 0x3F) as usize] as char } else { '=' });
+                        }
+                        Ok(Value::Str(out.into()))
+                    }
+                    None => Ok(Value::Str("".into())),
+                }
+            }
+            "base64_decode" => {
+                let input = args.first().map(|v| v.display()).unwrap_or_default();
+                const REV: fn(u8) -> Option<u8> = |c| match c {
+                    b'A'..=b'Z' => Some(c - b'A'),
+                    b'a'..=b'z' => Some(c - b'a' + 26),
+                    b'0'..=b'9' => Some(c - b'0' + 52),
+                    b'+' => Some(62),
+                    b'/' => Some(63),
+                    _ => None,
+                };
+                let bytes: Vec<u8> = input.bytes().filter(|c| *c != b'=' && *c != b'\n' && *c != b'\r').collect();
+                let mut out = Vec::new();
+                for chunk in bytes.chunks(4) {
+                    let b = [REV(chunk[0]).unwrap_or(0), REV(*chunk.get(1).unwrap_or(&b'A')).unwrap_or(0),
+                             REV(*chunk.get(2).unwrap_or(&b'A')).unwrap_or(0), REV(*chunk.get(3).unwrap_or(&b'A')).unwrap_or(0)];
+                    out.push((b[0] << 2) | (b[1] >> 4));
+                    if chunk.len() > 2 { out.push((b[1] << 4) | (b[2] >> 2)); }
+                    if chunk.len() > 3 { out.push((b[2] << 6) | b[3]); }
+                }
+                let items: Vec<Value> = out.iter().map(|b| Value::Int(*b as i64)).collect();
+                Ok(Value::Vec(items.into()))
+            }
             // 值语义内建（B5-M29）：move/clone 的解释器侧
             //（interp Vec 为持久化结构，clone 即共享引用，语义与 C 深拷贝一致）
             "al_vec_clone" => {
