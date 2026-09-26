@@ -2168,7 +2168,25 @@ impl eframe::App for App {
             }
             if self.focus_mode && i.key_pressed(egui::Key::Escape) { self.focus_mode = false; }
             if i.modifiers.ctrl && i.key_pressed(egui::Key::S) { self.save(); }
-            if i.modifiers.ctrl && i.key_pressed(egui::Key::F) { self.show_search = true; }
+            if i.modifiers.ctrl && i.key_pressed(egui::Key::F) {
+                // 选区文字自动填入搜索框
+                if let Some(t) = self.active_tab() {
+                    if let Some(b) = t.cursor_byte {
+                        // 简化：取光标处词（若光标在词内）
+                        let is_w = |c: char| c.is_alphanumeric() || c == '_';
+                        let content = &t.content;
+                        if b < content.len() && content.is_char_boundary(b) {
+                            let st = content[..b].rfind(|c: char| !is_w(c)).map(|x| x + 1).unwrap_or(0);
+                            let en = content[b..].find(|c: char| !is_w(c)).map(|x| b + x).unwrap_or(content.len());
+                            let word = &content[st..en];
+                            if !word.trim().is_empty() && word.len() < 80 {
+                                self.search_text = word.to_string();
+                            }
+                        }
+                    }
+                }
+                self.show_search = true;
+            }
             if i.modifiers.ctrl && i.key_pressed(egui::Key::P) { self.show_quick_open = true; }
             if i.modifiers.ctrl && i.key_pressed(egui::Key::K) { self.show_command_bar = true; }
             if i.key_pressed(egui::Key::Escape) {
@@ -3269,10 +3287,14 @@ impl eframe::App for App {
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
                                         ui.add_space(8.0);
-                                        if ui.add(egui::Button::new(
+                                        let tab_btn = ui.add(egui::Button::new(
                                             egui::RichText::new(label).color(fg).size(12.0)
-                                        ).frame(false)).clicked() {
+                                        ).frame(false));
+                                        if tab_btn.clicked() {
                                             self.active_tab = i;
+                                        }
+                                        if tab_btn.double_clicked() {
+                                            self.request_close_tab(i);
                                         }
                                         if ui.add(egui::Button::new(
                                             egui::RichText::new("✕").color(theme::FG_DIM).size(10.0)
