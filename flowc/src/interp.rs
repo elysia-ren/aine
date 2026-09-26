@@ -1039,6 +1039,57 @@ impl Interp {
                             }
                         }
                     }
+                    Expr::Field { base, field, .. } => {
+                        // s.x = 99：结构体字段赋值（重建副本后重绑定）
+                        let name = match &**base {
+                            Expr::Ident { name, .. } => name.clone(),
+                            _ => {
+                                return Err(RtError::msg(
+                                    "字段赋值目标必须是变量（let 声明），不支持嵌套路径",
+                                ))
+                            }
+                        };
+                        let cur = env
+                            .get(&name)
+                            .ok_or_else(|| RtError::msg(format!("未定义的变量 '{}'", name)))?;
+                        let new_val = match op {
+                            crate::ast::AssignOp::Assign => v.clone(),
+                            _ => {
+                                let cur_f = match &cur {
+                                    Value::Struct { fields, .. } => {
+                                        fields.iter().find(|(k, _)| k == field)
+                                            .map(|(_, val)| val.clone())
+                                            .unwrap_or(Value::Unit)
+                                    }
+                                    _ => Value::Unit,
+                                };
+                                self.arith(op, &cur_f, &v)?
+                            }
+                        };
+                        let newv = match cur {
+                            Value::Struct { ty, fields, .. } => {
+                                let mut new_fields: Vec<(String, Value)> = fields.iter()
+                                    .map(|(k, val)| (k.clone(), val.clone())).collect();
+                                let mut found = false;
+                                for slot in new_fields.iter_mut() {
+                                    if slot.0 == *field {
+                                        slot.1 = new_val.clone();
+                                        found = true;
+                                    }
+                                }
+                                if !found { new_fields.push((field.clone(), new_val.clone())); }
+                                Value::Struct { ty, fields: new_fields }
+                            }
+                            _ => {
+                                return Err(RtError::msg(format!(
+                                    "字段赋值目标必须是 struct，实际是 {}",
+                                    cur.display()
+                                )))
+                            }
+                        };
+                        env.assign(&name, newv.clone());
+                        return Ok(v);
+                    }
                     _ => return Err(RtError::msg("赋值目标必须是变量")),
                 };
                 let current = env.get(&name);
@@ -1959,6 +2010,27 @@ impl Interp {
                         items.sort_by(|a, b| a.display().cmp(&b.display()));
                         Ok(Some(Value::Unit))
                     }
+                    "set" => {
+                        if let (Some(Value::Int(idx)), Some(v)) = (args.first(), args.get(1)) {
+                            let idx = *idx as usize;
+                            if idx < items.len() { items[idx] = v.clone(); }
+                        }
+                        Ok(Some(slot.clone()))
+                    }
+                    "remove" => {
+                        if let Some(Value::Int(idx)) = args.first() {
+                            let idx = *idx as usize;
+                            if idx < items.len() { items.remove(idx); }
+                        }
+                        Ok(Some(slot.clone()))
+                    }
+                    "insert" => {
+                        if let (Some(Value::Int(idx)), Some(v)) = (args.first(), args.get(1)) {
+                            let idx = (*idx as usize).min(items.len());
+                            items.insert(idx, v.clone());
+                        }
+                        Ok(Some(slot.clone()))
+                    }
                     _ => Ok(None),
                 }
             }
@@ -2090,6 +2162,30 @@ impl Interp {
                 "sort" => {
                     let mut new_items: Vec<Value> = items.iter().cloned().collect();
                     new_items.sort_by(|a, b| a.display().cmp(&b.display()));
+                    Ok(Value::Vec(new_items.into()))
+                }
+                "set" => {
+                    let mut new_items: Vec<Value> = items.iter().cloned().collect();
+                    if let (Some(Value::Int(idx)), Some(v)) = (args.first(), args.get(1)) {
+                        let idx = *idx as usize;
+                        if idx < new_items.len() { new_items[idx] = v.clone(); }
+                    }
+                    Ok(Value::Vec(new_items.into()))
+                }
+                "remove" => {
+                    let mut new_items: Vec<Value> = items.iter().cloned().collect();
+                    if let Some(Value::Int(idx)) = args.first() {
+                        let idx = *idx as usize;
+                        if idx < new_items.len() { new_items.remove(idx); }
+                    }
+                    Ok(Value::Vec(new_items.into()))
+                }
+                "insert" => {
+                    let mut new_items: Vec<Value> = items.iter().cloned().collect();
+                    if let (Some(Value::Int(idx)), Some(v)) = (args.first(), args.get(1)) {
+                        let idx = (*idx as usize).min(new_items.len());
+                        new_items.insert(idx, v.clone());
+                    }
                     Ok(Value::Vec(new_items.into()))
                 }
                 _ => Ok(Value::Nil),
