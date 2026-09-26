@@ -681,7 +681,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                                 if btv == "String" {
                                     // D15：C 路径暂维持字节形态（与 s[i] 字节索引自洽；
                                     // 字符级统一切换待 M6-TCK 类型表）；解释器为字符语义
-                                    return "strlen(" + base_c + ")"
+                                    return "al_chars_len(" + base_c + ")"
                                 }
                                 if btv.starts_with("Vec<") {
                                     return base_c + ".len"
@@ -1068,7 +1068,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 match bt {
                     Some(btv) {
                         if btv == "String" || btv == "infer" {
-                            return "strlen(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                            return "al_chars_len(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
                         }
                     }
                     None {
@@ -2309,6 +2309,21 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
     out = out + "double al_map_get_f(al_map m, const char* k) { long i = al_map_find(&m, k); if (i < 0) { fprintf(stderr, \"Map 中不存在键: %s\\n\", k); abort(); } return ((double*)m.vals.data)[i]; }\n"
     out = out + "char* al_map_get_s(al_map m, const char* k) { long i = al_map_find(&m, k); if (i < 0) { fprintf(stderr, \"Map 中不存在键: %s\\n\", k); abort(); } return ((char**)m.vals.data)[i]; }\n"
     out = out + "void al_assert(int cond, char* msg) { if (!cond) { fprintf(stderr, \"断言失败: %s\\n\", msg); abort(); } }\n"
+    out = out + "#include <time.h>\n"
+    out = out + "long now_ms(void) { struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts); return ts.tv_sec * 1000 + ts.tv_nsec / 1000000; }\n"
+    out = out + "long codepoint_at(char* s, long idx) {\n"
+    out = out + "  long i = 0; long cp = 0;\n"
+    out = out + "  while (s[i] && i <= idx) {\n"
+    out = out + "    unsigned char c = (unsigned char)s[i];\n"
+    out = out + "    if (c < 0x80) { cp = c; i += 1; }\n"
+    out = out + "    else if ((c & 0xE0) == 0xC0) { cp = (c & 0x1F); i += 2; }\n"
+    out = out + "    else if ((c & 0xF0) == 0xE0) { cp = (c & 0x0F); i += 3; }\n"
+    out = out + "    else if ((c & 0xF8) == 0xF0) { cp = (c & 0x07); i += 4; }\n"
+    out = out + "    else { cp = c; i += 1; }\n"
+    out = out + "    if (i > idx) break;\n"
+    out = out + "  }\n"
+    out = out + "  return cp;\n"
+    out = out + "}\n"
     out = out + "long* read_bytes(char* path, long* out_len) {\n"
     out = out + "  FILE* f = fopen(path, \"rb\");\n"
     out = out + "  if (!f) { *out_len = -1; return NULL; }\n"

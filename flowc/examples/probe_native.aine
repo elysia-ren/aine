@@ -1,0 +1,30 @@
+enum Shape {
+    Circle(f64)
+    Rect(f64, f64)
+}
+
+struct Pt {
+    x: f64
+    y: i32
+    name: String
+}
+
+fn area(s: Shape) -> f64 {
+    match s {
+        Circle(r) => 3.14 * r * r
+        Rect(w, h) => w * h
+    }
+}
+
+fn main() {
+    print(f"area={area(Circle(2.0))}")
+    var pts: Vec<Pt> = []
+    pts.push(Pt { x: 1.5, y: 10, name: "a" })
+    var p0 = pts.get(0)
+    p0 = Pt { x: 99.5, y: p0.y, name: p0.name }
+    pts.set(0, p0)
+    print(f"pt0={pts.get(0).x}")
+    let s = "中文abc"
+    print(f"w={s.len()}")
+    print(f"t0={now_ms()}")
+}

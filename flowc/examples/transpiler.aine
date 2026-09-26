@@ -134,7 +134,16 @@ fn main() -> Result<(), String> {
     if cli_args.len() >= 2 {
         let src = read_file(cli_args[0])
         let p = parse_program(tokenize(src))?
-        let frb = flatten_stmts(p, "examples/", [])
+        // G6: 从源文件路径提取目录（不再硬编码 examples/）
+        let src_path = cli_args[0]
+        var dir_end = 0
+        var ci = 0
+        for ch in src_path {
+            if ch == 47 { dir_end = ci + 1 }
+            ci += 1
+        }
+        let src_dir = src_path[..dir_end]
+        let frb = flatten_stmts(p, src_dir, [])
         match frb {
             Ok(frbok) {
         let db = desugar_closures(frbok.out)

@@ -1,0 +1,17 @@
+// probe_run.aine —— 可运行子集验证:len 语义 / 基本容器 / 新内建
+struct Pt {
+    x: f64
+    y: i32
+    name: String
+}
+
+fn main() {
+    let s = "中文abc"
+    print(f"chars={s.len()}")
+    let v: Vec<i32> = [1, 2, 3]
+    print(f"v0={v[0]}")
+    var w: Vec<Pt> = [Pt { x: 1.5, y: 2, name: "n" }]
+    print(f"wx={w[0].x}")
+    let sub = s[0..2]
+    print(sub)
+}
