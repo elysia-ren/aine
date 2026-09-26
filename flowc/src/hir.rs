@@ -169,7 +169,7 @@ impl Resolution {
 /// Full stdlib registration arrives with the standard library implementation.
 pub const BUILTIN_GLOBALS: &[&str] = &[
     // I/O and runtime
-    "print", "now", "run_ui", "db", "http", "read_file", "write_file", "append_file", "file_exists",
+    "print", "now", "now_ms", "run_ui", "db", "http", "read_file", "write_file", "append_file", "file_exists",
     "read_bytes", "write_bytes", "base64_encode", "base64_decode", "to_bytes", "bytes_to_string",
     // Std API (docs/STD_API_SPEC.md): 服务化档
     "read_line", "env", "sleep", "json_encode", "json_decode", "http_request", "file_list",

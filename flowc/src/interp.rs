@@ -1612,6 +1612,12 @@ impl Interp {
                 let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
                 Ok(Value::Int(secs))
             }
+            // 毫秒级时钟: daemon 相位计时/性能基线用
+            "now_ms" => {
+                use std::time::{SystemTime, UNIX_EPOCH};
+                let ms = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+                Ok(Value::Int(ms))
+            }
             // Std API (冻结, docs/STD_API_SPEC.md): 逐行读 stdin; 注入缓冲优先
             "read_line" => {
                 if let Some(line) = self.input_lines.pop_front() {
@@ -2064,6 +2070,14 @@ impl Interp {
             Value::Str(s) => match method {
                 "clone" => Ok(Value::Str(s.clone())),
                 "len" => Ok(Value::Int(s.chars().count() as i64)),
+                // 第 i 个字符的码点(0 基,按字符计): 宽度表整数二分等热点用
+                "codepoint_at" => {
+                    let i = args.first().and_then(|v| match v { Value::Int(n) => Some(*n as usize), _ => None }).unwrap_or(0);
+                    match s.chars().nth(i) {
+                        Some(c) => Ok(Value::Int(c as i64)),
+                        None => Ok(Value::Int(-1)),
+                    }
+                }
                 "to_f64" => match s.trim().parse::<f64>() {
                     Ok(f) => Ok(Value::Float(f)),
                     Err(_) => Err(RtError::msg(format!("无法解析为数值: '{}'", s))),
