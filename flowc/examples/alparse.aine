@@ -624,7 +624,19 @@ fn parse_stmt(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
                     None { return Err("赋值左侧必须是变量或变量索引（如 v[i]）") }
                 }
             }
-            _ { return Err("赋值左侧必须是变量或变量索引（如 v[i]）") }
+            EField(e1, fname) {
+                // G4: s.x = value — 结构体字段赋值（编码为带点名称的 SAssign）
+                let mb = expr_ident_name(e1)
+                match mb {
+                    Some(bname) {
+                        let rr = parse_expr(tokens, r.next + 1, 0)?
+                        let qname = bname + "." + fname
+                        return Ok(SPResult { stmt: SAssign(qname, after.text, rr.value) next: rr.next })
+                    }
+                    None { return Err("字段赋值左侧必须是变量") }
+                }
+            }
+            _ { return Err("赋值左侧必须是变量、变量索引或字段") }
         }
     }
     return Ok(SPResult { stmt: SExpr(r.value) next: r.next })
