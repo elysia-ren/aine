@@ -1446,13 +1446,19 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                                         }
                                     }
                                     else if mname == "get" {
-                                        // m.get(k) → Option<V>
+                                        // G1: get 分派 — Map → al_opt；Vec/unknown → 下标访问
                                         let mbt = base_type(ib, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
                                         match mbt {
                                             Some(mt) {
                                                 if mt.starts_with("Map<") { ct = "al_opt" }
                                             }
                                             None {}
+                                        }
+                                        // 非 Map → 生成 Vec 下标访问 C（ct 保持由 method_ret 决定）
+                                        if ct != "al_opt" {
+                                            let idx_c = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                                            let base_c2 = c_expr(ib, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                                            ct = "al_vec_get(" + base_c2 + ", " + idx_c + ")"
                                         }
                                     }
                                 }
