@@ -942,7 +942,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                                     let mc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
                                     let idx_c = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
                                     let vc = c_expr(args[1], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
-                                    let et = second_type_arg(mt)
+                                    let et = first_type_arg(mt)
                                     let ect = c_type(Some(et), user_types)
                                     return "({ " + mc + ".data[" + idx_c + "] = (" + ect + ")(" + vc + "); })"
                                 }
