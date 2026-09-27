@@ -931,9 +931,14 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                                 }
                             }
                             None {
-                                // 接收者为方法调用链(如 rest.trim().len())→ String 语义
+                                // 接收者为 String 方法调用链(如 rest.trim().len())→ al_chars_len;
+                                // split 类返回 Vec → 保持 .len
                                 match base {
-                                    ECall(_, _) { return "al_chars_len(" + base_c + ")" }
+                                    ECall(EField(_, mname2), _) {
+                                        if mname2 == "trim" || mname2 == "replace" || mname2 == "substr" {
+                                            return "al_chars_len(" + base_c + ")"
+                                        }
+                                    }
                                     _ {}
                                 }
                             }
