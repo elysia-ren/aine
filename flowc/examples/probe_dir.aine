@@ -1,0 +1,14 @@
+fn main() {
+    let src_path = "E:/个人项目/Awen文档/awen-proto-aine/src/_cbuild.aine"
+    var dir_end = 0
+    var ci = 0
+    for ch in src_path {
+        if ch == "/" { dir_end = ci + 1 }
+        if ch == "\\" { dir_end = ci + 1 }
+        ci += 1
+    }
+    let src_dir = src_path[..dir_end]
+    print(f"dir=[{src_dir}] end={dir_end}")
+    let src = read_file(src_dir + "cjk.aine")
+    print(f"cjk_ok={src.contains(\"CJK\")}")
+}

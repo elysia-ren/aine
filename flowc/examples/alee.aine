@@ -2208,21 +2208,11 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
 
 // program -> C
 fn c_program(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>) -> String {
-    // 模块打平入口：mod name; -> 读入 name.aine（根目录固定 examples/，自举期限制）
-    let flr = flatten_stmts(program, "examples/", [])
-    match flr {
-        Err(e) {
-            return "/* module flatten error: " + e + " */"
-        }
-        Ok(r) {
-            // 独立闭包脱糖：let f = (x: T) => body → 顶层 fn f(...)
-            let dprog = desugar_closures(r.out)
-            // 值语义（B5-M29）：var-from-var 的 move/clone
-            let sem2 = value_semantics(dprog)
-            let vf2 = valueal_lite(sem2.program)
-            return c_program_flat(vf2.program, collect_user_types(vf2.program), collect_variant_names(vf2.program), collect_variant_owners(vf2.program), collect_fn_names(vf2.program), collect_fn_returns(vf2.program), collect_var_names(vf2.program), collect_var_types(vf2.program), collect_fn_ptypes(vf2.program), collect_enum_ty_names(vf2.program), collect_enum_variant_lists(vf2.program))
-        }
-    }
+    // 调用方已 flatten，不再重复（二次 flatten 硬编码 examples/ 导致 Awen 构建退化）
+    let dprog = desugar_closures(program)
+    let sem2 = value_semantics(dprog)
+    let vf2 = valueal_lite(sem2.program)
+    return c_program_flat(vf2.program, collect_user_types(vf2.program), collect_variant_names(vf2.program), collect_variant_owners(vf2.program), collect_fn_names(vf2.program), collect_fn_returns(vf2.program), collect_var_names(vf2.program), collect_var_types(vf2.program), collect_fn_ptypes(vf2.program), collect_enum_ty_names(vf2.program), collect_enum_variant_lists(vf2.program))
 }
 
 

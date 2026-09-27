@@ -1,0 +1,6 @@
+fn main() {
+    let a = read_file("E:/个人项目/Awen文档/awen-proto-aine/src/cjk.aine")
+    print(f"forward={a.contains(\"CJK\")}")
+    let b = read_file("E:\\个人项目\\Awen文档\\awen-proto-aine\\src\\cjk.aine")
+    print(f"back={b.contains(\"CJK\")}")
+}

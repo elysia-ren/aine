@@ -1,0 +1,6 @@
+fn main() {
+    let v = read_file("\\\\?\\E:\\个人项目\\Awen文档\\awen-proto-aine\\src\\cjk.aine")
+    print(f"verbatim={v.contains(\"CJK\")}")
+    let head = v[0..8]
+    print(head)
+}
