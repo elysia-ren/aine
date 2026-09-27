@@ -122,6 +122,15 @@ fn tokenize(src: String) -> Vec<Token> {
         }
         if is_digit(c) {
             let start = i
+            // hex 字面量 0x/0X
+            if c == "0" && i + 1 < len && (src[i + 1] == "x" || src[i + 1] == "X") {
+                i += 2
+                while i < len && (is_digit(src[i]) || (src[i] >= "a" && src[i] <= "f") || (src[i] >= "A" && src[i] <= "F")) {
+                    i += 1
+                }
+                tokens.push(Token { kind: TInt text: src[start..i] })
+                continue
+            }
             while i < len && is_digit(src[i]) {
                 i += 1
             }
