@@ -1,0 +1,25 @@
+// 自举codegen回归: 用户枚举 == / Option 比较 / 变体绑定
+enum Cmd {
+    Math
+    Code
+}
+
+fn lookup(n: String) -> Option<Cmd> {
+    if n == "m" {
+        return Some(Math)
+    }
+    return None
+}
+
+fn is_math(c: Cmd) -> bool {
+    return c == Math
+}
+
+fn main() {
+    print(is_math(Math))
+    let r = lookup("m")
+    match r {
+        Some(c) { print("found") }
+        None { print("no") }
+    }
+}

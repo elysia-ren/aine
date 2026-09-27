@@ -1,0 +1,26 @@
+enum Cmd {
+    Math
+    Code
+}
+
+fn lookup(n: String) -> Option<Cmd> {
+    if n == "m" {
+        return Some(Math)
+    }
+    return None
+}
+
+fn main() {
+    let raw = lookup("m")
+    let in_raw = match raw {
+        Some(cmd) { true }
+        None { false }
+    }
+    if in_raw {
+        let c = match raw {
+            Some(c2) { c2 }
+            None { Math }
+        }
+        print(c == Math)
+    }
+}

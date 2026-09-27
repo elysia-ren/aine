@@ -386,7 +386,7 @@ fn tck_program(program: Vec<Stmt>) -> Vec<String> {
                     seed_n.push(pnames[pi])
                     seed_t.push(ptypes[pi])
                 }
-                let fn_vi = var_info_of_stmts(body, fnames_all, freturns, seed_n, seed_t, collect_enum_variant_names(program), collect_enum_variant_ftypes(program), snames, sfnames, sftypes)
+                let fn_vi = var_info_of_stmts(body, fnames_all, freturns, seed_n, seed_t, collect_enum_variant_names(program), collect_enum_variant_ftypes(program), snames, sfnames, sftypes, varnames2, varowners2)
                 let sub = tck_stmts(body, name, fnames_all, fptypes, freturns, pnames, fn_vi.names, fn_vi.types, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
                 for d in sub { diags.push(d) }
             }

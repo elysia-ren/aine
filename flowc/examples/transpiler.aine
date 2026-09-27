@@ -121,6 +121,122 @@ struct VarInfo {
     types: Vec<String>
 }
 
+// ---------- C 关键字规避 ----------
+// 用户标识符与 C 关键字同名(如字段名 inline)会生成非法 C。
+// 统一在 codegen 前做 AST 级重命名: kw → kw + "_a"，声明与引用同过此关保持一致。
+// 仅覆盖 C 关键字中非 Aine 保留字的子集(true/false/bool 等排除，防误伤字面量)。
+fn ckw_is_kw(s: String) -> bool {
+    return s == "inline" || s == "register" || s == "volatile" || s == "auto" || s == "signed" || s == "unsigned" || s == "short" || s == "long" || s == "restrict" || s == "typedef" || s == "union" || s == "switch" || s == "case" || s == "default" || s == "do" || s == "goto" || s == "sizeof" || s == "const" || s == "static" || s == "int" || s == "char" || s == "float" || s == "double" || s == "void"
+}
+
+fn ckw_escape(s: String) -> String {
+    if ckw_is_kw(s) {
+        return s + "_a"
+    }
+    return s
+}
+
+fn ckw_fix_expr(e: Expr) -> Expr {
+    match e {
+        EIdent(n) { return EIdent(ckw_escape(n)) }
+        EField(b, f) { return EField(ckw_fix_expr(b), ckw_escape(f)) }
+        EBin(op, l, r) { return EBin(op, ckw_fix_expr(l), ckw_fix_expr(r)) }
+        EUnary(op, x) { return EUnary(op, ckw_fix_expr(x)) }
+        ECall(c, args) {
+            var na: Vec<Expr> = []
+            for a in args { na.push(ckw_fix_expr(a)) }
+            return ECall(ckw_fix_expr(c), na)
+        }
+        EBlock(ss) { return EBlock(ckw_fix_stmts(ss)) }
+        EVec(items) {
+            var ni: Vec<Expr> = []
+            for it in items { ni.push(ckw_fix_expr(it)) }
+            return EVec(ni)
+        }
+        EStruct(ty, fs) {
+            var nf: Vec<StructField> = []
+            for f in fs {
+                nf.push(StructField { name: ckw_escape(f.name) value: ckw_fix_expr(f.value) })
+            }
+            return EStruct(ty, nf)
+        }
+        ETry(x) { return ETry(ckw_fix_expr(x)) }
+        ERange(a, b) { return ERange(ckw_fix_expr(a), ckw_fix_expr(b)) }
+        EClosure(ps, body) {
+            var np: Vec<Param> = []
+            for p in ps {
+                np.push(Param { name: ckw_escape(p.name) ty: p.ty })
+            }
+            return EClosure(np, ckw_fix_expr(body))
+        }
+        EIndex(b, i) { return EIndex(ckw_fix_expr(b), ckw_fix_expr(i)) }
+        EIf(c, t, f2) { return EIf(ckw_fix_expr(c), ckw_fix_stmts(t), ckw_fix_stmts(f2)) }
+        EMatch(s, arms) {
+            var na2: Vec<MatchArm> = []
+            for arm in arms {
+                // 模式串内绑定名暂不重写(需解析模式串, 后续项)
+                na2.push(MatchArm { pat: arm.pat body: ckw_fix_stmt(arm.body) })
+            }
+            return EMatch(ckw_fix_expr(s), na2)
+        }
+        _ { return e }
+    }
+}
+
+fn ckw_fix_stmt(s: Stmt) -> Stmt {
+    match s {
+        SLet(n, m, ty, init) { return SLet(ckw_escape(n), m, ty, ckw_fix_expr(init)) }
+        SIf(c, a, b) { return SIf(ckw_fix_expr(c), ckw_fix_stmts(a), ckw_fix_stmts(b)) }
+        SWhile(c, b) { return SWhile(ckw_fix_expr(c), ckw_fix_stmts(b)) }
+        SFor(v, it, b) { return SFor(ckw_escape(v), ckw_fix_expr(it), ckw_fix_stmts(b)) }
+        SReturn(eo) {
+            match eo {
+                Some(x) { return SReturn(Some(ckw_fix_expr(x))) }
+                None { return s }
+            }
+        }
+        SExpr(e) { return SExpr(ckw_fix_expr(e)) }
+        SBlock(ss) { return SBlock(ckw_fix_stmts(ss)) }
+        SAssign(n, op, rhs) { return SAssign(ckw_escape(n), op, ckw_fix_expr(rhs)) }
+        SAssignIdx(n, idx, op, rhs) { return SAssignIdx(ckw_escape(n), ckw_fix_expr(idx), op, ckw_fix_expr(rhs)) }
+        SDef(n, ps, ret, b) {
+            var np: Vec<Param> = []
+            for p in ps {
+                np.push(Param { name: ckw_escape(p.name) ty: p.ty })
+            }
+            return SDef(ckw_escape(n), np, ret, ckw_fix_stmts(b))
+        }
+        SStruct(n, fs) {
+            var nf: Vec<Field> = []
+            for f in fs {
+                nf.push(Field { name: ckw_escape(f.name) ty: f.ty })
+            }
+            return SStruct(n, nf)
+        }
+        SImpl(ty, ms) {
+            var nm: Vec<Stmt> = []
+            for m in ms { nm.push(ckw_fix_stmt(m)) }
+            return SImpl(ty, nm)
+        }
+        SGo(det, ss) { return SGo(det, ckw_fix_stmts(ss)) }
+        SUi(ss) { return SUi(ckw_fix_stmts(ss)) }
+        SGlobalVar(n, ty, init) { return SGlobalVar(ckw_escape(n), ty, ckw_fix_expr(init)) }
+        _ { return s }
+    }
+}
+
+fn ckw_fix_stmts(stmts: Vec<Stmt>) -> Vec<Stmt> {
+    var out: Vec<Stmt> = []
+    for s in stmts {
+        out.push(ckw_fix_stmt(s))
+    }
+    return out
+}
+
+fn ckw_fix_program(program: Vec<Stmt>) -> Vec<Stmt> {
+    return ckw_fix_stmts(program)
+}
+
 module altype;
 module altypeck;
 module alvalueal;
@@ -168,7 +284,10 @@ fn main() -> Result<(), String> {
         if val_diags.len() > 0 {
             return Err(f"所有权检查失败: {val_diags.len()} 处")
         }
-        let c = c_program(p, collect_user_types(p), collect_variant_names(p), collect_variant_owners(p), collect_fn_names(p), collect_fn_returns(p), collect_var_names(p), collect_var_types(p), collect_fn_ptypes(p), collect_enum_ty_names(p), collect_enum_variant_lists(p))
+        // c_program 输入契约 = flatten 后的程序(内部自做 desugar/valueal 并重新 collect)
+        // C 关键字规避重命名先于 tck/valuecheck/codegen, 保证声明引用一致
+        let fp = ckw_fix_program(frbok.out)
+        let c = c_program(fp, collect_user_types(fp), collect_variant_names(fp), collect_variant_owners(fp), collect_fn_names(fp), collect_fn_returns(fp), collect_var_names(fp), collect_var_types(fp), collect_fn_ptypes(fp), collect_enum_ty_names(fp), collect_enum_variant_lists(fp))
         if !write_file(cli_args[1], c) {
             return Err("无法写入输出: " + cli_args[1])
         }
@@ -259,7 +378,7 @@ fn main() -> Result<(), String> {
     if !c11.contains("char* describe(al_opt o)") { return Err("case11 sig") }
     if !c11.contains("al_some_s(\"hi\")") { return Err("case11 some") }
     if !c11.contains("al_none()") { return Err("case11 none") }
-    if !c11.contains("auto x = o.data.s;") { return Err("case11 bind") }
+    if !c11.contains("char* x = o.data.s;") { return Err("case11 bind") }
     if !c11.contains("o.tag == 1") || !c11.contains("o.tag == 0") { return Err("case11 labels") }
     print("case11 option OK")
 
@@ -268,7 +387,7 @@ fn main() -> Result<(), String> {
     let p12 = parse_program(tokenize(src12))?
     let c12 = c_program(p12, collect_user_types(p12), collect_variant_names(p12), collect_variant_owners(p12), collect_fn_names(p12), collect_fn_returns(p12), collect_var_names(p12), collect_var_types(p12), collect_fn_ptypes(p12), collect_enum_ty_names(p12), collect_enum_variant_lists(p12))
     if !c12.contains("al_some_i(5)") { return Err("case12 some-i") }
-    if !c12.contains("auto x = r.data.i;") { return Err("case12 bind-i") }
+    if !c12.contains("int x = r.data.i;") { return Err("case12 bind-i") }
     if !c12.contains("(x == 5)") { return Err("case12 cmp") }
     print("case12 option-i32 OK")
 

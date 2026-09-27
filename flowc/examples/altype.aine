@@ -104,10 +104,10 @@ fn expr_ctype(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec
                     let ft = struct_field_ty(t, fname, snames, sfnames, sftypes)
                     match ft {
                         Some(ftv) { return c_type(Some(ftv), user_types) }
-                        None { return "int" }
+                        None { return "" }
                     }
                 }
-                None { return "int" }
+                None { return "" }
             }
         }
         ECall(callee, args) {
@@ -190,12 +190,35 @@ fn expr_ctype(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec
 
 
 // Some(x)/Ok(x) 载荷表达式 -> al_opt 联合体成员名
-fn some_member(e: Expr, user_types: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>) -> String {
+fn some_member(e: Expr, user_types: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, vnames2: Vec<String>, vowners2: Vec<String>) -> String {
     match e {
         EStr(s) { return "s" }
         EInt(n) { return "i" }
         EFloat(n) { return "f" }
         EVec(items) { return "v" }
+        // 结构体字面量载荷 → 用户类型成员 t_<T>(堆复制语义)
+        EStruct(ty0, _) {
+            if contains_str(user_types, ty0) { return "t_" + ty0 }
+            return "p"
+        }
+        // 嵌套函数调用(如 Some(MarkerKind_MkExplicit(cmd))) → 按函数返回类型
+        ECall(cf2, ca2) {
+            match cf2 {
+                EIdent(cfn2) {
+                    // 变体构造调用 → 其所属枚举即载荷类型
+                    match variant_owner(cfn2, vnames2, vowners2) {
+                        Some(o2) { return payload_member(Some(o2), user_types) }
+                        None {}
+                    }
+                    match fn_return(cfn2, fnames, freturns) {
+                        Some(rt2) { return payload_member(Some(rt2), user_types) }
+                        None {}
+                    }
+                }
+                _ {}
+            }
+            return "p"
+        }
         // 嵌套枚举构造（EMatch/EClosure 等）→ 用户枚举载荷 t_<T>
         EMatch(ms2, ma2) { return "t_Stmt" }
         EClosure(ps2, b2) { return "t_Expr" }
@@ -441,6 +464,8 @@ fn pat_bind_lines(pat: String, scrut_c: String, mem: String, err_mem: String, vf
 
         let idxs = str_split(path, ",")
         var access = scrut_c
+        // 本绑定最终字段的 Aine 类型(声明具体 C 类型用; 空 = 未知)
+        var last_ft = ""
         // 迭代边界 = 该绑定的路径层数（非模式构造器层数）：
         // 纯标识符绑定的路径短于 ctor 深度（兄弟变体也占 ctor 层）
         for k in 0..idxs.len() {
@@ -450,6 +475,9 @@ fn pat_bind_lines(pat: String, scrut_c: String, mem: String, err_mem: String, vf
                     access = access + ".data." + mem
                     if mem.starts_with("t_") {
                         access = "(*" + access + ")"
+                    }
+                    if scrut_ty.starts_with("Option<") || scrut_ty.starts_with("Result<") {
+                        last_ft = first_type_arg(scrut_ty)
                     }
                     // p 载荷带具体类型（Map 等）→ 解引用 + 显式转型
                     if mem == "p" && scrut_ty.starts_with("Option<") {
@@ -466,6 +494,7 @@ fn pat_bind_lines(pat: String, scrut_c: String, mem: String, err_mem: String, vf
                     let ft = enum_field_ty(parent, pidx, vfnames, vftypes)
                     match ft {
                         Some(ftv) {
+                            last_ft = ftv
                             if ftv.starts_with("Option<") || ftv.starts_with("Result<") {
                                 pm = payload_member(Some(first_type_arg(ftv)), user_types)
                             }
@@ -486,6 +515,9 @@ fn pat_bind_lines(pat: String, scrut_c: String, mem: String, err_mem: String, vf
                     if err_mem.starts_with("t_") {
                         access = "*" + access
                     }
+                    if scrut_ty.starts_with("Result<") {
+                        last_ft = second_type_arg(scrut_ty)
+                    }
                 } else {
                     let parent = ctors[k - 1]
                     let pidx = idxs[k - 1]
@@ -494,6 +526,7 @@ fn pat_bind_lines(pat: String, scrut_c: String, mem: String, err_mem: String, vf
                     match ft {
                         Some(ftv) {
                             if ftv.starts_with("Option<") || ftv.starts_with("Result<") {
+                                last_ft = first_type_arg(ftv)
                                 pm = payload_member(Some(first_type_arg(ftv)), user_types)
                             }
                         }
@@ -510,6 +543,7 @@ fn pat_bind_lines(pat: String, scrut_c: String, mem: String, err_mem: String, vf
                 let ft3 = enum_field_ty(part, idxs[k], vfnames, vftypes)
                 match ft3 {
                     Some(ftv3) {
+                        last_ft = ftv3
                         // 自递归载荷(类型 == 被匹配枚举自身)在 union 中为指针。
                         // scrut_ty 已知时直接比较; 未知(嵌套绑定)时用构造器所属枚举判定
                         // 存储不变量(SEnum 发射): 载荷类型 == 所属枚举自身 → 指针, 否则按值。
@@ -532,14 +566,21 @@ fn pat_bind_lines(pat: String, scrut_c: String, mem: String, err_mem: String, vf
                 }
             }
         }
-        // 单层 Some/Ok 载荷：p 载荷（Map 等）必须带类型（data.p 为 void*，auto 会让后续字段访问失效）；
-        // i/f/s/v 等原始载荷保持 auto（兼容既有断言与语义）
-        var decl_ty = "auto"
+        // 绑定声明一律用具体 C 类型（auto 在 C99 非 C23 下退化为隐式 int, 编译必错）:
+        // 已知字段类型 → c_type; 兜底 void*
+        var decl_ty = "void*"
+        if last_ft != "" {
+            let cct = c_type(Some(last_ft), user_types)
+            if cct != "" {
+                decl_ty = cct
+            }
+        }
+        // 旧推断路径保留: Option<T> 单层绑定的显式转型一致性
         let vt = first_type_arg(scrut_ty)
-        if vt != "" && ctors.len() == 1 && idxs.len() == 1 {
+        if decl_ty == "void*" && vt != "" && ctors.len() == 1 && idxs.len() == 1 {
             if ctors[0] == "Some" || ctors[0] == "Ok" {
                 let vct = c_type(Some(vt), user_types)
-                if vct == "al_map" || vct == "al_vec" || vct.starts_with("struct ") {
+                if vct != "" {
                     decl_ty = vct
                 }
             }
@@ -682,7 +723,7 @@ fn fn_return(name: String, fnames: Vec<String>, freturns: Vec<String>) -> Option
 
 
 // 递归收集语句块内的变量（含 if/while/for/block/match 嵌套；seed 含函数参数）
-fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Vec<String>, seed_names: Vec<String>, seed_types: Vec<String>, vfnames: Vec<String>, vftypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>) -> VarInfo {
+fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Vec<String>, seed_names: Vec<String>, seed_types: Vec<String>, vfnames: Vec<String>, vftypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, evnames: Vec<String>, eowners: Vec<String>) -> VarInfo {
     var names: Vec<String> = []
     for sn in seed_names { names.push(sn) }
     var types: Vec<String> = []
@@ -704,6 +745,12 @@ fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Ve
                                 var okt = "infer"
                                 match callee2 {
                                     EIdent(fname2) {
+                                        // 变体构造调用 → 所属枚举类型
+                                        let vown2 = variant_owner(fname2, evnames, eowners)
+                                        match vown2 {
+                                            Some(o2) { okt = o2 }
+                                            None {}
+                                        }
                                         if fname2 == "read_file" || fname2 == "al_strdup_lit" || fname2 == "get_text" {
                                             // 内建 read_file / al_strdup_lit → String
                                             okt = "String"
@@ -860,6 +907,13 @@ fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Ve
                                     }
                                 }
                             }
+                            EIdent(n3) {
+                                let vown3 = variant_owner(n3, evnames, eowners)
+                                match vown3 {
+                                    Some(o3) { types.push(o3) }
+                                    None { types.push("infer") }
+                                }
+                            }
                             EInt(n3) { types.push("i32") }
                             EFloat(f3) { types.push("f64") }
                             EBin(op2, l2, r2) {
@@ -922,25 +976,25 @@ fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Ve
                     _ {}
                 }
                 types.push(et)
-                let sub = var_info_of_stmts(body2, all_fnames, all_freturns, names, types, vfnames, vftypes, snames, sfnames, sftypes)
+                let sub = var_info_of_stmts(body2, all_fnames, all_freturns, names, types, vfnames, vftypes, snames, sfnames, sftypes, evnames, eowners)
                 names = sub.names
                 types = sub.types
             }
             SIf(_, then_s, else_s) {
-                let sub = var_info_of_stmts(then_s, all_fnames, all_freturns, names, types, vfnames, vftypes, snames, sfnames, sftypes)
+                let sub = var_info_of_stmts(then_s, all_fnames, all_freturns, names, types, vfnames, vftypes, snames, sfnames, sftypes, evnames, eowners)
                 names = sub.names
                 types = sub.types
-                let sub2 = var_info_of_stmts(else_s, all_fnames, all_freturns, names, types, vfnames, vftypes, snames, sfnames, sftypes)
+                let sub2 = var_info_of_stmts(else_s, all_fnames, all_freturns, names, types, vfnames, vftypes, snames, sfnames, sftypes, evnames, eowners)
                 names = sub2.names
                 types = sub2.types
             }
             SWhile(_, body_s) {
-                let sub = var_info_of_stmts(body_s, all_fnames, all_freturns, names, types, vfnames, vftypes, snames, sfnames, sftypes)
+                let sub = var_info_of_stmts(body_s, all_fnames, all_freturns, names, types, vfnames, vftypes, snames, sfnames, sftypes, evnames, eowners)
                 names = sub.names
                 types = sub.types
             }
             SBlock(stmts2) {
-                let sub = var_info_of_stmts(stmts2, all_fnames, all_freturns, names, types, vfnames, vftypes, snames, sfnames, sftypes)
+                let sub = var_info_of_stmts(stmts2, all_fnames, all_freturns, names, types, vfnames, vftypes, snames, sfnames, sftypes, evnames, eowners)
                 names = sub.names
                 types = sub.types
             }
@@ -991,7 +1045,7 @@ fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Ve
                             }
                         }
                     }
-                    let sub = var_info_of_stmts([arm.body], all_fnames, all_freturns, names, types, vfnames, vftypes, snames, sfnames, sftypes)
+                    let sub = var_info_of_stmts([arm.body], all_fnames, all_freturns, names, types, vfnames, vftypes, snames, sfnames, sftypes, evnames, eowners)
                     names = sub.names
                     types = sub.types
                 }
@@ -1004,12 +1058,17 @@ fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Ve
 
 
 fn var_type(name: String, vnames: Vec<String>, vtypes: Vec<String>) -> Option<String> {
+    // 同名重声明(遮蔽)取最后一条 — 配合语句级前缀表实现位置敏感解析
     var idx = 0
+    var hit = 0 - 1
     for vn in vnames {
         if vn == name {
-            return Some(vtypes[idx])
+            hit = idx
         }
         idx += 1
+    }
+    if hit >= 0 {
+        return Some(vtypes[hit])
     }
     return None
 }

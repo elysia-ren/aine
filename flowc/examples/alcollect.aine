@@ -240,7 +240,7 @@ fn collect_var_names(program: Vec<Stmt>) -> Vec<String> {
             SGlobalVar(name, ty, init) { ns.push(name) }
             SDef(name, params, ret, body_s) {
                 for p in params { ns.push(p.name) }
-                let vi = var_info_of_stmts(body_s, all_fnames, all_freturns, [], [], collect_enum_variant_names(program), collect_enum_variant_ftypes(program), collect_struct_snames(program), collect_struct_fnames(program), collect_struct_ftypes(program))
+                let vi = var_info_of_stmts(body_s, all_fnames, all_freturns, [], [], collect_enum_variant_names(program), collect_enum_variant_ftypes(program), collect_struct_snames(program), collect_struct_fnames(program), collect_struct_ftypes(program), collect_variant_names(program), collect_variant_owners(program))
                 for n in vi.names { ns.push(n) }
             }
             _ {}
@@ -264,7 +264,7 @@ fn collect_var_types(program: Vec<Stmt>) -> Vec<String> {
             }
             SDef(name, params, ret, body_s) {
                 for p in params { ts.push(p.ty) }
-                let vi = var_info_of_stmts(body_s, all_fnames, all_freturns, [], [], collect_enum_variant_names(program), collect_enum_variant_ftypes(program), collect_struct_snames(program), collect_struct_fnames(program), collect_struct_ftypes(program))
+                let vi = var_info_of_stmts(body_s, all_fnames, all_freturns, [], [], collect_enum_variant_names(program), collect_enum_variant_ftypes(program), collect_struct_snames(program), collect_struct_fnames(program), collect_struct_ftypes(program), collect_variant_names(program), collect_variant_owners(program))
                 for t in vi.types { ts.push(t) }
             }
             _ {}
@@ -307,7 +307,7 @@ fn collect_fn_var_infos(program: Vec<Stmt>) -> Vec<VarInfo> {
                     names.push(p.name)
                     types.push(p.ty)
                 }
-                let vi = var_info_of_stmts(body_s, all_fnames, all_freturns, names, types, collect_enum_variant_names(program), collect_enum_variant_ftypes(program), collect_struct_snames(program), collect_struct_fnames(program), collect_struct_ftypes(program))
+                let vi = var_info_of_stmts(body_s, all_fnames, all_freturns, names, types, collect_enum_variant_names(program), collect_enum_variant_ftypes(program), collect_struct_snames(program), collect_struct_fnames(program), collect_struct_ftypes(program), collect_variant_names(program), collect_variant_owners(program))
                 infos.push(vi)
             }
             SImpl(ty, methods) {
@@ -320,7 +320,7 @@ fn collect_fn_var_infos(program: Vec<Stmt>) -> Vec<VarInfo> {
                                 names.push(p.name)
                                 if p.ty == "self" { types.push(ty) } else { types.push(p.ty) }
                             }
-                            let vi = var_info_of_stmts(mbody, all_fnames, all_freturns, names, types, collect_enum_variant_names(program), collect_enum_variant_ftypes(program), collect_struct_snames(program), collect_struct_fnames(program), collect_struct_ftypes(program))
+                            let vi = var_info_of_stmts(mbody, all_fnames, all_freturns, names, types, collect_enum_variant_names(program), collect_enum_variant_ftypes(program), collect_struct_snames(program), collect_struct_fnames(program), collect_struct_ftypes(program), collect_variant_names(program), collect_variant_owners(program))
                             infos.push(vi)
                         }
                         _ {}

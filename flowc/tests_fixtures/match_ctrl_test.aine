@@ -1,0 +1,37 @@
+enum Cmd {
+    Math
+    Code
+}
+
+struct ParseErr {
+    msg: String
+    hint: Option<String>
+}
+
+fn lookup(n: String) -> Option<Cmd> {
+    if n == "m" {
+        return Some(Math)
+    }
+    return None
+}
+
+fn read_value(s: String, i: i32) -> Option<Cmd> {
+    let cmd_opt = lookup(s)
+    let cmd = match cmd_opt {
+        Some(c) { c }
+        None {
+            return Err(ParseErr {
+            msg: f"未注册的命令 '@[{s}]'(核心规范 §11 白名单)",
+            hint: None,
+        })
+        }
+    }
+    if cmd == Math || cmd == Code {
+        return Some(cmd)
+    }
+    return None
+}
+
+fn main() {
+    print("x")
+}

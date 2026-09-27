@@ -1,0 +1,19 @@
+enum Cmd {
+    Math
+    Code
+}
+
+fn lookup(n: String) -> Option<Cmd> {
+    if n == "m" {
+        return Some(Math)
+    }
+    return None
+}
+
+fn chk(cmd: Cmd, cn: String) -> bool {
+    return lookup(cn) == Some(cmd)
+}
+
+fn main() {
+    print(chk(Math, "m"))
+}

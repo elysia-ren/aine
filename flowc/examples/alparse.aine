@@ -577,8 +577,9 @@ fn parse_stmt(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
                 return Ok(SPResult { stmt: SReturn(None) next: nxt })
             }
             // G2.0 ⑥：语句关键字不续读（防吞下一语句为返回值）
+            // 例外: match/if 是表达式形态(return match {...} / return if ...) 必须续读
             if after.kind == TIdent {
-                if after.text == "let" || after.text == "var" || after.text == "if" || after.text == "match" || after.text == "for" || after.text == "while" || after.text == "return" || after.text == "break" || after.text == "continue" {
+                if after.text == "let" || after.text == "var" || after.text == "for" || after.text == "while" || after.text == "return" || after.text == "break" || after.text == "continue" {
                     return Ok(SPResult { stmt: SReturn(None) next: i + 1 })
                 }
             }
@@ -1540,7 +1541,7 @@ fn desugar_closures(program: Vec<Stmt>) -> Vec<Stmt> {
                                         dbody.push(s_ret)
                                         // 捕获分析：自由变量 = 外层函数的局部变量/参数
                                         // → 提升为隐藏前缀参数（调用点同步补传）
-                                        let vi = var_info_of_stmts(body_s, fnames, freturns, pnames, ptypes, [], [], [], [], [])
+                                        let vi = var_info_of_stmts(body_s, fnames, freturns, pnames, ptypes, [], [], [], [], [], [], [])
                                         let body_txt = stringify(bexpr)
                                         var caps: Vec<Param> = []
                                         var cap_call_args: Vec<Expr> = []
