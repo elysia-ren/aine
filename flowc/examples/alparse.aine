@@ -858,7 +858,7 @@ fn parse_struct(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
     j += 1
     var fields: Vec<Field> = []
     while true {
-        while tokens[j].kind == TSemi {
+        while tokens[j].kind == TSemi || tokens[j].text == "," {
             j += 1
         }
         if tokens[j].text == "}" {

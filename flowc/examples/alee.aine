@@ -2328,7 +2328,7 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
     out = out + "char* al_map_get_s(al_map m, const char* k) { long i = al_map_find(&m, k); if (i < 0) { fprintf(stderr, \"Map 中不存在键: %s\\n\", k); abort(); } return ((char**)m.vals.data)[i]; }\n"
     out = out + "void al_assert(int cond, char* msg) { if (!cond) { fprintf(stderr, \"断言失败: %s\\n\", msg); abort(); } }\n"
     out = out + "#include <time.h>\n"
-    out = out + "long now_ms(void) { struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts); return ts.tv_sec * 1000 + ts.tv_nsec / 1000000; }\n"
+    out = out + "long long now_ms(void) { struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts); return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000; }\n"
     out = out + "long codepoint_at(char* s, long idx) {\n"
     out = out + "  long i = 0; long cp = 0;\n"
     out = out + "  while (s[i] && i <= idx) {\n"

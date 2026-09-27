@@ -1,0 +1,10 @@
+fn main() {
+    let back = read_bytes("g_gap.bin")
+    print(f"back len={back.len()} b0={back.get(0)}")
+    let enc = base64_encode(back)
+    print(f"enc='{enc}'")
+    let s = bytes_to_string(enc)
+    print(f"s='{s}'")
+    let s2 = bytes_to_string(base64_encode(read_bytes("g_gap.bin")))
+    print(f"s2='{s2}'")
+}

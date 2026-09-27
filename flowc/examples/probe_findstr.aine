@@ -1,0 +1,15 @@
+fn find_str(hay: String, needle: String, from: i32) -> i32 {
+    let hn = hay.len()
+    let nn = needle.len()
+    if nn == 0 { return from }
+    var i: i32 = from
+    while i + nn <= hn {
+        if hay[i..(i + nn)] == needle { return i }
+        i += 1
+    }
+    return -1
+}
+
+fn main() {
+    print(find_str("hello world", "world", 0))
+}

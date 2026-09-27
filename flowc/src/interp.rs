@@ -1917,7 +1917,7 @@ impl Interp {
                         Ok(s) => Ok(Value::Str(s.into())),
                         Err(e) => Ok(Value::Str(format!("[bytes_to_string error: {}]", e).into())),
                     },
-                    None => Ok(Value::Str("".into())),
+                    None => Ok(Value::Str("[bytes_to_string error: 需要 Vec<Int> 字节参数]".into())),
                 }
             }
             // Vec.concat: 追加在 Vec 方法区

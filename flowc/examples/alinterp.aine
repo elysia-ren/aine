@@ -273,6 +273,68 @@ fn ai_as_str(v: AVal) -> String {
     }
 }
 
+// 码点列表 → String(手工 UTF-8 编码, 经 bytes_to_string 合成)
+fn ai_codes_to_string(codes: Vec<i32>) -> String {
+    var bytes: Vec<i32> = []
+    var i = 0
+    while i < codes.len() {
+        let cp = codes[i]
+        if cp < 0 {
+            bytes.push(63)
+        } else if cp < 128 {
+            bytes.push(cp)
+        } else if cp < 2048 {
+            bytes.push(192 + cp / 64)
+            bytes.push(128 + cp % 64)
+        } else if cp < 65536 {
+            bytes.push(224 + cp / 4096)
+            bytes.push(128 + (cp / 64) % 64)
+            bytes.push(128 + cp % 64)
+        } else {
+            bytes.push(240 + cp / 262144)
+            bytes.push(128 + (cp / 4096) % 64)
+            bytes.push(128 + (cp / 64) % 64)
+            bytes.push(128 + cp % 64)
+        }
+        i = i + 1
+    }
+    return bytes_to_string(bytes)
+}
+
+// 名字里第一个 '.' 的下标(没有则 -1); "p.x" → 1
+fn ai_dotted_dot(name: String) -> i32 {
+    var i = 0
+    while i < name.len() {
+        if name[i] == "." {
+            return i
+        }
+        i += 1
+    }
+    return -1
+}
+
+// s[0..end)
+fn ai_str_head(s: String, end: i32) -> String {
+    var out = ""
+    var i = 0
+    while i < end {
+        out = out + s[i]
+        i += 1
+    }
+    return out
+}
+
+// s[start..len)
+fn ai_str_tail(s: String, start: i32) -> String {
+    var out = ""
+    var i = start
+    while i < s.len() {
+        out = out + s[i]
+        i += 1
+    }
+    return out
+}
+
 // JSON 编码(Std API 双引擎一致; 支持 Int/Float/Bool/String/Vec/Map/None/Unit)
 fn ai_json_encode(v: AVal) -> String {
     match v {
@@ -927,7 +989,7 @@ fn ai_call_method(base: AVal, method: String, args: Vec<AVal>, env: Map<String, 
                     let idx = ai_as_i32(args[0])
                     if idx >= 0 && idx < items.len() {
                         var new_items: Vec<AVal> = []
-                        for k in range(0, items.len()) {
+                        for k in 0..items.len() {
                             if k != idx { new_items.push(items[k]) }
                         }
                         return AVec(new_items)
@@ -940,7 +1002,7 @@ fn ai_call_method(base: AVal, method: String, args: Vec<AVal>, env: Map<String, 
                     let idx = ai_as_i32(args[0])
                     if idx >= 0 && idx <= items.len() {
                         var new_items: Vec<AVal> = []
-                        for k in range(0, items.len()) {
+                        for k in 0..items.len() {
                             if k == idx { new_items.push(args[1]) }
                             new_items.push(items[k])
                         }
@@ -1459,15 +1521,12 @@ fn ai_expr(e: Expr, env: Map<String, AVal>, program: Index) -> AVal {
                         return ABool(false)
                     }
                     if fname == "read_bytes" {
-                        if arg_vals.len() > 0 {
-                            // 宿主内建 read_bytes 返回 Vec<Int>(0-255)，包装为 AVec
+                        if arg_vals.len() > 0 && file_exists(ai_as_str(arg_vals[0])) {
+                            // 宿主内建 read_bytes 返回 Vec<Int>(0-255)，逐项包装为 AInt
                             let raw = read_bytes(ai_as_str(arg_vals[0]))
                             var out: Vec<AVal> = []
                             for v in raw {
-                                match v {
-                                    AInt(n) { out.push(AInt(n)) }
-                                    _ {}
-                                }
+                                out.push(AInt(v))
                             }
                             return AVec(out)
                         }
@@ -1477,21 +1536,54 @@ fn ai_expr(e: Expr, env: Map<String, AVal>, program: Index) -> AVal {
                         if arg_vals.len() >= 2 {
                             match arg_vals[1] {
                                 AVec(items) {
-                                    // 逐字节用 write_file 的 append 模式不可行，改用单次 write
-                                    // write_bytes 是宿主内建，直接透传
-                                    return write_bytes(ai_as_str(arg_vals[0]), items)
+                                    // AVal 层字节 → 宿主 i32 列表后透传
+                                    var raws: Vec<i32> = []
+                                    for it in items {
+                                        raws.push(ai_as_i32(it))
+                                    }
+                                    return ABool(write_bytes(ai_as_str(arg_vals[0]), raws))
                                 }
                                 _ {}
                             }
                         }
                         return ABool(false)
                     }
+                    if fname == "base64_encode" {
+                        if arg_vals.len() > 0 {
+                            match arg_vals[0] {
+                                AVec(items) {
+                                    var raws: Vec<i32> = []
+                                    for it in items {
+                                        raws.push(ai_as_i32(it))
+                                    }
+                                    return AStr(base64_encode(raws))
+                                }
+                                AStr(s) { return AStr(base64_encode(s)) }
+                                _ {}
+                            }
+                        }
+                        return AStr("")
+                    }
+                    if fname == "base64_decode" {
+                        if arg_vals.len() > 0 {
+                            // 宿主内建返回 Vec<Int>(0-255)，逐项包装为 AInt
+                            let raw = base64_decode(ai_as_str(arg_vals[0]))
+                            var out: Vec<AVal> = []
+                            for v in raw {
+                                out.push(AInt(v))
+                            }
+                            return AVec(out)
+                        }
+                        return AVec([])
+                    }
                     if fname == "to_bytes" {
                         if arg_vals.len() > 0 {
                             let txt = ai_as_str(arg_vals[0])
                             var out: Vec<AVal> = []
-                            for ch in txt {
-                                out.push(AInt(ch as i32))
+                            var ci = 0
+                            while ci < txt.len() {
+                                out.push(AInt(txt.codepoint_at(ci)))
+                                ci = ci + 1
                             }
                             return AVec(out)
                         }
@@ -1517,6 +1609,9 @@ fn ai_expr(e: Expr, env: Map<String, AVal>, program: Index) -> AVal {
                     }
                     if fname == "now" {
                         return AInt(now())
+                    }
+                    if fname == "now_ms" {
+                        return AInt(now_ms())
                     }
                     if fname == "Map" {
                         return AMap([])
@@ -2286,7 +2381,36 @@ fn ai_stmt(s: Stmt, env: Map<String, AVal>, program: Index) -> AiFlow {
             var new_env = env
             if op == "=" {
                 let v = ai_expr(rhs, env, program)
-                new_env.set(vn, v)
+                // 字段赋值: "p.x" 形式 → 更新 AStruct 对应条目
+                let dot = ai_dotted_dot(vn)
+                if dot > 0 {
+                    let base_name = ai_str_head(vn, dot)
+                    let field_name = ai_str_tail(vn, dot + 1)
+                    let old = env.get(base_name).unwrap_or(AUnit)
+                    match old {
+                        AStruct(sname, entries) {
+                            var new_entries: Vec<AEntry> = []
+                            var hit = false
+                            for en in entries {
+                                if en.key == field_name {
+                                    new_entries.push(AEntry { key: field_name value: v })
+                                    hit = true
+                                } else {
+                                    new_entries.push(en)
+                                }
+                            }
+                            if !hit {
+                                new_entries.push(AEntry { key: field_name value: v })
+                            }
+                            new_env.set(base_name, AStruct(sname, new_entries))
+                        }
+                        _ {
+                            new_env.set(vn, v)
+                        }
+                    }
+                } else {
+                    new_env.set(vn, v)
+                }
             } else {
                 // 复合赋值 += -= *= /=
                 let old = env.get(vn).unwrap_or(AUnit)
@@ -2406,8 +2530,23 @@ fn ai_stmt(s: Stmt, env: Map<String, AVal>, program: Index) -> AiFlow {
                                     }
                                     let res = ai_call_method(bv, mname, arg_vals, env, program)
                                     var new_env = env
-                                    if mname == "push" || mname == "set" || mname == "pop" {
+                                    if mname == "push" || mname == "set" || mname == "insert" || mname == "remove" {
                                         new_env.set(bn, res)
+                                    }
+                                    if mname == "pop" {
+                                        // 语句级 pop: 丢弃弹出的返回元素, 写回去掉末尾的 Vec
+                                        match bv {
+                                            AVec(items) {
+                                                if items.len() > 0 {
+                                                    var new_items: Vec<AVal> = []
+                                                    for k in 0..items.len() - 1 {
+                                                        new_items.push(items[k])
+                                                    }
+                                                    new_env.set(bn, AVec(new_items))
+                                                }
+                                            }
+                                            _ {}
+                                        }
                                     }
                                     return AiFlow { ctrl: "ok" value: AUnit env: new_env }
                                 }

@@ -1,0 +1,12 @@
+fn main() {
+    let bytes = to_bytes("AB")
+    print(f"n={bytes.len()} first={bytes.get(0)}")
+    let enc = base64_encode(bytes)
+    print(f"enc='{enc}' len={enc.len()}")
+    let dec = base64_decode(enc)
+    print(f"dec len={dec.len()} d0={dec.get(0)}")
+    let s = bytes_to_string(dec)
+    print(f"s='{s}'")
+    let v = read_bytes("Cargo.toml")
+    print(f"file type len={v.len()}")
+}
