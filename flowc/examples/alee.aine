@@ -28,7 +28,7 @@ fn c_str_lit(s: String) -> String {
     return out + "\""
 }
 
-fn c_operand(e: Expr, is_char_side: bool, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>) -> String {
+fn c_operand(e: Expr, is_char_side: bool, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>, vfnames: Vec<String>, vftypes: Vec<String>) -> String {
     if is_char_side {
         match e {
             // 字符字面量: 转义换行/回车/制表/引号/反斜杠, 否则破坏 C 语法
@@ -56,13 +56,13 @@ fn c_operand(e: Expr, is_char_side: bool, user_types: Vec<String>, vnames: Vec<S
             _ {}
         }
     }
-    return c_expr(e, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+    return c_expr(e, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
 }
 
 
 // 字符串拼接操作数：char 值 → (char[2]){c, 0}
-fn c_str_operand(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>) -> String {
-    let c = c_expr(e, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+fn c_str_operand(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>, vfnames: Vec<String>, vftypes: Vec<String>) -> String {
+    let c = c_expr(e, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
     if is_char_typed(e, varnames, vartypes) {
         return "al_char_to_str(" + c + ")"
     }
@@ -192,14 +192,14 @@ fn ctor_arg_inner(e: Expr, enames: Vec<String>, varnames: Vec<String>, vartypes:
 
 
 // f-string 插值片段：数值 → al_num/al_fnum；字符串 → 原样
-fn fstr_piece(val: String, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, enames: Vec<String>, elists: Vec<String>, user_types: Vec<String>, vnames2: Vec<String>, vowners2: Vec<String>, fptypes: Vec<String>) -> String {
+fn fstr_piece(val: String, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, enames: Vec<String>, elists: Vec<String>, user_types: Vec<String>, vnames2: Vec<String>, vowners2: Vec<String>, fptypes: Vec<String>, vfnames: Vec<String>, vftypes: Vec<String>) -> String {
     // AST 路径（B5-M33）：整段可解析 → 走完整 c_expr（方法链/嵌套调用/索引/字段全支持）
     let toks = tokenize(val)
     let pr = parse_expr(toks, 0, 0)
     match pr {
         Ok(r) {
             if r.next < toks.len() && toks[r.next].kind == TEof {
-                let c = c_expr(r.value, user_types, vnames2, vowners2, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                let c = c_expr(r.value, user_types, vnames2, vowners2, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                 // bool 插值 → al_bool（expr_ctype 的 bool 映射为 int，需按 Aine 类型判别）
                 let bt2 = base_type(r.value, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
                 match bt2 {
@@ -372,7 +372,7 @@ fn fstr_piece(val: String, varnames: Vec<String>, vartypes: Vec<String>, fnames:
 
 
 // f-string → C：f"a{x}b" → al_strcat(al_strcat("a", piece(x)), "b")
-fn fstr_c(s: String, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, enames: Vec<String>, elists: Vec<String>, user_types: Vec<String>, vnames2: Vec<String>, vowners2: Vec<String>, fptypes: Vec<String>) -> String {
+fn fstr_c(s: String, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, enames: Vec<String>, elists: Vec<String>, user_types: Vec<String>, vnames2: Vec<String>, vowners2: Vec<String>, fptypes: Vec<String>, vfnames: Vec<String>, vftypes: Vec<String>) -> String {
 
     if s.len() < 3 {
         return "\"\""
@@ -421,7 +421,7 @@ fn fstr_c(s: String, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<S
         } else {
             let val = if p.len() > 5 { p[5..p.len()] } else { return "" }
 
-            piece = fstr_piece(val, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, enames, elists, user_types, vnames2, vowners2, fptypes)
+            piece = fstr_piece(val, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, enames, elists, user_types, vnames2, vowners2, fptypes, vfnames, vftypes)
         }
         if first_part {
             out = piece
@@ -544,11 +544,11 @@ fn expr_num_hint(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: 
 
 
 // print(...) -> printf 语句（格式 %d/%g/%s/%zu 按实参类型）
-fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>) -> String {
+fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>, vfnames: Vec<String>, vftypes: Vec<String>) -> String {
     var parts: Vec<String> = []
     var fmts: Vec<String> = []
     for a in args {
-        let pc = c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+        let pc = c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
         var f1 = "%s"
         var part = pc
         // 先按表达式类型提示选格式（覆盖 EBin/EIndex 等组合形态）
@@ -621,12 +621,12 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
 
 
 // expression -> C
-fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>) -> String {    match e {
+fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>, vfnames: Vec<String>, vftypes: Vec<String>) -> String {    match e {
         EInt(n) { return f"{n}" }
         EFloat(nf) { return f"{nf}" }
         EStr(s) {
             if s.len() >= 3 && s[0..2] == "f\"" && s[s.len() - 1] == "\"" {
-                return fstr_c(s, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, enames, elists, user_types, vnames, vowners, fptypes)
+                return fstr_c(s, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, enames, elists, user_types, vnames, vowners, fptypes, vfnames, vftypes)
             }
             return c_str_lit(s)
         }
@@ -649,15 +649,15 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 let is_str = expr_is_string(l, r, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
                 let r_is_str = expr_is_string(r, l, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
                 if is_str || r_is_str {
-                    return "al_strcat(" + c_str_operand(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ", " + c_str_operand(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                    return "al_strcat(" + c_str_operand(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ", " + c_str_operand(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
                 }
             }
             // String 比较（char*）：用 strcmp(a, b) op 0
             let l_is_str = expr_is_string(l, r, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
             let r_is_str = expr_is_string(r, l, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
             if l_is_str && r_is_str {
-                let lc = c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
-                let rc = c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                let lc = c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                let rc = c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                 let op_c = c_op(op)
                 return "(strcmp(" + lc + ", " + rc + ") " + op_c + " 0)"
             }
@@ -668,14 +668,14 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
             let r_lit_char = is_1char_str(r)
             if l_char || r_char || l_lit_char || r_lit_char {
                 let lc: String = if l_char || l_lit_char {
-                    c_operand(l, true, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                    c_operand(l, true, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                 } else {
-                    "(" + c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")[0]"
+                    "(" + c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")[0]"
                 }
                 let rc: String = if r_char || r_lit_char {
-                    c_operand(r, true, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                    c_operand(r, true, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                 } else {
-                    "(" + c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")[0]"
+                    "(" + c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")[0]"
                 }
                 return "(" + lc + " " + c_op(op) + " " + rc + ")"
             }
@@ -686,7 +686,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 Some(lvn) {
                     match r {
                         EField(rb, rf) {
-                            return "(" + c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ".tag " + c_op(op) + " " + lvn + ")"
+                            return "(" + c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ".tag " + c_op(op) + " " + lvn + ")"
                         }
                         _ {}
                     }
@@ -697,7 +697,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 Some(rvn) {
                     match l {
                         EField(lb, lf) {
-                            return "(" + c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ".tag " + c_op(op) + " " + rvn + ")"
+                            return "(" + c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ".tag " + c_op(op) + " " + rvn + ")"
                         }
                         _ {}
                     }
@@ -728,8 +728,8 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     _ {}
                 }
                 if lv_is || rv_is {
-                    let lc2 = c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
-                    let rc2 = c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                    let lc2 = c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                    let rc2 = c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                     // 两侧都取 .tag: 变量侧是枚举结构体, 变体侧是构造调用返回的结构体
                     return "(((" + lc2 + ").tag) " + c_op(op) + " ((" + rc2 + ").tag))"
                 }
@@ -750,8 +750,8 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                             match r_bt {
                                 Some(rt) {
                                     if rt == lt {
-                                        let lc3 = c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
-                                        let rc3 = c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                                        let lc3 = c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                                        let rc3 = c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                                         if op == "!=" {
                                             return "(!al_eq_" + lt + "(" + lc3 + ", " + rc3 + "))"
                                         }
@@ -804,8 +804,8 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     }
                 }
                 if l_payload != "" && r_payload != "" && l_payload == r_payload {
-                    let lc4 = c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
-                    let rc4 = c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                    let lc4 = c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                    let rc4 = c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                     // 载荷比较按 Aine 类型分派
                     var pcmp = ""
                     if l_payload == "String" {
@@ -828,30 +828,30 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     return "__extension__ ({ al_opt _l = (" + lc4 + "); al_opt _r = (" + rc4 + "); " + core + "; })"
                 }
             }
-            return "(" + c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + " " + c_op(op) + " " + c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+            return "(" + c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + " " + c_op(op) + " " + c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
         }
-        EUnary(op, x) { return "(" + op + c_expr(x, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")" }
+        EUnary(op, x) { return "(" + op + c_expr(x, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")" }
         ECall(f, args) {
             // 内置构造：Some/None/Ok/Err → al_opt 宏
             match f {
                 EIdent(bname) {
                     if bname == "Some" && args.len() == 1 {
-                        return "al_some_" + some_member(args[0], user_types, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, vnames, vowners) + "(" + c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                        return "al_some_" + some_member(args[0], user_types, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, vnames, vowners) + "(" + c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
                     }
                     if bname == "None" {
                         return "al_none()"
                     }
                     if bname == "Ok" && args.len() == 1 {
-                        return "al_some_" + some_member(args[0], user_types, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, vnames, vowners) + "(" + c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                        return "al_some_" + some_member(args[0], user_types, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, vnames, vowners) + "(" + c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
                     }
                     if bname == "Err" && args.len() == 1 {
                         return "al_none()"
                     }
                     // 断言内建：统一发射为 al_assert(cond, msg)，缺省补消息
                     if bname == "assert" {
-                        let ac = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let ac = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                         if args.len() >= 2 {
-                            let mc = c_expr(args[1], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                            let mc = c_expr(args[1], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                             return "al_assert(" + ac + ", " + mc + ")"
                         }
                         return "al_assert(" + ac + ", \"断言失败\")"
@@ -867,7 +867,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         match owner {
                             Some(o) {
                                 var parts: Vec<String> = []
-                                for a in args { parts.push(c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)) }
+                                for a in args { parts.push(c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)) }
                                 return o + "_" + vname + "(" + join(parts, ", ") + ")"
                             }
                             None {}
@@ -881,8 +881,8 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     // Option 后缀链: X.get(k).unwrap_or(d) → 取值或默认
                     // (al_opt statement-expr 已是值形态, 解包为 data 成员读取)
                     if mname == "unwrap_or" && args.len() == 1 {
-                        let def_c = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
-                        let inner = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let def_c = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        let inner = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                         // 载荷成员按 get 接收者的 Map 值类型推导(默认 s=char*)
                         var mem2 = "s"
                         match base {
@@ -909,12 +909,12 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         return "({ al_opt __o = " + inner + "; (__o.tag ? " + deref2 + "__o.data." + mem2 + " : " + def_c + "); })"
                     }
                     if mname == "unwrap" && args.len() == 0 {
-                        let inner = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let inner = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                         return "({ al_opt __o = " + inner + "; *__o.data.s; })"
                     }
                     if mname == "len" && args.len() == 0 {
                         // String.len() → strlen(s)；Vec.len() → v.len
-                        let base_c = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let base_c = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                         let bt = base_type(base, varnames, vartypes, [], [], snames, sfnames, sftypes)
                         match bt {
                             Some(btv) {
@@ -930,12 +930,18 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                                     return base_c + ".keys.len"
                                 }
                             }
-                            None {}
+                            None {
+                                // 接收者为方法调用链(如 rest.trim().len())→ String 语义
+                                match base {
+                                    ECall(_, _) { return "al_chars_len(" + base_c + ")" }
+                                    _ {}
+                                }
+                            }
                         }
                         return base_c + ".len"
                     }
                     if mname == "push" && args.len() == 1 {
-                        let arg_c = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let arg_c = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                         // 元素大小：按 base Vec 的元素类型（最可靠）；未知时回退实参推断
                         var es = "sizeof(int)"
                         let bt = base_type(base, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
@@ -1034,52 +1040,52 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                             }
                             _ {}
                         }
-                        return "al_push(&" + c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ", " + es + ", " + addr + ")"
+                        return "al_push(&" + c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ", " + es + ", " + addr + ")"
                     }
                     if mname == "to_i32" && args.len() == 0 {
-                        return "atoi(" + c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                        return "atoi(" + c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
                     }
                     if mname == "to_f64" && args.len() == 0 {
-                        return "atof(" + c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                        return "atof(" + c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
                     }
                     if mname == "starts_with" && args.len() == 1 {
-                        let bc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
-                        let ac = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let bc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        let ac = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                         return "(strncmp(" + bc + ", " + ac + ", strlen(" + ac + ")) == 0)"
                     }
                     if mname == "contains" && args.len() == 1 {
-                        let bc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
-                        let ac = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let bc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        let ac = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                         return "(strstr(" + bc + ", " + ac + ") != NULL)"
                     }
                     if mname == "ends_with" && args.len() == 1 {
-                        let bc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
-                        let ac = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let bc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        let ac = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                         return "(strlen(" + bc + ") >= strlen(" + ac + ") && strcmp(" + bc + " + strlen(" + bc + ") - strlen(" + ac + "), " + ac + ") == 0)"
                     }
                     if mname == "trim" && args.len() == 0 {
-                        return "al_trim(" + c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                        return "al_trim(" + c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
                     }
                     if mname == "split" && args.len() == 1 {
-                        let bc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
-                        let ac = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let bc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        let ac = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                         return "al_split(" + bc + ", " + ac + ")"
                     }
                     if mname == "replace" && args.len() == 2 {
-                        let bc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
-                        let a0 = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
-                        let a1 = c_expr(args[1], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let bc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        let a0 = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        let a1 = c_expr(args[1], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                         return "al_replace(" + bc + ", " + a0 + ", " + a1 + ")"
                     }
                     if mname == "iter" && args.len() == 0 {
                         // Vec.iter() → 恒等（方法链起点）
-                        return c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        return c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                     }
                     if mname == "map" && args.len() == 1 {
                         match args[0] {
                             EClosure(params, body) {
                                 // X.map(p { BODY) → 循环构建新 Vec（语句表达式） }
-                                let base_c = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                                let base_c = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                                 let bt = base_type(base, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
                                 var ect = "char"
                                 var eft = "i32"
@@ -1101,7 +1107,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                                 for tt in vartypes { vty2.push(tt) }
                                 vty2.push(eft)
                                 let bct = expr_ctype(body, vt2, vty2, fnames, freturns, snames, sfnames, sftypes, user_types)
-                                let body_c = c_expr(body, user_types, vnames, vowners, vt2, vty2, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                                let body_c = c_expr(body, user_types, vnames, vowners, vt2, vty2, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                                 return "({ al_vec __out = { 0, 0, NULL }; for (size_t _i = 0; _i < " + base_c + ".len; _i++) { " + ect + " " + p + " = ((" + ect + "*)(" + base_c + ".data))[_i]; " + bct + " __v = (" + body_c + "); al_push(&__out, sizeof(" + bct + "), &((" + bct + "){ __v })); } __out; })"
                             }
                             _ {}
@@ -1109,7 +1115,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         return "/* map without closure */ 0"
                     }
                     if mname == "sum" && args.len() == 0 {
-                        let base_c = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let base_c = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                         // 折叠链：X.iter().map(p { BODY).sum() → 单循环求和 }
                         match base {
                             ECall(mcallee, margs) {
@@ -1120,7 +1126,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                                                 EClosure(params2, body2) {
                                                     // 显式 Expr 注解: 发射器对未注解 Expr 变量按 char* 推断, 生成非法 C
                                                     var iter_expr: Expr = inner
-                                                    var inner_c = c_expr(inner, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                                                    var inner_c = c_expr(inner, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                                                     // inner 可能本身是 X.iter() → 取其 base
                                                     match inner {
                                                         ECall(ical, iargs) {
@@ -1128,7 +1134,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                                                                 EField(ib, im) {
                                                                     if im == "iter" && iargs.len() == 0 {
                                                                         iter_expr = ib
-                                                                        inner_c = c_expr(ib, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                                                                        inner_c = c_expr(ib, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                                                                     }
                                                                 }
                                                                 _ {}
@@ -1157,7 +1163,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                                                     for tt in vartypes { vty3.push(tt) }
                                                     vty3.push(eft2)
                                                     let bct2 = expr_ctype(body2, vt3, vty3, fnames, freturns, snames, sfnames, sftypes, user_types)
-                                                    let body_c2 = c_expr(body2, user_types, vnames, vowners, vt3, vty3, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                                                    let body_c2 = c_expr(body2, user_types, vnames, vowners, vt3, vty3, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                                                     let act2 = if bct2 == "double" { "double" } else { "long" }
                                                     return "({ " + act2 + " __acc = 0; for (size_t _i = 0; _i < " + inner_c + ".len; _i++) { " + ect2 + " " + p2 + " = ((" + ect2 + "*)(" + inner_c + ".data))[_i]; __acc += (" + body_c2 + "); } __acc; })"
                                                 }
@@ -1200,9 +1206,9 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         match mbt_pre {
                             Some(mt) {
                                 if mt.starts_with("Vec<") {
-                                    let mc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
-                                    let idx_c = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
-                                    let vc = c_expr(args[1], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                                    let mc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                                    let idx_c = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                                    let vc = c_expr(args[1], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                                     let et = first_type_arg(mt)
                                     let ect = c_type(Some(et), user_types)
                                     return "({ ((" + ect + "*)" + mc + ".data)[" + idx_c + "] = (" + vc + "); })"
@@ -1210,9 +1216,9 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                             }
                             None {}
                         }
-                        let mc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
-                        let kc = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
-                        let vc = c_expr(args[1], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let mc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        let kc = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        let vc = c_expr(args[1], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                         let mbt = base_type(base, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
                         var vct = "char*"
                         match mbt {
@@ -1231,8 +1237,8 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         return "({ int __f = 0; for (size_t _i = 0; _i < " + mc + ".keys.len; _i++) { if (strcmp(((char**)" + mc + ".keys.data)[_i], " + kc + ") == 0) { ((" + vct + "*)" + mc + ".vals.data)[_i] = (" + vc + "); __f = 1; break; } if (!__f) { al_push(&" + mc + ".keys, sizeof(char*), &(char*){ " + kc + " }); al_push(&" + mc + ".vals, sizeof(" + vct + "), &(" + vct + "){ " + vc + " }); } 0; })"
                     }
                     if mname == "get" && args.len() == 1 {
-                        let mc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
-                        let kc = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let mc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        let kc = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                         let mbt = base_type(base, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
                         // G1: Vec.get → 下标访问（发 *(T*)al_vec_get(&base, idx)）
                         match mbt {
@@ -1272,15 +1278,15 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         return "({ al_opt __r = al_none(); for (size_t _i = 0; _i < " + mc + ".keys.len; _i++) { if (strcmp(((char**)" + mc + ".keys.data)[_i], " + kc + ") == 0) { __r = " + some_m + "(" + argpre + "((" + vct + "*)" + mc + ".vals.data)[_i]); break; } } __r; })"
                     }
                     if mname == "contains" && args.len() == 1 {
-                        let mc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
-                        let kc = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let mc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        let kc = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                         return "({ int __f = 0; for (size_t _i = 0; _i < " + mc + ".keys.len; _i++) { if (strcmp(((char**)" + mc + ".keys.data)[_i], " + kc + ") == 0) { __f = 1; break; } __f; })"
                     }
                     if mname == "keys" && args.len() == 0 {
-                        return c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ".keys"
+                        return c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ".keys"
                     }
                     if mname == "values" && args.len() == 0 {
-                        return c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ".vals"
+                        return c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ".vals"
                     }
                     // impl 方法兜底：base 是用户类型 → Type_method(self, args)
                     let ibt = base_type(base, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
@@ -1288,9 +1294,9 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         Some(it) {
                             if contains_str(user_types, it) {
                                 var iparts: Vec<String> = []
-                                iparts.push(c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists))
+                                iparts.push(c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes))
                                 for a in args {
-                                    iparts.push(c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists))
+                                    iparts.push(c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes))
                                 }
                                 return it + "_" + mname + "(" + join(iparts, ", ") + ")"
                             }
@@ -1319,7 +1325,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
             }
             for ai in 0..args.len() {
                 let a = args[ai]
-                let ac = c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                let ac = c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                 // char 实参 → String 形参：al_char_to_str 转换
                 var conv = ac
                 if found_fn {
@@ -1344,7 +1350,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 }
                 parts.push(conv)
             }
-            return c_expr(f, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + "(" + join(parts, ", ") + ")"
+            return c_expr(f, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + "(" + join(parts, ", ") + ")"
         }
         EField(b, name) {
             // String 的 .len 字段 → strlen（Vec 才是真字段 .len）
@@ -1355,15 +1361,15 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 match bt {
                     Some(btv) {
                         if btv == "String" || btv == "infer" {
-                            return "al_chars_len(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                            return "al_chars_len(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
                         }
                     }
                     None {
-                        return "strlen(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                        return "strlen(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
                     }
                 }
             }
-            return c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + "." + name
+            return c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + "." + name
         }
         EUnit { return "0" }
         EVec(items) {
@@ -1448,7 +1454,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 var st = "({ al_vec __v = { 0, sizeof(" + esz + "), NULL }; "
                 var ei = 0
                 for it in items {
-                    let ec = c_expr(it, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                    let ec = c_expr(it, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                     st = st + "{ " + esz + " _e" + f"{ei}" + " = " + ec + "; al_push(&__v, sizeof(_e" + f"{ei}" + "), &_e" + f"{ei}" + "); } "
                     ei += 1
                 }
@@ -1456,14 +1462,14 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 return st
             }
             for it in items {
-                parts.push(c_expr(it, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists))
+                parts.push(c_expr(it, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes))
             }
             return "((al_vec){ " + f"{items.len()}" + ", sizeof(" + esz + "), " + etag + "{ " + join(parts, ", ") + " } })"
         }
         EStruct(ty, fields) {
             var parts: Vec<String> = []
             for fd in fields {
-                var vc = c_expr(fd.value, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                var vc = c_expr(fd.value, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                 // char 值入 String 字段 → al_char_to_str(c)
                 if is_char_typed(fd.value, varnames, vartypes) {
                     vc = "al_char_to_str(" + vc + ")"
@@ -1485,8 +1491,8 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
             }
             return "((struct " + ty + "){" + join(parts, ", ") + "})"
         }
-        ETry(x) { return c_expr(x, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) }
-        ERange(a, b) { return c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ".." + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) }
+        ETry(x) { return c_expr(x, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) }
+        ERange(a, b) { return c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ".." + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) }
         EClosure(params, body) { return "/* closure */ 0" }
         EIndex(b, idx) {
             match idx {
@@ -1501,9 +1507,9 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         None {}
                     }
                     if is_vec {
-                        return "al_slice(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ", " + c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ", " + c_expr(hi, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                        return "al_slice(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ", " + c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ", " + c_expr(hi, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
                     }
-                    return "al_substr_ch(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ", " + c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ", " + c_expr(hi, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                    return "al_substr_ch(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ", " + c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ", " + c_expr(hi, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
                 }
                 _ {}
             }
@@ -1511,7 +1517,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
             match b {
                 EIdent(bn4) {
                     if bn4 == "cli_args" {
-                        return "((char**)(al_cli_args.data))[" + c_expr(idx, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + "]"
+                        return "((char**)(al_cli_args.data))[" + c_expr(idx, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + "]"
                     }
                 }
                 _ {}
@@ -1528,7 +1534,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         if et == "String" { ect = "char*" }
                         else if et == "f64" { ect = "double" }
                         else if contains_str(user_types, et) { ect = "struct " + et }
-                        return "((" + ect + "*)(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ".data))[" + c_expr(idx, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + "]"
+                        return "((" + ect + "*)(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ".data))[" + c_expr(idx, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + "]"
                     }
                     if t.starts_with("Map<") {
                         let vt = second_type_arg(t)
@@ -1536,12 +1542,12 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         if vt == "f64" { suf = "f" }
                         if vt == "String" { suf = "s" }
                         if suf == "" { suf = "i" }
-                        return "al_map_get_" + suf + "(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ", " + c_expr(idx, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")"
+                        return "al_map_get_" + suf + "(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ", " + c_expr(idx, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
                     }
                 }
                 None {}
             }
-            return c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + "[" + c_expr(idx, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + "]"
+            return c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + "[" + c_expr(idx, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + "]"
         }
         EIf(cond, then_s, else_s) {
             let t_val = block_tail_expr(then_s)
@@ -1549,7 +1555,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
             match t_val {
                 Some(tv) {
                     match e_val {
-                        Some(ev) { return "(" + c_expr(cond, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + " ? " + c_expr(tv, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + " : " + c_expr(ev, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ")" }
+                        Some(ev) { return "(" + c_expr(cond, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + " ? " + c_expr(tv, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + " : " + c_expr(ev, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")" }
                         None {}
                     }
                 }
@@ -1559,7 +1565,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
         }
         EMatch(mscrut, marms) {
             // match 表达式 → 嵌套三元（Some(x) 臂在语句表达式内声明绑定）
-            let mscrut_c = c_expr(mscrut, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+            let mscrut_c = c_expr(mscrut, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
             let st0 = base_type(mscrut, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
             var mscrut_ty = ""
             match st0 {
@@ -1689,16 +1695,16 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     // 臂体: 值语句赋 _mv; return 原样; 其余语句透传
                     var body_stmts = ""
                     match marm.body {
-                        SReturn(Some(mx)) { body_stmts = "return " + c_expr(mx, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";" }
+                        SReturn(Some(mx)) { body_stmts = "return " + c_expr(mx, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";" }
                         SReturn(None) { body_stmts = "return _mv;" }
-                        SExpr(mbe) { body_stmts = "_mv = " + c_expr(mbe, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";" }
+                        SExpr(mbe) { body_stmts = "_mv = " + c_expr(mbe, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";" }
                         SBlock(mss2) {
                             var parts2: Vec<String> = []
                             for s2 in mss2 {
                                 match s2 {
-                                    SReturn(Some(mx2)) { parts2.push("return " + c_expr(mx2, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";") }
+                                    SReturn(Some(mx2)) { parts2.push("return " + c_expr(mx2, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";") }
                                     SReturn(None) { parts2.push("return _mv;") }
-                                    SExpr(mbe2) { parts2.push("_mv = " + c_expr(mbe2, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";") }
+                                    SExpr(mbe2) { parts2.push("_mv = " + c_expr(mbe2, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";") }
                                     _ {}
                                 }
                             }
@@ -1722,15 +1728,25 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 else if mpat == "None" || mpat == "Err" { mcond = mscrut_c + ".tag == 0" }
                 else { mcond = mscrut_c + ".tag == " + mpat }
                 var mbody = "0"
+                // Some/Ok 绑定类型临时入表(供臂体方法调用按真实类型发射, 如 String.len → strlen)
+                var pushed = false
+                if (mpat == "Some" || mpat == "Ok") && mscrut_ty.starts_with("Option<") {
+                    let binds0 = pat_binds(marm.pat)
+                    if binds0.len() > 0 {
+                        varnames.push(binds0[0])
+                        vartypes.push(first_type_arg(mscrut_ty))
+                        pushed = true
+                    }
+                }
                 match marm.body {
-                    SExpr(mbe) { mbody = c_expr(mbe, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) }
-                    SReturn(Some(mx)) { mbody = c_expr(mx, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) }
+                    SExpr(mbe) { mbody = c_expr(mbe, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) }
+                    SReturn(Some(mx)) { mbody = c_expr(mx, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) }
                     SBlock(mss) {
                         // 花括号臂: 末尾表达式语句作为块值
                         if mss.len() > 0 {
                             match mss[mss.len() - 1] {
-                                SExpr(mbe2) { mbody = c_expr(mbe2, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) }
-                                SReturn(Some(mx2)) { mbody = c_expr(mx2, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) }
+                                SExpr(mbe2) { mbody = c_expr(mbe2, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) }
+                                SReturn(Some(mx2)) { mbody = c_expr(mx2, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) }
                                 _ {}
                             }
                         }
@@ -1740,6 +1756,14 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 // 臂绑定 → 语句表达式前缀。绑定类型用 __typeof__(union 成员):
                 // 无需字段类型元数据, 对 Some/Ok 与用户变体一视同仁
                 var mpre = ""
+                if mscrut_ty == "" {
+                    match mscrut {
+                        EField(EIdent(bn), _) {
+                            print("DBG-MPRE-FAIL base=" + bn + " vt=" + f"{var_type(bn, varnames, vartypes)}")
+                        }
+                        _ {}
+                    }
+                }
                 if (mpat == "Some" || mpat == "Ok") && mscrut_ty.starts_with("Option<") {
                     let binds = pat_binds(marm.pat)
                     if binds.len() > 0 {
@@ -1784,13 +1808,13 @@ fn ui_int_arg(e: Expr, c: String) -> String {
 }
 
 // ui{} 组件语句 → 过程式原语行(非组件返回空; S1a)
-fn ui_comp_lines(st: Stmt, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>) -> Vec<String> {
+fn ui_comp_lines(st: Stmt, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>, vfnames: Vec<String>, vftypes: Vec<String>) -> Vec<String> {
     var out: Vec<String> = []
     match st {
         SExpr(e2) {
             match e2 {
                 ECall(callee2, ca) {
-                    let ce2 = ui_args(ca, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                    let ce2 = ui_args(ca, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                     match callee2 {
                         EIdent(cn) {
                             if cn == "Window" && ca.len() >= 3 {
@@ -1860,7 +1884,7 @@ fn ui_comp_lines(st: Stmt, user_types: Vec<String>, vnames: Vec<String>, vowners
         }
         SBlock(bs2) {
             for st2 in bs2 {
-                let sub = ui_comp_lines(st2, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                let sub = ui_comp_lines(st2, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                 for l in sub { out.push(l) }
             }
         }
@@ -1869,10 +1893,10 @@ fn ui_comp_lines(st: Stmt, user_types: Vec<String>, vnames: Vec<String>, vowners
     return out
 }
 
-fn ui_args(ca: Vec<Expr>, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>) -> Vec<String> {
+fn ui_args(ca: Vec<Expr>, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>, vfnames: Vec<String>, vftypes: Vec<String>) -> Vec<String> {
     var out: Vec<String> = []
     for a in ca {
-        out.push(c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists))
+        out.push(c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes))
     }
     return out
 }
@@ -2181,7 +2205,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
             // ? 解包：let x = call()? → al_opt 检查 + 载荷提取
             match init {
                 ETry(inner) {
-                    let res_c = c_expr(inner, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                    let res_c = c_expr(inner, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                     var okt = "()"
                     match inner {
                         ECall(callee2, args2) {
@@ -2215,7 +2239,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                 }
                 _ {}
             }
-            let init_c = c_expr(init, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+            let init_c = c_expr(init, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
             // 遮蔽检测：同名已存在（参数/更早局部）→ 先用临时变量捕获初始值
             // （C 中 int i = i; 自引用未初始化，需先算外层值）
             var shadow_count = 0
@@ -2230,7 +2254,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
             return pad + ct + " " + name + " = " + init_c + "; // " + kv + name
         }
         SIf(cond, then_s, else_s) {
-            var out = pad + "if (" + c_expr(cond, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ") {"
+            var out = pad + "if (" + c_expr(cond, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ") {"
             var body: Vec<String> = []
             for l in emit_scoped_body(then_s, pad + "  ", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, cur, vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists) { body.push(l) }
             out = out + "\n" + join(body, "\n") + "\n" + pad + "}"
@@ -2243,7 +2267,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
             return out
         }
         SWhile(cond, body_s) {
-            var out = pad + "while (" + c_expr(cond, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ") {"
+            var out = pad + "while (" + c_expr(cond, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ") {"
             var body: Vec<String> = []
             for l in emit_scoped_body(body_s, pad + "  ", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, cur, vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists) { body.push(l) }
             out = out + "\n" + join(body, "\n") + "\n" + pad + "}"
@@ -2253,7 +2277,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
             // 范围迭代：for i in 0..n → for (int i = a; i < b; i++)
             match iter {
                 ERange(r_a, r_b) {
-                    var rout = pad + "for (int " + vv + " = " + c_expr(r_a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + "; " + vv + " < " + c_expr(r_b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + "; " + vv + "++) {"
+                    var rout = pad + "for (int " + vv + " = " + c_expr(r_a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + "; " + vv + " < " + c_expr(r_b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + "; " + vv + "++) {"
                     var rbody: Vec<String> = []
                     for l in emit_scoped_body(body_s, pad + "  ", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, cur, vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists) { rbody.push(l) }
                     rout = rout + "\n" + join(rbody, "\n") + "\n" + pad + "}"
@@ -2261,7 +2285,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                 }
                 _ {}
             }
-            let iter_c = c_expr(iter, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+            let iter_c = c_expr(iter, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
             // 迭代元素类型：Vec<T> → T；String → char
             var elem = "char"
             var len_expr = "strlen(" + iter_c + ")"
@@ -2323,7 +2347,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
             body.push(pad + "  int __al_win = -1;")
             body.push(pad + "  int __al_y = 20;")
             for st in stmts {
-                let lines = ui_comp_lines(st, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                let lines = ui_comp_lines(st, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                 if lines.len() > 0 {
                     for l in lines { body.push(pad + "  " + l) }
                 } else {
@@ -2364,7 +2388,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                                                 if ft.starts_with("Option<") || ft.starts_with("Result<") {
                                                     let m_r = payload_member(Some(first_type_arg(ft)), user_types)
                                                     if args_r.len() == 1 {
-                                                        return pad + "return al_some_" + m_r + "(" + c_expr(args_r[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ");"
+                                                        return pad + "return al_some_" + m_r + "(" + c_expr(args_r[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ");"
                                                     }
                                                 }
                                             }
@@ -2377,7 +2401,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                         }
                         _ {}
                     }
-                    return pad + "return " + c_expr(x, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";"
+                    return pad + "return " + c_expr(x, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";"
                 }
                 None {
                     if cur == "main" { return pad + "return 0;" }
@@ -2388,7 +2412,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
         SExpr(e) {
             match e {
                 ETry(inner) {
-                    let res_c = c_expr(inner, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                    let res_c = c_expr(inner, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                     if cur == "main" {
                         return pad + "al_opt _r_e = " + res_c + ";\n" + pad + "if (_r_e.tag == 0) { return 1; }"
                     }
@@ -2398,11 +2422,11 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                     match callee {
                         EIdent(name) {
                             if name == "print" {
-                                return c_print_stmt(args, pad, user_types, vnames, vowners, fnames, freturns, varnames, vartypes, snames, sfnames, sftypes, fptypes, enames, elists)
+                                return c_print_stmt(args, pad, user_types, vnames, vowners, fnames, freturns, varnames, vartypes, snames, sfnames, sftypes, fptypes, enames, elists, vfnames, vftypes)
                             }
                             if name == "button_onclick" && args.len() == 2 {
                                 // 第二参为回调函数名字符串 → 直接发射函数标识符(函数指针)
-                                let fnid = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                                let fnid = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                                 var fname2 = ""
                                 match args[1] {
                                     EStr(sv) { fname2 = sv }
@@ -2410,12 +2434,12 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                                 }
                                 return pad + "button_onclick(" + fnid + ", " + fname2 + ");"
                             }
-                            return pad + c_expr(e, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";"
+                            return pad + c_expr(e, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";"
                         }
-                        _ { return pad + c_expr(e, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";" }
+                        _ { return pad + c_expr(e, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";" }
                     }
                 }
-                _ { return pad + c_expr(e, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";" }
+                _ { return pad + c_expr(e, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";" }
             }
         }
         SAssignIdx(bn, idxe, op, rhs) {
@@ -2426,8 +2450,8 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                     if t.starts_with("Vec<") {
                         let elem = first_type_arg(t)
                         let elem_c = c_type(Some(elem), user_types)
-                        let idx_c = c_expr(idxe, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
-                        let rhs_c = c_expr(rhs, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let idx_c = c_expr(idxe, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        let rhs_c = c_expr(rhs, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                         let slot = "((" + elem_c + "*)" + bn + ".data)[" + idx_c + "]"
                         return pad + slot + " " + op + " " + rhs_c + ";"
                     }
@@ -2437,8 +2461,8 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                         if vt == "f64" { suf = "f" }
                         if vt == "String" { suf = "s" }
                         if suf == "" { suf = "i" }
-                        let idx_c = c_expr(idxe, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
-                        let rhs_c = c_expr(rhs, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                        let idx_c = c_expr(idxe, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        let rhs_c = c_expr(rhs, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                         if op == "=" {
                             return pad + "al_map_set_" + suf + "(&" + bn + ", " + idx_c + ", " + rhs_c + ");"
                         }
@@ -2473,7 +2497,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                                         None {}
                                     }
                                     if args_a.len() == 1 {
-                                        return pad + name + " = al_some_" + m_a + "(" + c_expr(args_a[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ");"
+                                        return pad + name + " = al_some_" + m_a + "(" + c_expr(args_a[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ");"
                                     }
                                 }
                             }
@@ -2483,7 +2507,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                     _ {}
                 }
             }
-            return pad + name + " " + op + " " + c_expr(rhs, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";"
+            return pad + name + " " + op + " " + c_expr(rhs, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";"
         }
         SDef(name, params, ret, body_s) {
             // 函数作用域变量表：直接按本函数构建
@@ -2536,7 +2560,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                     match st {
                         SExpr(e) {
                             if name != "main" {
-                                body.push(pad + "  return " + c_expr(e, user_types, vnames, vowners, cur_names, cur_types, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";")
+                                body.push(pad + "  return " + c_expr(e, user_types, vnames, vowners, cur_names, cur_types, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";")
                             } else {
                                 body.push(c_stmt(st, pad + "  ", user_types, vnames, vowners, fnames, freturns, cur_names, cur_types, name, vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false))
                             }
@@ -2693,7 +2717,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
             return out
         }
         SMatch(scrut, arms) {
-            let scrut_c = c_expr(scrut, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+            let scrut_c = c_expr(scrut, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
             // Option/Result scrut → 载荷成员（默认 "s"：String 载荷最常见）
             var mem = "s"
             var err_mem = "s"
@@ -2835,7 +2859,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                             if is_print_call(be) {
                                 match be {
                                     ECall(c3, a3) {
-                                        ab.push(c_print_stmt(a3, pad + "  ", user_types, vnames, vowners, fnames, freturns, arm_names, arm_types, snames, sfnames, sftypes, fptypes, enames, elists))
+                                        ab.push(c_print_stmt(a3, pad + "  ", user_types, vnames, vowners, fnames, freturns, arm_names, arm_types, snames, sfnames, sftypes, fptypes, enames, elists, vfnames, vftypes))
                                     }
                                     _ {}
                                 }
@@ -2852,9 +2876,9 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                                 }
                                 if is_method {
                                     // 方法调用语句（如 v.push(x)）→ 非返回值
-                                    ab.push(pad + "  " + c_expr(be, user_types, vnames, vowners, arm_names, arm_types, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";")
+                                    ab.push(pad + "  " + c_expr(be, user_types, vnames, vowners, arm_names, arm_types, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";")
                                 } else {
-                                    ab.push(pad + "  return " + c_expr(be, user_types, vnames, vowners, arm_names, arm_types, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";")
+                                    ab.push(pad + "  return " + c_expr(be, user_types, vnames, vowners, arm_names, arm_types, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";")
                                 }
                             }
                         }
@@ -2898,7 +2922,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                                                     }
                                                     var bd2 = ""
                                                     for pl in pre { bd2 = bd2 + pl + "\n" }
-                                                    bd = bd2 + pad + "  return " + c_expr(be2, user_types, vnames, vowners, arm_names, arm_types, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";"
+                                                    bd = bd2 + pad + "  return " + c_expr(be2, user_types, vnames, vowners, arm_names, arm_types, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";"
                                                 }
                                             }
                                             _ {}
@@ -2933,11 +2957,14 @@ fn c_program(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<String>, v
     let dprog = desugar_closures(program)
     let sem2 = value_semantics(dprog)
     let vf2 = valueal_lite(sem2.program)
-    return c_program_flat(vf2.program, collect_user_types(vf2.program), collect_variant_names(vf2.program), collect_variant_owners(vf2.program), collect_fn_names(vf2.program), collect_fn_returns(vf2.program), collect_var_names(vf2.program), collect_var_types(vf2.program), collect_fn_ptypes(vf2.program), collect_enum_ty_names(vf2.program), collect_enum_variant_lists(vf2.program))
+    // c_program_flat 需要 vfnames/vftypes(表达式级变体绑定)
+    let vfnames = collect_enum_variant_names(vf2.program)
+    let vftypes = collect_enum_variant_ftypes(vf2.program)
+    return c_program_flat(vf2.program, collect_user_types(vf2.program), collect_variant_names(vf2.program), collect_variant_owners(vf2.program), collect_fn_names(vf2.program), collect_fn_returns(vf2.program), collect_var_names(vf2.program), collect_var_types(vf2.program), collect_fn_ptypes(vf2.program), collect_enum_ty_names(vf2.program), collect_enum_variant_lists(vf2.program), vfnames, vftypes)
 }
 
 
-fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>) -> String {
+fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>, vfnames: Vec<String>, vftypes: Vec<String>) -> String {
 
     var out = "#include <stdio.h>\n#include <stdint.h>\n#include <string.h>\n#include <stdlib.h>\n"
     out = out + "static long al_alloc_count = 0;\n"
@@ -3476,7 +3503,7 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
         match s {
             SGlobalVar(name, ty, init) {
                 let ct = c_type(ty, user_types)
-                let ic = c_expr(init, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                let ic = c_expr(init, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                 out = out + ct + " " + name + " = " + ic + ";\n"
             }
             _ {}

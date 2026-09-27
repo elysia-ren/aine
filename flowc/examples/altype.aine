@@ -826,6 +826,22 @@ fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Ve
                                 }
                                 types.push(okt)
                             }
+                            EField(fb2, ff2) {
+                                // 字段访问初始化: base 结构体字段类型
+                                var okt = "infer"
+                                let bt2 = base_type(fb2, names, types, all_fnames, all_freturns, snames, sfnames, sftypes)
+                                match bt2 {
+                                    Some(t2) {
+                                        let ft2 = struct_field_ty(t2, ff2, snames, sfnames, sftypes)
+                                        match ft2 {
+                                            Some(ftv2) { okt = ftv2 }
+                                            None {}
+                                        }
+                                    }
+                                    None {}
+                                }
+                                types.push(okt)
+                            }
                             EIndex(b2, idx2) {
                                 match idx2 {
                                     ERange(a2, h2) { types.push("String") }

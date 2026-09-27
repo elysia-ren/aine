@@ -1,0 +1,16 @@
+struct CU {
+    content: Option<String>
+}
+
+fn check(u: CU) -> bool {
+    let header_empty = match u.content {
+        None { true }
+        Some(c) { c.len() == 0 }
+    }
+    return header_empty
+}
+
+fn main() {
+    let u = CU { content: Some("ab") }
+    print(check(u))
+}
