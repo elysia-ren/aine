@@ -934,6 +934,21 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         }
                     }
                     if mname == "set" && args.len() == 2 {
+                        // G1: Vec.set(i, v) → 下标写入（替代 Map 查找）
+                        let mbt_pre = base_type(base, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                        match mbt_pre {
+                            Some(mt) {
+                                if mt.starts_with("Vec<") {
+                                    let mc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                                    let idx_c = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                                    let vc = c_expr(args[1], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                                    let et = second_type_arg(mt)
+                                    let ect = c_type(Some(et), user_types)
+                                    return "({ " + mc + ".data[" + idx_c + "] = (" + ect + ")(" + vc + "); })"
+                                }
+                            }
+                            None {}
+                        }
                         let mc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
                         let kc = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
                         let vc = c_expr(args[1], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
@@ -2277,6 +2292,7 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
     out = out + "  v->len++;\n"
     out = out + "}\n"
     out = out + "int al_chars_len(const char* s) { int n = 0; for (; *s; s++) { if ((*s & 0xC0) != 0x80) n++; } return n; }\n"
+    out = out + "long al_vec_get(void* vec, long idx) { long len = *(long*)vec; if (idx < 0 || idx >= len) return 0; long* data = (long*)((char*)vec + sizeof(long)); return data[idx]; }\n"
     out = out + "const char* al_char_off(const char* s, long i) { while (i > 0 && *s) { s++; while ((*s & 0xC0) == 0x80) s++; i--; } return s; }\n"
     out = out + "char* al_char_at(const char* s, long i) { const char* p = al_char_off(s, i); long n = 1; while ((p[n] & 0xC0) == 0x80) n++; char* r = (char*)malloc(n + 1); memcpy(r, p, n); r[n] = 0; return r; }\n"
     out = out + "char* al_substr_ch(const char* s, long a, long b) { if (a < 0) a = 0; const char* p = al_char_off(s, a); const char* q = al_char_off(p, b - a); long n = q - p; char* r = (char*)malloc(n + 1); memcpy(r, p, n); r[n] = 0; return r; }\n"
