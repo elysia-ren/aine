@@ -1594,11 +1594,13 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
             }
             var mtail = mbase
             // 兜底零值按臂值类型推断(展开块臂 → block_tail_expr → expr_value_ct)
+            var vct0 = ""
             if marms.len() > 0 {
-                var vct0 = ""
                 var ai = 0
                 while ai < marms.len() {
                     let a0 = marms[ai]
+                    let mpat0 = first_ident(a0.pat)
+                    let binds0 = pat_binds(a0.pat)
                     var inner: Vec<Stmt> = []
                     match a0.body {
                         SBlock(ss0) {
@@ -1608,9 +1610,22 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     }
                     let tail0 = block_tail_expr(inner)
                     var vci = ""
-                    match tail0 {
-                        Some(te) { vci = evc(te, enames, elists, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, user_types) }
-                        None {}
+                    // 臂值是 Some/Ok 绑定名本身 → Option 载荷类型(优先于表查询)
+                    if binds0.len() > 0 && (mpat0 == "Some" || mpat0 == "Ok") {
+                        match tail0 {
+                            Some(EIdent(en0)) {
+                                if en0 == binds0[0] && (mscrut_ty.starts_with("Option<") || mscrut_ty.starts_with("Result<")) {
+                                    vci = c_type(Some(first_type_arg(mscrut_ty)), user_types)
+                                }
+                            }
+                            _ {}
+                        }
+                    }
+                    if vci == "" {
+                        match tail0 {
+                            Some(te) { vci = evc(te, enames, elists, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, user_types) }
+                            None {}
+                        }
                     }
                     if vci != "" {
                         vct0 = vci
@@ -1741,6 +1756,20 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 else if mpat == "None" || mpat == "Err" { mcond = mscrut_c + ".tag == 0" }
                 else { mcond = mscrut_c + ".tag == " + mpat }
                 var mbody = "0"
+                // 臂尾表达式(类型统一判断用); 块臂先展开
+                var mbe_tail = EUnit
+                var m_inner: Vec<Stmt> = []
+                match marm.body {
+                    SBlock(mss3) {
+                        for s3 in mss3 { m_inner.push(s3) }
+                    }
+                    _ { m_inner.push(marm.body) }
+                }
+                let bt0 = block_tail_expr(m_inner)
+                match bt0 {
+                    Some(te0) { mbe_tail = te0 }
+                    None {}
+                }
                 // Some/Ok 绑定类型临时入表(供臂体方法调用按真实类型发射, 如 String.len → strlen)
                 var pushed = false
                 if (mpat == "Some" || mpat == "Ok") && mscrut_ty.starts_with("Option<") {
@@ -1765,6 +1794,12 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         }
                     }
                     _ {}
+                }
+                // 臂类型统一: 兜底 char* 而臂值为 char → al_char_to_str(比较/赋值两侧同型)
+                if vct0 == "char*" {
+                    if is_char_typed(mbe_tail, varnames, vartypes) {
+                        mbody = "al_char_to_str(" + mbody + ")"
+                    }
                 }
                 // 臂绑定 → 语句表达式前缀。绑定类型用 __typeof__(union 成员):
                 // 无需字段类型元数据, 对 Some/Ok 与用户变体一视同仁
@@ -1985,6 +2020,10 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                                 EField(ib, mname) {
                                     // 方法调用返回类型
                                     let mrt = method_ret(mname, args.len())
+                                    // push/insert/remove/concat 返回接收者自身 → Vec（al_vec）
+                                    if mname == "push" || mname == "insert" || mname == "remove" || mname == "concat" {
+                                        ct = "al_vec"
+                                    }
                                     if mrt.starts_with("Vec<") { ct = "al_vec" }
                                     else if mrt == "String" { ct = "char*" }
                                     else if mrt == "i32" { ct = "int" }
@@ -2965,9 +3004,97 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
 
 
 // program -> C
+// 结构体/枚举按值依赖拓扑排序: 被按值嵌套的用户类型先定义
+// (C 不完整类型不能按值作成员; Vec/Option 载荷走指针, 不构成依赖)
+fn topo_types_program(program: Vec<Stmt>, user_types: Vec<String>) -> Vec<Stmt> {
+    var types: Vec<Stmt> = []
+    var names: Vec<String> = []
+    var rest: Vec<Stmt> = []
+    for s in program {
+        var is_ty = false
+        var nm = ""
+        match s {
+            SStruct(tn, _) {
+                is_ty = true
+                nm = tn
+            }
+            SEnum(tn2, _) {
+                is_ty = true
+                nm = tn2
+            }
+            _ {}
+        }
+        if is_ty {
+            types.push(s)
+            names.push(nm)
+        } else {
+            rest.push(s)
+        }
+    }
+    var out: Vec<Stmt> = []
+    var emitted: Vec<String> = []
+    var guard = 0
+    while out.len() < types.len() && guard < types.len() * types.len() + 8 {
+        guard += 1
+        var progressed = false
+        var ti = 0
+        while ti < types.len() {
+            let s = types[ti]
+            let nm = names[ti]
+            if !contains_str(emitted, nm) {
+                var deps: Vec<String> = []
+                match s {
+                    SStruct(_, fs) {
+                        for fd in fs {
+                            if contains_str(user_types, fd.ty) && !contains_str(emitted, fd.ty) && fd.ty != nm {
+                                deps.push(fd.ty)
+                            }
+                        }
+                    }
+                    SEnum(_, vs) {
+                        for v in vs {
+                            for ft in v.fields {
+                                if contains_str(user_types, ft) && !contains_str(emitted, ft) && ft != nm {
+                                    deps.push(ft)
+                                }
+                            }
+                        }
+                    }
+                    _ {}
+                }
+                var ok = true
+                for d in deps {
+                    if !contains_str(emitted, d) { ok = false }
+                }
+                if ok {
+                    out.push(s)
+                    emitted.push(nm)
+                    progressed = true
+                }
+            }
+            ti += 1
+        }
+        if !progressed {
+            // 环或跨类依赖: 按当前顺序输出剩余(前向声明兜底指针场景)
+            for ti in 0..types.len() {
+                if !contains_str(emitted, names[ti]) {
+                    out.push(types[ti])
+                    emitted.push(names[ti])
+                }
+            }
+        }
+    }
+    var out2: Vec<Stmt> = []
+    for o in out { out2.push(o) }
+    for r in rest { out2.push(r) }
+    return out2
+}
+
 fn c_program(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>) -> String {
     // 调用方已 flatten，不再重复（二次 flatten 硬编码 examples/ 导致 Awen 构建退化）
-    let dprog = desugar_closures(program)
+    // 类型定义拓扑排序前置: 按值成员依赖序(TextPatch 先于 EditResult 等)
+    let tprog = topo_types_program(program, user_types)
+    let dprog = desugar_closures(tprog)
     let sem2 = value_semantics(dprog)
     let vf2 = valueal_lite(sem2.program)
     // c_program_flat 需要 vfnames/vftypes(表达式级变体绑定)

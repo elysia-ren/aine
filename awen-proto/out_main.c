@@ -1558,15 +1558,18 @@ al_opt ex_scan_balanced(char* s, int start) {
 }
 al_opt read_value(char* s, int start) {
   {
+  printf("%s\n", "@RV enter");
   char raw_c = s[start]; // let raw_c
   al_opt q_opt = fw_normalize_in_command(al_char_to_str(raw_c)); // let q_opt
-  char* quote = (q_opt.tag == 1 ? ({ char* q = q_opt.data.s; q; }) : (q_opt.tag == 0 ? raw_c : (char)0)); // let quote
+  printf("%s\n", "@RV1 rawc-ok");
+  char* quote = (q_opt.tag == 1 ? ({ char* q = q_opt.data.s; q; }) : (q_opt.tag == 0 ? al_char_to_str(raw_c) : "")); // let quote
+  printf("%s\n", "@RV2 qm-done");
   if ((strcmp(quote, "\"") == 0)) {
     int i = (start + 1); // var i
     char* out = al_strdup_lit(""); // var out
     while ((i < al_chars_len(s))) {
       al_opt cq_opt = fw_normalize_in_command(al_char_to_str(s[i])); // let cq_opt
-      char* cq = (cq_opt.tag == 1 ? ({ char* q = cq_opt.data.s; q; }) : (cq_opt.tag == 0 ? s[i] : ((char*){ 0 }))); // let cq
+      char* cq = (cq_opt.tag == 1 ? ({ char* q = cq_opt.data.s; q; }) : (cq_opt.tag == 0 ? al_char_to_str(s[i]) : "")); // let cq
       if ((strcmp(cq, "\"") == 0)) {
         return al_some_t_ValParsed(((struct ValParsed){.arg = Arg_Str(out), .consumed = ((i + 1) - start)}));
       }
@@ -1596,8 +1599,11 @@ al_opt parse_header(char* s, int at) {
   if ((al_chars_len(name) == 0)) {
     return al_none();
   }
+  printf("%s\n", "@P1 name-ok");
   al_opt cmd_opt = lookup(name); // let cmd_opt
+  printf("%s\n", "@P2 lookup-ok");
   struct ExplicitCommand cmd = __extension__ ({ struct ExplicitCommand _mv = ((struct ExplicitCommand){ 0 }); if (cmd_opt.tag == 1) { struct ExplicitCommand c = *cmd_opt.data.t_ExplicitCommand; _mv = c; } else if (cmd_opt.tag == 0) { return al_none(); } _mv; }); // let cmd
+  printf("%s\n", "@P3 cmd-typed");
   if (((((cmd).tag) == ((ExplicitCommand_Comment()).tag)) || (((cmd).tag) == ((ExplicitCommand_Footnote()).tag)))) {
     al_opt bal_opt = ex_scan_balanced(s, i); // let bal_opt
     struct Balanced bal = __extension__ ({ struct Balanced _mv = ((struct Balanced){ 0 }); if (bal_opt.tag == 1) { struct Balanced b = *bal_opt.data.t_Balanced; _mv = b; } else if (bal_opt.tag == 0) { return al_none(); } _mv; }); // let bal
@@ -1608,6 +1614,7 @@ al_opt parse_header(char* s, int at) {
   al_vec args = ((al_vec){ 0, 0, NULL }); // var args
   al_vec attrs = ((al_vec){ 0, 0, NULL }); // var attrs
   while (1) {
+    printf("%s\n", "@P4 arg-iter");
     while (((i < al_chars_len(s)) && ((s[i] == ' ') || (s[i] == '\t')))) {
       i += 1;
     }
@@ -1637,6 +1644,7 @@ al_opt parse_header(char* s, int at) {
     }
     int is_colon = ((j < al_chars_len(s)) && ((s[j] == ':') || __extension__ ({ al_opt _l = (fw_normalize_in_command(al_char_to_str(s[j]))); al_opt _r = (al_some_s(":")); (_l.tag == _r.tag && (_l.tag == 0 || strcmp(_l.data.s, _r.data.s) == 0)); }))); // let is_colon
     if (is_colon) {
+      printf("%s\n", "@C colon-branch");
       j += 1;
       while (((j < al_chars_len(s)) && ((s[j] == ' ') || (s[j] == '\t')))) {
         j += 1;
@@ -1652,6 +1660,7 @@ al_opt parse_header(char* s, int at) {
       struct ValParsed vvp = *_r_vvp.data.t_ValParsed; // let vvp
       j = (j + vvp.consumed);
       attrs = ({ al_push(&attrs, sizeof(struct KVPair), &((struct KVPair){.key = arg_plain(tok), .val = vvp.arg})); attrs; });
+      printf("%s\n", "@C attrs-pushed");
       i = j;
     } else {
       args = ({ al_push(&args, sizeof(struct Arg), &tok); args; });
@@ -1825,6 +1834,7 @@ int lw_is_word_char(char* c) {
 }
 struct ScanOut lw_scan_inline(char* chars, int line, al_vec diags) {
   {
+  printf("%s\n", "@T scan-in");
   struct AtomOut ao = lw_atomize(chars, line, diags); // let ao
   return lw_resolve(ao.atoms, ao.diags, line);
   }
@@ -1908,6 +1918,7 @@ al_opt lw_read_close_tag(char* s, int start) {
 }
 struct AtomOut lw_atomize(char* chars, int line, al_vec diags) {
   {
+  printf("%s\n", "@T atomize-in");
   al_vec atoms = ((al_vec){ 0, 0, NULL }); // var atoms
   char* text = al_strdup_lit(""); // var text
   al_vec diags = diags; // var diags
@@ -2197,6 +2208,7 @@ char* lw_atom_raw(struct LwAtom a) {
 }
 al_vec lw_literalize(al_vec atoms) {
   {
+  printf("%s\n", "@T literalize-in");
   char* out = al_strdup_lit(""); // var out
   for (size_t _i = 0; _i < atoms.len; _i++) {
     struct LwAtom a = ((struct LwAtom*)(atoms.data))[_i];
@@ -2207,6 +2219,7 @@ al_vec lw_literalize(al_vec atoms) {
 }
 al_vec lw_merge_texts(al_vec items) {
   {
+  printf("%s\n", "@T merge-in");
   al_vec merged = ((al_vec){ 0, 0, NULL }); // var merged
   for (size_t _i = 0; _i < items.len; _i++) {
     struct Inline it = ((struct Inline*)(items.data))[_i];
@@ -2266,6 +2279,7 @@ struct Inline mk_text(char* s) {
 }
 struct ScanOut lw_resolve(al_vec atoms, al_vec diags, int line) {
   {
+  printf("%s\n", "@T resolve-in");
   al_vec frames = ((al_vec){ 1, sizeof(struct Frame), (struct Frame[]){ ((struct Frame){.kind = al_none(), .children = ((al_vec){ 0, 0, NULL })}) } }); // var frames
   al_vec diags = diags; // var diags
   int aborted = 0; // var aborted
@@ -2588,7 +2602,9 @@ struct CmdOutcome lex_command_line(char* chars, int lineno, al_vec diags, al_opt
   {
   al_vec blocks = ((al_vec){ 0, 0, NULL }); // var blocks
   al_vec diags = diags; // var diags
+  printf("%s\n", "@A hdr-before");
   al_opt hp = parse_header(chars, 0); // let hp
+  printf("%s\n", "@B hdr-after");
   if (hp.tag == 0) {
     struct ParseErr e = *hp.data.t_ParseErr;
     {
@@ -2612,15 +2628,20 @@ struct CmdOutcome lex_command_line(char* chars, int lineno, al_vec diags, al_opt
   else if (hp.tag == 1) {
     struct HeaderParsed hp2 = (*hp.data.t_HeaderParsed);
     {
+      printf("%s\n", "@D ok-arm");
       struct CommandUse u = hp2.cu; // let u
       int consumed = hp2.consumed; // let consumed
+      printf("%s\n", "@E1 table-check");
       if ((u.cmd.tag == Table)) {
         blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = lineno, .block = Block_TableOpen(u)})); blocks; });
         return ((struct CmdOutcome){.blocks = blocks, .diags = diags, .raw = raw, .table = 1});
       }
+      printf("%s\n", "@E2 rawblock-check");
       if (is_raw_block(u.cmd)) {
         int header_empty = (u.content.tag == 0 ? 1 : (u.content.tag == 1 ? ({ char* c = u.content.data.s; (al_chars_len(c) == 0); }) : 0)); // let header_empty
         char* rest = al_substr_ch(chars, consumed, al_chars_len(chars)); // let rest
+        printf("%s\n", "@E4 trimlen-check");
+        printf("%s\n", "@E3 rest-sliced");
         if ((header_empty && (al_chars_len(al_trim(rest)) == 0))) {
           al_opt lang = al_none(); // var lang
           if (((u.cmd.tag == Code) && (u.args.len > 0))) {
@@ -2758,8 +2779,7 @@ al_opt buffer_apply(struct Buffer b, struct TextPatch p) {
   return al_some_t_Buffer(((struct Buffer){.content = al_strcat(al_strcat(al_substr_ch(b.content, 0, p.start), p.new), al_substr_ch(b.content, (p.start + al_chars_len(p.old)), al_chars_len(b.content)))}));
   }
 }
-int main(int _argc, char** _argv) {
-  setvbuf(stdout, NULL, _IONBF, 0);
+int main(int _argc, char** _argv) { setvbuf(stdout, NULL, _IONBF, 0);
   al_cli_args = (al_vec){ 0, sizeof(char*), NULL };
   for (int _ai = 1; _ai < _argc; _ai++) { char* _av = _argv[_ai]; al_push(&al_cli_args, sizeof(char*), (void*)&_av); }
   {

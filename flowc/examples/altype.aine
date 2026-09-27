@@ -793,7 +793,12 @@ fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Ve
                                             }
                                             if okt == "infer" { okt = method_ret(mname2, args2.len()) }
                                         } else {
-                                            okt = method_ret(mname2, args2.len())
+                                            if mname2 == "push" || mname2 == "insert" || mname2 == "remove" || mname2 == "concat" {
+                                                // 返回接收者自身 → Vec
+                                                okt = "Vec<infer>"
+                                            } else {
+                                                okt = method_ret(mname2, args2.len())
+                                            }
                                         }
                                     }
                                     _ {}
