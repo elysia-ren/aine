@@ -442,7 +442,7 @@ static char* al_num(long v) { char* r = (char*)malloc(32); snprintf(r, 32, "%ld"
 static char* al_fnum(double v) { char* r = (char*)malloc(32); if (v == (long long)v && v >= -1e15 && v <= 1e15) { snprintf(r, 32, "%.1f", v); } else { snprintf(r, 32, "%g", v); } return r; }
 static char* al_bool(int b) { return b ? "true" : "false"; }
 static char* al_trim(char* s) { char* r = (char*)malloc(strlen(s) + 1); strcpy(r, s); char* st = r; while (*st == ' ' || *st == '\t' || *st == '\r' || *st == '\n') st++; char* en = st + strlen(st); while (en > st && (en[-1] == ' ' || en[-1] == '\t' || en[-1] == '\r' || en[-1] == '\n')) en--; *en = 0; if (st != r) memmove(r, st, strlen(st) + 1); return r; }
-static al_vec al_split(char* s, char* sep) { al_vec r = { 0, 0, NULL }; size_t sl = strlen(sep); if (sl == 0) { for (size_t i = 0; i < strlen(s); i++) { char* p = (char*)malloc(2); p[0] = s[i]; p[1] = 0; al_push(&r, sizeof(char*), &p); } } else { char* cur = s; while (1) { char* hit = strstr(cur, sep); if (!hit) { al_push(&r, sizeof(char*), &(char*){ cur }); break; } size_t n = (size_t)(hit - cur); char* p = (char*)malloc(n + 1); memcpy(p, cur, n); p[n] = 0; al_push(&r, sizeof(char*), &p); cur = hit + sl; } return r; } }
+static al_vec al_split(char* s, char* sep) { al_vec r = { 0, sizeof(char*), NULL }; size_t sl = strlen(sep); if (sl == 0) { for (size_t i = 0; i < strlen(s); i++) { char* p = (char*)malloc(2); p[0] = s[i]; p[1] = 0; al_push(&r, sizeof(char*), &p); } return r; } else { char* cur = s; while (1) { char* hit = strstr(cur, sep); if (!hit) { al_push(&r, sizeof(char*), &(char*){ cur }); break; } size_t n = (size_t)(hit - cur); char* p = (char*)malloc(n + 1); memcpy(p, cur, n); p[n] = 0; al_push(&r, sizeof(char*), &p); cur = hit + sl; } return r; } }
 static char* al_replace(char* s, char* from, char* to) { size_t fl = strlen(from), tl = strlen(to), sl = strlen(s); if (fl == 0) return s; size_t cnt = 0; char* q = s; while ((q = strstr(q, from)) != NULL) { cnt++; q += fl; } char* r = (char*)malloc(sl + cnt * (tl - fl) + 1); char* o = r; char* p = s; while (1) { char* hit = strstr(p, from); if (!hit) { strcpy(o, p); break; } size_t pre = (size_t)(hit - p); memcpy(o, p, pre); o += pre; memcpy(o, to, tl); o += tl; p = hit + fl; } return r; }
 static al_vec al_slice(al_vec v, size_t a, size_t b) {
   if (b > v.len) b = v.len;
@@ -491,6 +491,35 @@ typedef struct { int tag; union { int i; double f; char* s; al_vec v; void* p;st
 #define al_some_t_Buffer(x) __extension__ ({ struct Buffer _t = (x); (al_opt){ .tag = 1, .data.t_Buffer = al_dup(&_t, sizeof(struct Buffer)) }; })
 #define al_some_t_BufWithPatch(x) __extension__ ({ struct BufWithPatch _t = (x); (al_opt){ .tag = 1, .data.t_BufWithPatch = al_dup(&_t, sizeof(struct BufWithPatch)) }; })
 #define al_none() ((al_opt){ .tag = 0 })
+struct Severity;
+struct Diagnostic;
+struct ExplicitCommand;
+struct EscapeHit;
+struct Arg;
+struct KVPair;
+struct CommandUse;
+struct ParseErr;
+struct HeaderParsed;
+struct ValParsed;
+struct Balanced;
+struct Inline;
+struct LineClass;
+struct MarkerKind;
+struct MarkerAtom;
+struct LwAtom;
+struct AtomOut;
+struct ScanOut;
+struct CloseSpan;
+struct CloseHit;
+struct Frame;
+struct Block;
+struct LexedBlock;
+struct LexOutput;
+struct CmdOutcome;
+struct SourceSpan;
+struct TextPatch;
+struct Buffer;
+struct BufWithPatch;
 static int al_eq_Severity(struct Severity a, struct Severity b);
 static int al_eq_Diagnostic(struct Diagnostic a, struct Diagnostic b);
 static int al_eq_ExplicitCommand(struct ExplicitCommand a, struct ExplicitCommand b);
@@ -1622,10 +1651,10 @@ al_opt parse_header(char* s, int at) {
       if (_r_vvp.tag == 0) { return _r_vvp; }
       struct ValParsed vvp = *_r_vvp.data.t_ValParsed; // let vvp
       j = (j + vvp.consumed);
-      attrs = al_push(&attrs, sizeof(struct KVPair), &((struct KVPair){.key = arg_plain(tok), .val = vvp.arg}));
+      attrs = ({ al_push(&attrs, sizeof(struct KVPair), &((struct KVPair){.key = arg_plain(tok), .val = vvp.arg})); attrs; });
       i = j;
     } else {
-      args = al_push(&args, sizeof(struct Arg), &tok);
+      args = ({ al_push(&args, sizeof(struct Arg), &tok); args; });
       al_opt ar = positional_arity(cmd); // let ar
       int over = (ar.tag == 1 ? ({ int n = ar.data.i; (args.len > n); }) : (ar.tag == 0 ? 0 : 0)); // let over
       if (over) {
@@ -1888,20 +1917,20 @@ struct AtomOut lw_atomize(char* chars, int line, al_vec diags) {
     if ((c == '@')) {
       if (starts_with_at(chars, i, "@@[")) {
         if ((al_chars_len(text) > 0)) {
-          atoms = al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; })));
+          atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; }))); atoms; });
           text = "";
         }
         al_opt lit = lw_scan_literal_object(chars, i); // let lit
         if (lit.tag == 1) {
           int end = lit.data.i;
           {
-            atoms = al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(al_substr_ch(chars, (i + 1), end)); &_t; })));
+            atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(al_substr_ch(chars, (i + 1), end)); &_t; }))); atoms; });
             i = end;
           }
         }
         else if (lit.tag == 0) {
           {
-            diags = al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_warning("@@[ 未闭合,按字面处理", line); &_t; })));
+            diags = ({ al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_warning("@@[ 未闭合,按字面处理", line); &_t; }))); diags; });
             text = "@";
             i += 1;
           }
@@ -1910,21 +1939,21 @@ struct AtomOut lw_atomize(char* chars, int line, al_vec diags) {
       }
       if (starts_with_at(chars, i, "@[/")) {
         if ((al_chars_len(text) > 0)) {
-          atoms = al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; })));
+          atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; }))); atoms; });
           text = "";
         }
         al_opt hit = lw_read_close_tag(chars, i); // let hit
         if (hit.tag == 1) {
           struct CloseHit h = (*hit.data.t_CloseHit);
           {
-            atoms = al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtClose(h.cmd, al_substr_ch(chars, i, h.end)); &_t; })));
+            atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtClose(h.cmd, al_substr_ch(chars, i, h.end)); &_t; }))); atoms; });
             i = h.end;
           }
         }
         else if (hit.tag == 0) {
           {
-            diags = al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_warning("关闭标签缺少 ']',按字面处理", line); &_t; })));
-            atoms = al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(al_substr_ch(chars, i, al_chars_len(chars))); &_t; })));
+            diags = ({ al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_warning("关闭标签缺少 ']',按字面处理", line); &_t; }))); diags; });
+            atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(al_substr_ch(chars, i, al_chars_len(chars))); &_t; }))); atoms; });
             i = al_chars_len(chars);
           }
         }
@@ -1932,7 +1961,7 @@ struct AtomOut lw_atomize(char* chars, int line, al_vec diags) {
       }
       if (starts_with_at(chars, i, "@[")) {
         if ((al_chars_len(text) > 0)) {
-          atoms = al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; })));
+          atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; }))); atoms; });
           text = "";
         }
         al_opt hp = parse_header(chars, i); // let hp
@@ -1946,21 +1975,21 @@ struct AtomOut lw_atomize(char* chars, int line, al_vec diags) {
               if (close_opt.tag == 1) {
                 struct CloseSpan cs = (*close_opt.data.t_CloseSpan);
                 {
-                  atoms = al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtRawSeg(u.cmd, lw_code_lang(u), al_substr_ch(chars, (i + consumed), cs.start), al_substr_ch(chars, i, cs.end)); &_t; })));
+                  atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtRawSeg(u.cmd, lw_code_lang(u), al_substr_ch(chars, (i + consumed), cs.start), al_substr_ch(chars, i, cs.end)); &_t; }))); atoms; });
                   i = cs.end;
                 }
               }
               else if (close_opt.tag == 0) {
                 {
-                  diags = al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_warning(al_strcat(al_strcat("行内 ", u.name_raw), " 缺少关闭标签(应形如 @[m]…@[/m]),按字面处理"), line); &_t; })));
-                  atoms = al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(al_substr_ch(chars, i, (i + consumed))); &_t; })));
+                  diags = ({ al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_warning(al_strcat(al_strcat("行内 ", u.name_raw), " 缺少关闭标签(应形如 @[m]…@[/m]),按字面处理"), line); &_t; }))); diags; });
+                  atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(al_substr_ch(chars, i, (i + consumed))); &_t; }))); atoms; });
                   i += consumed;
                 }
               }
             } else {
               int close_found = (lw_find_inline_close(chars, (i + consumed), u.cmd).tag == 1 ? 1 : (lw_find_inline_close(chars, (i + consumed), u.cmd).tag == 0 ? 0 : 0)); // let close_found
               int opens = ((is_scoped(u.cmd) || (u.cmd.tag == Cell)) && close_found); // let opens
-              atoms = al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtCmd(u, al_substr_ch(chars, i, (i + consumed)), opens); &_t; })));
+              atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtCmd(u, al_substr_ch(chars, i, (i + consumed)), opens); &_t; }))); atoms; });
               i += consumed;
             }
           }
@@ -1980,14 +2009,14 @@ struct AtomOut lw_atomize(char* chars, int line, al_vec diags) {
 
               }
             }
-            diags = al_push(&diags, sizeof(struct Diagnostic), &mut_d);
+            diags = ({ al_push(&diags, sizeof(struct Diagnostic), &mut_d); diags; });
             int j = (i + 2); // var j
             while (((j < al_chars_len(chars)) && (chars[j] != ']'))) {
               j += 1;
             }
             int end = (j + 1); // let end
             int stop = ((end > al_chars_len(chars)) ? al_chars_len(chars) : end); // let stop
-            atoms = al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(al_substr_ch(chars, i, stop)); &_t; })));
+            atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(al_substr_ch(chars, i, stop)); &_t; }))); atoms; });
             i = stop;
           }
         }
@@ -1995,10 +2024,10 @@ struct AtomOut lw_atomize(char* chars, int line, al_vec diags) {
       }
       if (starts_with_at(chars, i, "@@")) {
         if ((al_chars_len(text) > 0)) {
-          atoms = al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; })));
+          atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; }))); atoms; });
           text = "";
         }
-        atoms = al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText("@"); &_t; })));
+        atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText("@"); &_t; }))); atoms; });
         i += 1;
         continue;
       }
@@ -2021,10 +2050,10 @@ struct AtomOut lw_atomize(char* chars, int line, al_vec diags) {
       }
       if (esc_hit) {
         if ((al_chars_len(text) > 0)) {
-          atoms = al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; })));
+          atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; }))); atoms; });
           text = "";
         }
-        atoms = al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(esc_text); &_t; })));
+        atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(esc_text); &_t; }))); atoms; });
         i += esc_len;
         continue;
       }
@@ -2034,14 +2063,14 @@ struct AtomOut lw_atomize(char* chars, int line, al_vec diags) {
     }
     if ((c == '`')) {
       if ((al_chars_len(text) > 0)) {
-        atoms = al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; })));
+        atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; }))); atoms; });
         text = "";
       }
       al_opt close_opt = lw_find_char(chars, (i + 1), "`"); // let close_opt
       if (close_opt.tag == 1) {
         int j = close_opt.data.i;
         {
-          atoms = al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtCode(al_substr_ch(chars, (i + 1), j)); &_t; })));
+          atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtCode(al_substr_ch(chars, (i + 1), j)); &_t; }))); atoms; });
           i = (j + 1);
         }
       }
@@ -2076,12 +2105,12 @@ struct AtomOut lw_atomize(char* chars, int line, al_vec diags) {
         continue;
       }
       if ((al_chars_len(text) > 0)) {
-        atoms = al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; })));
+        atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; }))); atoms; });
         text = "";
       }
       int can_open = ((i == 0) || (!lw_is_word_char(al_char_to_str(chars[(i - 1)])))); // let can_open
       int can_close = (((i + mlen) >= al_chars_len(chars)) || (!lw_is_word_char(al_char_to_str(chars[(i + mlen)])))); // let can_close
-      atoms = al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtMarker(((struct MarkerAtom){.kind = mk, .literal = al_substr_ch(chars, i, (i + mlen)), .can_open = can_open, .can_close = can_close})); &_t; })));
+      atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtMarker(((struct MarkerAtom){.kind = mk, .literal = al_substr_ch(chars, i, (i + mlen)), .can_open = can_open, .can_close = can_close})); &_t; }))); atoms; });
       i += mlen;
       continue;
     }
@@ -2089,7 +2118,7 @@ struct AtomOut lw_atomize(char* chars, int line, al_vec diags) {
     i += 1;
   }
   if ((al_chars_len(text) > 0)) {
-    atoms = al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; })));
+    atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; }))); atoms; });
   }
   return ((struct AtomOut){.atoms = atoms, .diags = diags});
   }
@@ -2100,9 +2129,9 @@ al_vec lw_vec_set(al_vec v, int i, struct Frame f) {
   int k = 0; // var k
   while ((k < v.len)) {
     if ((k == i)) {
-      out = al_push(&out, sizeof(struct Frame), &f);
+      out = ({ al_push(&out, sizeof(struct Frame), &f); out; });
     } else {
-      out = al_push(&out, sizeof(struct Frame), &((struct Frame*)(v.data))[k]);
+      out = ({ al_push(&out, sizeof(struct Frame), &((struct Frame*)(v.data))[k]); out; });
     }
     k += 1;
   }
@@ -2114,7 +2143,7 @@ al_vec lw_vec_drop_last(al_vec v) {
   al_vec out = ((al_vec){ 0, 0, NULL }); // var out
   int k = 0; // var k
   while ((k < (v.len - 1))) {
-    out = al_push(&out, sizeof(struct Frame), &((struct Frame*)(v.data))[k]);
+    out = ({ al_push(&out, sizeof(struct Frame), &((struct Frame*)(v.data))[k]); out; });
     k += 1;
   }
   return out;
@@ -2201,14 +2230,14 @@ al_vec lw_merge_texts(al_vec items) {
           }
         }
         if ((!did)) {
-          merged = al_push(&merged, sizeof(struct Inline), (__extension__ ({ struct Inline _t = Inline_AwTxt(s); &_t; })));
+          merged = ({ al_push(&merged, sizeof(struct Inline), (__extension__ ({ struct Inline _t = Inline_AwTxt(s); &_t; }))); merged; });
         }
       }
     }
     else if (1) {
       struct Inline other = it;
       {
-        merged = al_push(&merged, sizeof(struct Inline), &other);
+        merged = ({ al_push(&merged, sizeof(struct Inline), &other); merged; });
       }
     }
   }
@@ -2221,9 +2250,9 @@ al_vec lw_vec_set_inline(al_vec v, int i, struct Inline item) {
   int k = 0; // var k
   while ((k < v.len)) {
     if ((k == i)) {
-      out = al_push(&out, sizeof(struct Inline), &item);
+      out = ({ al_push(&out, sizeof(struct Inline), &item); out; });
     } else {
-      out = al_push(&out, sizeof(struct Inline), &((struct Inline*)(v.data))[k]);
+      out = ({ al_push(&out, sizeof(struct Inline), &((struct Inline*)(v.data))[k]); out; });
     }
     k += 1;
   }
@@ -2250,7 +2279,7 @@ struct ScanOut lw_resolve(al_vec atoms, al_vec diags, int line) {
       {
         int fi = (frames.len - 1); // let fi
         struct Frame f = ((struct Frame*)(frames.data))[fi]; // let f
-        frames = lw_vec_set(frames, fi, ((struct Frame){.kind = f.kind, .children = al_push(&f.children, sizeof(struct Inline), (__extension__ ({ struct Inline _t = mk_text(s); &_t; })))}));
+        frames = lw_vec_set(frames, fi, ((struct Frame){.kind = f.kind, .children = ({ al_push(&f.children, sizeof(struct Inline), (__extension__ ({ struct Inline _t = mk_text(s); &_t; }))); f.children; })}));
       }
     }
     else if (atom.tag == AtCode) {
@@ -2258,7 +2287,7 @@ struct ScanOut lw_resolve(al_vec atoms, al_vec diags, int line) {
       {
         int fi = (frames.len - 1); // let fi
         struct Frame f = ((struct Frame*)(frames.data))[fi]; // let f
-        frames = lw_vec_set(frames, fi, ((struct Frame){.kind = f.kind, .children = al_push(&f.children, sizeof(struct Inline), (__extension__ ({ struct Inline _t = Inline_CodeSpan(s); &_t; })))}));
+        frames = lw_vec_set(frames, fi, ((struct Frame){.kind = f.kind, .children = ({ al_push(&f.children, sizeof(struct Inline), (__extension__ ({ struct Inline _t = Inline_CodeSpan(s); &_t; }))); f.children; })}));
       }
     }
     else if (atom.tag == AtRawSeg) {
@@ -2269,7 +2298,7 @@ struct ScanOut lw_resolve(al_vec atoms, al_vec diags, int line) {
       {
         int fi = (frames.len - 1); // let fi
         struct Frame f = ((struct Frame*)(frames.data))[fi]; // let f
-        frames = lw_vec_set(frames, fi, ((struct Frame){.kind = f.kind, .children = al_push(&f.children, sizeof(struct Inline), (__extension__ ({ struct Inline _t = Inline_RawInline(cmd, lang, content); &_t; })))}));
+        frames = lw_vec_set(frames, fi, ((struct Frame){.kind = f.kind, .children = ({ al_push(&f.children, sizeof(struct Inline), (__extension__ ({ struct Inline _t = Inline_RawInline(cmd, lang, content); &_t; }))); f.children; })}));
       }
     }
     else if (atom.tag == AtCmd) {
@@ -2278,11 +2307,11 @@ struct ScanOut lw_resolve(al_vec atoms, al_vec diags, int line) {
       int opens = atom.data.AtCmd._2;
       {
         if (opens) {
-          frames = al_push(&frames, sizeof(struct Frame), &((struct Frame){.kind = al_some_t_MarkerKind(MarkerKind_MkExplicit(u.cmd)), .children = ((al_vec){ 0, 0, NULL })}));
+          frames = ({ al_push(&frames, sizeof(struct Frame), &((struct Frame){.kind = al_some_t_MarkerKind(MarkerKind_MkExplicit(u.cmd)), .children = ((al_vec){ 0, 0, NULL })})); frames; });
         } else {
           int fi = (frames.len - 1); // let fi
           struct Frame f = ((struct Frame*)(frames.data))[fi]; // let f
-          frames = lw_vec_set(frames, fi, ((struct Frame){.kind = f.kind, .children = al_push(&f.children, sizeof(struct Inline), (__extension__ ({ struct Inline _t = Inline_Command(u); &_t; })))}));
+          frames = lw_vec_set(frames, fi, ((struct Frame){.kind = f.kind, .children = ({ al_push(&f.children, sizeof(struct Inline), (__extension__ ({ struct Inline _t = Inline_Command(u); &_t; }))); f.children; })}));
         }
       }
     }
@@ -2297,16 +2326,16 @@ struct ScanOut lw_resolve(al_vec atoms, al_vec diags, int line) {
           frames = lw_vec_drop_last(frames);
           int fi = (frames.len - 1); // let fi
           struct Frame pf = ((struct Frame*)(frames.data))[fi]; // let pf
-          frames = lw_vec_set(frames, fi, ((struct Frame){.kind = pf.kind, .children = al_push(&pf.children, sizeof(struct Inline), (__extension__ ({ struct Inline _t = Inline_Scoped(cmd, f.children); &_t; })))}));
+          frames = lw_vec_set(frames, fi, ((struct Frame){.kind = pf.kind, .children = ({ al_push(&pf.children, sizeof(struct Inline), (__extension__ ({ struct Inline _t = Inline_Scoped(cmd, f.children); &_t; }))); pf.children; })}));
         } else {
           if (lw_frames_contain(frames, kind)) {
-            diags = al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_warning("行内标记交叉(作用域次序非法),整行按字面处理", line); &_t; })));
+            diags = ({ al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_warning("行内标记交叉(作用域次序非法),整行按字面处理", line); &_t; }))); diags; });
             aborted = 1;
           } else {
-            diags = al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_warning(al_strcat(al_strcat("未匹配的关闭标签 ", literal), ",按字面处理"), line); &_t; })));
+            diags = ({ al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_warning(al_strcat(al_strcat("未匹配的关闭标签 ", literal), ",按字面处理"), line); &_t; }))); diags; });
             int fi = (frames.len - 1); // let fi
             struct Frame f = ((struct Frame*)(frames.data))[fi]; // let f
-            frames = lw_vec_set(frames, fi, ((struct Frame){.kind = f.kind, .children = al_push(&f.children, sizeof(struct Inline), (__extension__ ({ struct Inline _t = mk_text(literal); &_t; })))}));
+            frames = lw_vec_set(frames, fi, ((struct Frame){.kind = f.kind, .children = ({ al_push(&f.children, sizeof(struct Inline), (__extension__ ({ struct Inline _t = mk_text(literal); &_t; }))); f.children; })}));
           }
         }
       }
@@ -2321,18 +2350,18 @@ struct ScanOut lw_resolve(al_vec atoms, al_vec diags, int line) {
           int fi = (frames.len - 1); // let fi
           struct Frame pf = ((struct Frame*)(frames.data))[fi]; // let pf
           struct Inline node = (m.kind.tag == MkBold ? Inline_IBold(f.children) : (m.kind.tag == MkItalic ? Inline_Italic(f.children) : (m.kind.tag == MkStrike ? Inline_Strike(f.children) : (m.kind.tag == MkExplicit ? ({ __typeof__(m.kind.data.MkExplicit._0) cmd = m.kind.data.MkExplicit._0; Inline_Scoped(cmd, f.children); }) : ((struct Inline){ 0 }))))); // let node
-          frames = lw_vec_set(frames, fi, ((struct Frame){.kind = pf.kind, .children = al_push(&pf.children, sizeof(struct Inline), &node)}));
+          frames = lw_vec_set(frames, fi, ((struct Frame){.kind = pf.kind, .children = ({ al_push(&pf.children, sizeof(struct Inline), &node); pf.children; })}));
         } else {
           if ((m.can_close && lw_frames_contain(frames, m.kind))) {
-            diags = al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_warning("行内标记交叉(嵌套次序非法),整行按字面处理", line); &_t; })));
+            diags = ({ al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_warning("行内标记交叉(嵌套次序非法),整行按字面处理", line); &_t; }))); diags; });
             aborted = 1;
           } else {
             if (m.can_open) {
-              frames = al_push(&frames, sizeof(struct Frame), &((struct Frame){.kind = al_some_t_MarkerKind(m.kind), .children = ((al_vec){ 0, 0, NULL })}));
+              frames = ({ al_push(&frames, sizeof(struct Frame), &((struct Frame){.kind = al_some_t_MarkerKind(m.kind), .children = ((al_vec){ 0, 0, NULL })})); frames; });
             } else {
               int fi = (frames.len - 1); // let fi
               struct Frame f = ((struct Frame*)(frames.data))[fi]; // let f
-              frames = lw_vec_set(frames, fi, ((struct Frame){.kind = f.kind, .children = al_push(&f.children, sizeof(struct Inline), (__extension__ ({ struct Inline _t = mk_text(m.literal); &_t; })))}));
+              frames = lw_vec_set(frames, fi, ((struct Frame){.kind = f.kind, .children = ({ al_push(&f.children, sizeof(struct Inline), (__extension__ ({ struct Inline _t = mk_text(m.literal); &_t; }))); f.children; })}));
             }
           }
         }
@@ -2343,7 +2372,7 @@ struct ScanOut lw_resolve(al_vec atoms, al_vec diags, int line) {
     return ((struct ScanOut){.inline_a = lw_literalize(atoms), .diags = diags});
   }
   if ((frames.len > 1)) {
-    diags = al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_warning("行内标记未闭合,整行按字面处理", line); &_t; })));
+    diags = ({ al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_warning("行内标记未闭合,整行按字面处理", line); &_t; }))); diags; });
     return ((struct ScanOut){.inline_a = lw_literalize(atoms), .diags = diags});
   }
   return ((struct ScanOut){.inline_a = lw_merge_texts(((struct Frame*)(frames.data))[0].children), .diags = diags});
@@ -2428,22 +2457,22 @@ struct LexOutput lex(char* src) {
         }
       }
       if (closed) {
-        blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_RawClose(cmd)}));
+        blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_RawClose(cmd)})); blocks; });
         raw = al_none();
       } else {
-        blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_RawLine(line)}));
+        blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_RawLine(line)})); blocks; });
       }
       continue;
     }
     if (table) {
       char* t = al_trim(line); // let t
       if ((strcmp(t, "@[/table]") == 0)) {
-        blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = ((struct Block){ .tag = TableClose })}));
+        blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = ((struct Block){ .tag = TableClose })})); blocks; });
         table = 0;
         continue;
       }
       if ((al_chars_len(t) == 0)) {
-        blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = ((struct Block){ .tag = Blank })}));
+        blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = ((struct Block){ .tag = Blank })})); blocks; });
         continue;
       }
       if (((starts_with_at(t, 0, "|") && (t[(al_chars_len(t) - 1)] == '|')) && (al_chars_len(t) >= 2))) {
@@ -2453,13 +2482,13 @@ struct LexOutput lex(char* src) {
         for (size_t _i = 0; _i < strlen(inner); _i++) {
           char ch = inner[_i];
           if ((ch == '|')) {
-            cells_text = al_push(&cells_text, sizeof(char*), &(char*){ al_trim(cur) });
+            cells_text = ({ al_push(&cells_text, sizeof(char*), &(char*){ al_trim(cur) }); cells_text; });
             cur = "";
           } else {
             cur = al_strcat(cur, al_char_to_str(ch));
           }
         }
-        cells_text = al_push(&cells_text, sizeof(char*), &(char*){ al_trim(cur) });
+        cells_text = ({ al_push(&cells_text, sizeof(char*), &(char*){ al_trim(cur) }); cells_text; });
         int all_delim = 1; // var all_delim
         for (size_t _i = 0; _i < cells_text.len; _i++) {
           char* ct = ((char**)(cells_text.data))[_i];
@@ -2472,24 +2501,24 @@ struct LexOutput lex(char* src) {
           char* ct = ((char**)(cells_text.data))[_i];
           struct ScanOut so = lw_scan_inline(ct, (lineno - 1), diags); // let so
           diags = so.diags;
-          cells = al_push(&cells, sizeof(al_vec), &so.inline_a);
+          cells = ({ al_push(&cells, sizeof(al_vec), &so.inline_a); cells; });
         }
-        blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_TableRow(cells, all_delim)}));
+        blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_TableRow(cells, all_delim)})); blocks; });
         continue;
       }
-      diags = al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_error("表格块内只能包含表格行(以 | 开始和结束)或 @[/table]", (lineno - 1)); &_t; })));
-      blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_Paragraph(({ al_vec __v = { 0, sizeof(struct Inline), NULL }; { struct Inline _e0 = Inline_AwTxt(line); al_push(&__v, sizeof(_e0), &_e0); } __v; }))}));
+      diags = ({ al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_error("表格块内只能包含表格行(以 | 开始和结束)或 @[/table]", (lineno - 1)); &_t; }))); diags; });
+      blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_Paragraph(({ al_vec __v = { 0, sizeof(struct Inline), NULL }; { struct Inline _e0 = Inline_AwTxt(line); al_push(&__v, sizeof(_e0), &_e0); } __v; }))})); blocks; });
       continue;
     }
     struct LineClass cls = classify(line); // let cls
     if (cls.tag == LcBlank) {
       {
-        blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = ((struct Block){ .tag = Blank })}));
+        blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = ((struct Block){ .tag = Blank })})); blocks; });
       }
     }
     else if (cls.tag == LcDivider) {
       {
-        blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = ((struct Block){ .tag = Divider })}));
+        blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = ((struct Block){ .tag = Divider })})); blocks; });
       }
     }
     else if (cls.tag == LcHeading) {
@@ -2497,7 +2526,7 @@ struct LexOutput lex(char* src) {
       {
         struct ScanOut so = lw_scan_inline(al_substr_ch(line, (level + 1), al_chars_len(line)), (lineno - 1), diags); // let so
         diags = so.diags;
-        blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_Heading(level, so.inline_a)}));
+        blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_Heading(level, so.inline_a)})); blocks; });
       }
     }
     else if (cls.tag == LcQuote) {
@@ -2505,7 +2534,7 @@ struct LexOutput lex(char* src) {
       {
         struct ScanOut so = lw_scan_inline(al_substr_ch(line, (depth + 1), al_chars_len(line)), (lineno - 1), diags); // let so
         diags = so.diags;
-        blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_Quote(depth, so.inline_a)}));
+        blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_Quote(depth, so.inline_a)})); blocks; });
       }
     }
     else if (cls.tag == LcListItem) {
@@ -2514,7 +2543,7 @@ struct LexOutput lex(char* src) {
         int skip = (ordered ? ordered_marker_len(line) : 2); // let skip
         struct ScanOut so = lw_scan_inline(al_substr_ch(line, skip, al_chars_len(line)), (lineno - 1), diags); // let so
         diags = so.diags;
-        blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_ListItem(ordered, so.inline_a)}));
+        blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_ListItem(ordered, so.inline_a)})); blocks; });
       }
     }
     else if (cls.tag == LcCommand) {
@@ -2522,7 +2551,7 @@ struct LexOutput lex(char* src) {
         struct CmdOutcome co = lex_command_line(line, (lineno - 1), diags, raw, table); // let co
         for (size_t _i = 0; _i < co.blocks.len; _i++) {
           struct LexedBlock nb = ((struct LexedBlock*)(co.blocks.data))[_i];
-          blocks = al_push(&blocks, sizeof(struct LexedBlock), &nb);
+          blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &nb); blocks; });
         }
         diags = co.diags;
         raw = co.raw;
@@ -2533,7 +2562,7 @@ struct LexOutput lex(char* src) {
       {
         struct ScanOut so = lw_scan_inline(line, (lineno - 1), diags); // let so
         diags = so.diags;
-        blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_Paragraph(so.inline_a)}));
+        blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_Paragraph(so.inline_a)})); blocks; });
       }
     }
   }
@@ -2541,7 +2570,7 @@ struct LexOutput lex(char* src) {
   if (raw.tag == 1) {
     struct ExplicitCommand cmd = (*raw.data.t_ExplicitCommand);
     {
-      diags = al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_error("Raw Block 未闭合到文件结尾", last); &_t; })));
+      diags = ({ al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_error("Raw Block 未闭合到文件结尾", last); &_t; }))); diags; });
     }
   }
   else if (raw.tag == 0) {
@@ -2550,7 +2579,7 @@ struct LexOutput lex(char* src) {
     }
   }
   if (table) {
-    diags = al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_error("@[table] 未闭合到文件结尾", last); &_t; })));
+    diags = ({ al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_error("@[table] 未闭合到文件结尾", last); &_t; }))); diags; });
   }
   return ((struct LexOutput){.blocks = blocks, .diags = diags});
   }
@@ -2575,8 +2604,8 @@ struct CmdOutcome lex_command_line(char* chars, int lineno, al_vec diags, al_opt
 
         }
       }
-      diags = al_push(&diags, sizeof(struct Diagnostic), &mut_d);
-      blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = lineno, .block = Block_Paragraph(({ al_vec __v = { 0, sizeof(struct Inline), NULL }; { struct Inline _e0 = Inline_AwTxt(chars); al_push(&__v, sizeof(_e0), &_e0); } __v; }))}));
+      diags = ({ al_push(&diags, sizeof(struct Diagnostic), &mut_d); diags; });
+      blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = lineno, .block = Block_Paragraph(({ al_vec __v = { 0, sizeof(struct Inline), NULL }; { struct Inline _e0 = Inline_AwTxt(chars); al_push(&__v, sizeof(_e0), &_e0); } __v; }))})); blocks; });
       return ((struct CmdOutcome){.blocks = blocks, .diags = diags, .raw = raw, .table = table});
     }
   }
@@ -2586,7 +2615,7 @@ struct CmdOutcome lex_command_line(char* chars, int lineno, al_vec diags, al_opt
       struct CommandUse u = hp2.cu; // let u
       int consumed = hp2.consumed; // let consumed
       if ((u.cmd.tag == Table)) {
-        blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = lineno, .block = Block_TableOpen(u)}));
+        blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = lineno, .block = Block_TableOpen(u)})); blocks; });
         return ((struct CmdOutcome){.blocks = blocks, .diags = diags, .raw = raw, .table = 1});
       }
       if (is_raw_block(u.cmd)) {
@@ -2597,7 +2626,7 @@ struct CmdOutcome lex_command_line(char* chars, int lineno, al_vec diags, al_opt
           if (((u.cmd.tag == Code) && (u.args.len > 0))) {
             lang = al_some_s(arg_plain(((struct Arg*)(u.args.data))[0]));
           }
-          blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = lineno, .block = Block_RawOpen(u.cmd, lang)}));
+          blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = lineno, .block = Block_RawOpen(u.cmd, lang)})); blocks; });
           return ((struct CmdOutcome){.blocks = blocks, .diags = diags, .raw = al_some_t_ExplicitCommand(u.cmd), .table = table});
         }
       }
@@ -2621,12 +2650,12 @@ struct CmdOutcome lex_command_line(char* chars, int lineno, al_vec diags, al_opt
       if (single.tag == 1) {
         struct CommandUse cu = (*single.data.t_CommandUse);
         {
-          blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = lineno, .block = Block_Object(cu)}));
+          blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = lineno, .block = Block_Object(cu)})); blocks; });
         }
       }
       else if (single.tag == 0) {
         {
-          blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = lineno, .block = Block_Paragraph(so.inline_a)}));
+          blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = lineno, .block = Block_Paragraph(so.inline_a)})); blocks; });
         }
       }
       return ((struct CmdOutcome){.blocks = blocks, .diags = diags, .raw = raw, .table = table});
@@ -2730,6 +2759,7 @@ al_opt buffer_apply(struct Buffer b, struct TextPatch p) {
   }
 }
 int main(int _argc, char** _argv) {
+  setvbuf(stdout, NULL, _IONBF, 0);
   al_cli_args = (al_vec){ 0, sizeof(char*), NULL };
   for (int _ai = 1; _ai < _argc; _ai++) { char* _av = _argv[_ai]; al_push(&al_cli_args, sizeof(char*), (void*)&_av); }
   {

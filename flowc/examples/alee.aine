@@ -1045,7 +1045,9 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                             }
                             _ {}
                         }
-                        return "al_push(&" + c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ", " + es + ", " + addr + ")"
+                        // push 表达式语义(Aine: push 返回 Vec 本身) → 语句表达式:
+                        // 语句+取值, 不依赖 al_push 的 C 返回值; base 须为 lvalue
+                        return "({ al_push(&" + c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ", " + es + ", " + addr + "); " + c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + "; })"
                     }
                     if mname == "to_i32" && args.len() == 0 {
                         return "atoi(" + c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
@@ -1081,6 +1083,12 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         let a0 = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                         let a1 = c_expr(args[1], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                         return "al_replace(" + bc + ", " + a0 + ", " + a1 + ")"
+                    }
+                    if mname == "codepoint_at" && args.len() == 1 {
+                        // s.codepoint_at(i) → C 运行时 codepoint_at(s, i)
+                        let bc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        let a0 = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        return "codepoint_at(" + bc + ", " + a0 + ")"
                     }
                     if mname == "iter" && args.len() == 0 {
                         // Vec.iter() → 恒等（方法链起点）
@@ -3455,7 +3463,7 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
     out = out + "static char* al_fnum(double v) { char* r = (char*)malloc(32); if (v == (long long)v && v >= -1e15 && v <= 1e15) { snprintf(r, 32, \"%.1f\", v); } else { snprintf(r, 32, \"%g\", v); } return r; }\n"
     out = out + "static char* al_bool(int b) { return b ? \"true\" : \"false\"; }\n"
     out = out + "static char* al_trim(char* s) { char* r = (char*)malloc(strlen(s) + 1); strcpy(r, s); char* st = r; while (*st == ' ' || *st == '\\t' || *st == '\\r' || *st == '\\n') st++; char* en = st + strlen(st); while (en > st && (en[-1] == ' ' || en[-1] == '\\t' || en[-1] == '\\r' || en[-1] == '\\n')) en--; *en = 0; if (st != r) memmove(r, st, strlen(st) + 1); return r; }\n"
-    out = out + "static al_vec al_split(char* s, char* sep) { al_vec r = { 0, 0, NULL }; size_t sl = strlen(sep); if (sl == 0) { for (size_t i = 0; i < strlen(s); i++) { char* p = (char*)malloc(2); p[0] = s[i]; p[1] = 0; al_push(&r, sizeof(char*), &p); } } else { char* cur = s; while (1) { char* hit = strstr(cur, sep); if (!hit) { al_push(&r, sizeof(char*), &(char*){ cur }); break; } size_t n = (size_t)(hit - cur); char* p = (char*)malloc(n + 1); memcpy(p, cur, n); p[n] = 0; al_push(&r, sizeof(char*), &p); cur = hit + sl; } return r; } }\n"
+    out = out + "static al_vec al_split(char* s, char* sep) { al_vec r = { 0, sizeof(char*), NULL }; size_t sl = strlen(sep); if (sl == 0) { for (size_t i = 0; i < strlen(s); i++) { char* p = (char*)malloc(2); p[0] = s[i]; p[1] = 0; al_push(&r, sizeof(char*), &p); } return r; } else { char* cur = s; while (1) { char* hit = strstr(cur, sep); if (!hit) { al_push(&r, sizeof(char*), &(char*){ cur }); break; } size_t n = (size_t)(hit - cur); char* p = (char*)malloc(n + 1); memcpy(p, cur, n); p[n] = 0; al_push(&r, sizeof(char*), &p); cur = hit + sl; } return r; } }\n"
     out = out + "static char* al_replace(char* s, char* from, char* to) { size_t fl = strlen(from), tl = strlen(to), sl = strlen(s); if (fl == 0) return s; size_t cnt = 0; char* q = s; while ((q = strstr(q, from)) != NULL) { cnt++; q += fl; } char* r = (char*)malloc(sl + cnt * (tl - fl) + 1); char* o = r; char* p = s; while (1) { char* hit = strstr(p, from); if (!hit) { strcpy(o, p); break; } size_t pre = (size_t)(hit - p); memcpy(o, p, pre); o += pre; memcpy(o, to, tl); o += tl; p = hit + fl; } return r; }\n"
     out = out + "static al_vec al_slice(al_vec v, size_t a, size_t b) {\n"
     out = out + "  if (b > v.len) b = v.len;\n"
@@ -3484,6 +3492,10 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
         out = out + "#define al_some_t_" + t + "(x) __extension__ ({ struct " + t + " _t = (x); (al_opt){ .tag = 1, .data.t_" + t + " = al_dup(&_t, sizeof(struct " + t + ")) }; })\n"
     }
     out = out + "#define al_none() ((al_opt){ .tag = 0 })\n"
+    // 用户类型前向声明(定义顺序问题永久消失)
+    for t in user_types {
+        out = out + "struct " + t + ";\n"
+    }
     // al_eq 前向声明: 枚举/结构体比较器可互相引用
     for t in user_types {
         out = out + "static int al_eq_" + t + "(struct " + t + " a, struct " + t + " b);\n"
