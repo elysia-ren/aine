@@ -2292,7 +2292,7 @@ struct ScanOut lw_resolve(al_vec atoms, al_vec diags, int line) {
       {
         struct MarkerKind kind = MarkerKind_MkExplicit(cmd); // let kind
         al_opt top = ((struct Frame*)(frames.data))[(frames.len - 1)].kind; // let top
-        if ((top == al_some_t_MarkerKind(kind))) {
+        if (__extension__ ({ al_opt _l = (top); al_opt _r = (al_some_t_MarkerKind(kind)); (_l.tag == _r.tag && (_l.tag == 0 || al_eq_MarkerKind(*_l.data.t_MarkerKind, *_r.data.t_MarkerKind))); })) {
           struct Frame f = ((struct Frame*)(frames.data))[(frames.len - 1)]; // let f
           frames = lw_vec_drop_last(frames);
           int fi = (frames.len - 1); // let fi
@@ -2315,12 +2315,12 @@ struct ScanOut lw_resolve(al_vec atoms, al_vec diags, int line) {
       struct MarkerAtom m = atom.data.AtMarker._0;
       {
         al_opt top = ((struct Frame*)(frames.data))[(frames.len - 1)].kind; // let top
-        if (((top == al_some_t_MarkerKind(m.kind)) && m.can_close)) {
+        if ((__extension__ ({ al_opt _l = (top); al_opt _r = (al_some_t_MarkerKind(m.kind)); (_l.tag == _r.tag && (_l.tag == 0 || al_eq_MarkerKind(*_l.data.t_MarkerKind, *_r.data.t_MarkerKind))); }) && m.can_close)) {
           struct Frame f = ((struct Frame*)(frames.data))[(frames.len - 1)]; // let f
           frames = lw_vec_drop_last(frames);
           int fi = (frames.len - 1); // let fi
           struct Frame pf = ((struct Frame*)(frames.data))[fi]; // let pf
-          int node = (m.kind.tag == MkBold ? Inline_IBold(f.children) : (m.kind.tag == MkItalic ? Inline_Italic(f.children) : (m.kind.tag == MkStrike ? Inline_Strike(f.children) : (m.kind.tag == MkExplicit ? Inline_Scoped(cmd, f.children) : 0)))); // let node
+          struct Inline node = (m.kind.tag == MkBold ? Inline_IBold(f.children) : (m.kind.tag == MkItalic ? Inline_Italic(f.children) : (m.kind.tag == MkStrike ? Inline_Strike(f.children) : (m.kind.tag == MkExplicit ? ({ __typeof__(m.kind.data.MkExplicit._0) cmd = m.kind.data.MkExplicit._0; Inline_Scoped(cmd, f.children); }) : ((struct Inline){ 0 }))))); // let node
           frames = lw_vec_set(frames, fi, ((struct Frame){.kind = pf.kind, .children = al_push(&pf.children, sizeof(struct Inline), &node)}));
         } else {
           if ((m.can_close && lw_frames_contain(frames, m.kind))) {
@@ -2353,7 +2353,7 @@ int lw_frames_contain(al_vec frames, struct MarkerKind kind) {
   {
   int k = 0; // var k
   while ((k < frames.len)) {
-    if ((((struct Frame*)(frames.data))[k].kind == al_some_t_MarkerKind(kind))) {
+    if (__extension__ ({ al_opt _l = (((struct Frame*)(frames.data))[k].kind); al_opt _r = (al_some_t_MarkerKind(kind)); (_l.tag == _r.tag && (_l.tag == 0 || al_eq_MarkerKind(*_l.data.t_MarkerKind, *_r.data.t_MarkerKind))); })) {
       return 1;
     }
     k += 1;
@@ -2453,13 +2453,13 @@ struct LexOutput lex(char* src) {
         for (size_t _i = 0; _i < strlen(inner); _i++) {
           char ch = inner[_i];
           if ((ch == '|')) {
-            cells_text = al_push(&cells_text, sizeof(char*), &al_trim(cur));
+            cells_text = al_push(&cells_text, sizeof(char*), &(char*){ al_trim(cur) });
             cur = "";
           } else {
             cur = al_strcat(cur, al_char_to_str(ch));
           }
         }
-        cells_text = al_push(&cells_text, sizeof(char*), &al_trim(cur));
+        cells_text = al_push(&cells_text, sizeof(char*), &(char*){ al_trim(cur) });
         int all_delim = 1; // var all_delim
         for (size_t _i = 0; _i < cells_text.len; _i++) {
           char* ct = ((char**)(cells_text.data))[_i];
@@ -2497,7 +2497,7 @@ struct LexOutput lex(char* src) {
       {
         struct ScanOut so = lw_scan_inline(al_substr_ch(line, (level + 1), al_chars_len(line)), (lineno - 1), diags); // let so
         diags = so.diags;
-        blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_Heading(level, so.inline)}));
+        blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_Heading(level, so.inline_a)}));
       }
     }
     else if (cls.tag == LcQuote) {
@@ -2505,7 +2505,7 @@ struct LexOutput lex(char* src) {
       {
         struct ScanOut so = lw_scan_inline(al_substr_ch(line, (depth + 1), al_chars_len(line)), (lineno - 1), diags); // let so
         diags = so.diags;
-        blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_Quote(depth, so.inline)}));
+        blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_Quote(depth, so.inline_a)}));
       }
     }
     else if (cls.tag == LcListItem) {
@@ -2514,7 +2514,7 @@ struct LexOutput lex(char* src) {
         int skip = (ordered ? ordered_marker_len(line) : 2); // let skip
         struct ScanOut so = lw_scan_inline(al_substr_ch(line, skip, al_chars_len(line)), (lineno - 1), diags); // let so
         diags = so.diags;
-        blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_ListItem(ordered, so.inline)}));
+        blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_ListItem(ordered, so.inline_a)}));
       }
     }
     else if (cls.tag == LcCommand) {
@@ -2533,7 +2533,7 @@ struct LexOutput lex(char* src) {
       {
         struct ScanOut so = lw_scan_inline(line, (lineno - 1), diags); // let so
         diags = so.diags;
-        blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_Paragraph(so.inline)}));
+        blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_Paragraph(so.inline_a)}));
       }
     }
   }
@@ -2604,9 +2604,9 @@ struct CmdOutcome lex_command_line(char* chars, int lineno, al_vec diags, al_opt
       struct ScanOut so = lw_scan_inline(chars, lineno, diags); // let so
       int is_single = 0; // var is_single
       al_opt single = al_none(); // var single
-      if ((so.inline.len == 1)) {
-        if (so.inline[0].tag == Command) {
-          struct CommandUse cu = so.inline[0].data.Command._0;
+      if ((so.inline_a.len == 1)) {
+        if (((struct Inline*)(so.inline_a.data))[0].tag == Command) {
+          struct CommandUse cu = ((struct Inline*)(so.inline_a.data))[0].data.Command._0;
           {
             is_single = 1;
             single = al_some_t_CommandUse(cu);
@@ -2626,7 +2626,7 @@ struct CmdOutcome lex_command_line(char* chars, int lineno, al_vec diags, al_opt
       }
       else if (single.tag == 0) {
         {
-          blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = lineno, .block = Block_Paragraph(so.inline)}));
+          blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = lineno, .block = Block_Paragraph(so.inline_a)}));
         }
       }
       return ((struct CmdOutcome){.blocks = blocks, .diags = diags, .raw = raw, .table = table});
@@ -2765,7 +2765,7 @@ int main(int _argc, char** _argv) {
     }
     else if (b.block.tag == Heading) {
       int level = b.block.data.Heading._0;
-      al_vec inline = b.block.data.Heading._1;
+      al_vec inline_a = b.block.data.Heading._1;
       {
         headings += 1;
       }

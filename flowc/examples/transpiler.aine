@@ -218,6 +218,13 @@ fn ckw_fix_stmt(s: Stmt) -> Stmt {
             for m in ms { nm.push(ckw_fix_stmt(m)) }
             return SImpl(ty, nm)
         }
+        SMatch(s, arms) {
+            var na3: Vec<MatchArm> = []
+            for arm in arms {
+                na3.push(MatchArm { pat: arm.pat body: ckw_fix_stmt(arm.body) })
+            }
+            return SMatch(ckw_fix_expr(s), na3)
+        }
         SGo(det, ss) { return SGo(det, ckw_fix_stmts(ss)) }
         SUi(ss) { return SUi(ckw_fix_stmts(ss)) }
         SGlobalVar(n, ty, init) { return SGlobalVar(ckw_escape(n), ty, ckw_fix_expr(init)) }

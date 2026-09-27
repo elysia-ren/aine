@@ -1,0 +1,22 @@
+enum Mk {
+    MkBold
+    MkItalic
+}
+
+enum Node {
+    NB(Vec<Node>)
+    NS(String)
+}
+
+fn wrap(m: Mk, ch: Vec<Node>) -> Node {
+    let node = match m {
+        MkBold { NB(ch) }
+        MkItalic { NS("x") }
+    }
+    return node
+}
+
+fn main() {
+    let v: Vec<Node> = []
+    print(wrap(MkBold, v))
+}

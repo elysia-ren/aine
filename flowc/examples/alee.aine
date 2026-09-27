@@ -82,6 +82,7 @@ fn expr_value_ct(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: 
             match cf {
                 EIdent(cfn) {
                     if cfn == "Some" || cfn == "Ok" || cfn == "Err" { return "al_opt" }
+                    // 变体构造的归属在 evc(需 enames/elists)处处理
                     match fn_return(cfn, fnames, freturns) {
                         Some(rt) { return c_type(Some(rt), user_types) }
                         None {}
@@ -122,6 +123,28 @@ fn expr_value_ct(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: 
     }
 }
 
+
+// expr_value_ct + 裸变体构造识别(臂值 NB(ch) → 所属枚举 struct)
+fn evc(te: Expr, enames: Vec<String>, elists: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, user_types: Vec<String>) -> String {
+    match te {
+        ECall(cf, _) {
+            match cf {
+                EIdent(cfn) {
+                    var oi = 0
+                    for en in enames {
+                        for pp in str_split(elists[oi], ",") {
+                            if pp == cfn { return "struct " + en }
+                        }
+                        oi += 1
+                    }
+                }
+                _ {}
+            }
+        }
+        _ {}
+    }
+    return expr_value_ct(te, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, user_types)
+}
 
 // Option<T>/Result<T,E> 的载荷 Aine 类型名(字面量/内建/用户类型通用); 非 Option/Result 返回 ""
 fn opt_payload_inner(ty: Option<String>) -> String {
@@ -760,6 +783,26 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 if r_payload.starts_with("Option<") || r_payload.starts_with("Result<") {
                     r_payload = first_type_arg(r_payload)
                 }
+                if l_payload == "" && r_payload != "" {
+                    match l_bt {
+                        Some(lt2) {
+                            if lt2.starts_with("Option<") || lt2.starts_with("Result<") || lt2 == "infer" {
+                                l_payload = r_payload
+                            }
+                        }
+                        None { l_payload = r_payload }
+                    }
+                }
+                if r_payload == "" && l_payload != "" {
+                    match r_bt {
+                        Some(rt2) {
+                            if rt2.starts_with("Option<") || rt2.starts_with("Result<") || rt2 == "infer" {
+                                r_payload = l_payload
+                            }
+                        }
+                        None { r_payload = l_payload }
+                    }
+                }
                 if l_payload != "" && r_payload != "" && l_payload == r_payload {
                     let lc4 = c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
                     let rc4 = c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
@@ -935,11 +978,15 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                                             }
                                             None {
                                                 // 枚举构造器（Owner_Name()）返回结构体右值 → 语句表达式内落临时取其地址
+                                                print("DBG-PUSH fname=" + fname2 + " es=" + es)
                                                 let vown = variant_owner(fname2, vnames, vowners)
                                                 match vown {
                                                     Some(ow2) { addr = "(__extension__ ({ struct " + ow2 + " _t = " + arg_c + "; &_t; }))" }
                                                     None {
-                                                        if es.starts_with("sizeof(struct ") {
+                                                        if es == "sizeof(char*)" {
+                                                            addr = "&(char*){ " + arg_c + " }"
+                                                        }
+                                                        else if es.starts_with("sizeof(struct ") {
                                                             let tn3 = es[7..es.len() - 1]
                                                             if arg_c.starts_with("(struct") {
                                                                 // 已是同型复合字面量 → 直接取址
@@ -952,6 +999,14 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                                                     }
                                                 }
                                             }
+                                        }
+                                    }
+                                    EField(mb2, mm2) {
+                                        // 方法调用实参(cur.trim() 等): callee 为 EField → char* 复合字面量
+                                        if es == "sizeof(char*)" {
+                                            addr = "&(char*){ " + arg_c + " }"
+                                        } else {
+                                            addr = "&" + arg_c
                                         }
                                     }
                                     _ {}
@@ -1471,24 +1526,24 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 }
             }
             var mtail = mbase
-            // 兜底零值按臂值类型推断(扫全部臂取第一个可判定者; 臂 al_opt → al_none; 结构体 → 零值复合字面量)
+            // 兜底零值按臂值类型推断(展开块臂 → block_tail_expr → expr_value_ct)
             if marms.len() > 0 {
                 var vct0 = ""
                 var ai = 0
                 while ai < marms.len() {
                     let a0 = marms[ai]
-                    var vci = ""
+                    var inner: Vec<Stmt> = []
                     match a0.body {
-                        SExpr(mbe0) { vci = expr_value_ct(mbe0, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, user_types) }
-                        SBlock(mss0) {
-                            if mss0.len() > 0 {
-                                match mss0[mss0.len() - 1] {
-                                    SExpr(mbe0) { vci = expr_value_ct(mbe0, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, user_types) }
-                                    _ {}
-                                }
-                            }
+                        SBlock(ss0) {
+                            for s0 in ss0 { inner.push(s0) }
                         }
-                        _ {}
+                        _ { inner.push(a0.body) }
+                    }
+                    let tail0 = block_tail_expr(inner)
+                    var vci = ""
+                    match tail0 {
+                        Some(te) { vci = evc(te, enames, elists, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, user_types) }
+                        None {}
                     }
                     if vci != "" {
                         vct0 = vci
@@ -1566,7 +1621,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                             let mem = payload_member(Some(vt), user_types)
                             var access = mscrut_c + ".data." + mem
                             if mem.starts_with("t_") { access = "*" + access }
-                            bind_line = vct + " " + b0 + " = " + access + "; "
+                            bind_line = vct + " " + ckw_escape(b0) + " = " + access + "; "
                             bind_var = b0
                         }
                     }
@@ -1579,7 +1634,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                             let mem = payload_member(Some(vt), user_types)
                             var access = mscrut_c + ".data." + mem
                             if mem.starts_with("t_") { access = "*" + access }
-                            bind_line = vct + " " + b0 + " = " + access + "; "
+                            bind_line = vct + " " + ckw_escape(b0) + " = " + access + "; "
                             bind_var = b0
                         }
                     }
@@ -1634,7 +1689,8 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     }
                     _ {}
                 }
-                // Some(x)/Ok(x) 绑定 → 语句表达式 ({ T x = 载荷; BODY; })
+                // 臂绑定 → 语句表达式前缀。绑定类型用 __typeof__(union 成员):
+                // 无需字段类型元数据, 对 Some/Ok 与用户变体一视同仁
                 var mpre = ""
                 if (mpat == "Some" || mpat == "Ok") && mscrut_ty.starts_with("Option<") {
                     let binds = pat_binds(marm.pat)
@@ -1645,7 +1701,20 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         let mem = payload_member(Some(vt), user_types)
                         var access = mscrut_c + ".data." + mem
                         if mem.starts_with("t_") { access = "*" + access }
-                        mpre = "({ " + vct + " " + b0 + " = " + access + "; "
+                        mpre = "({ " + vct + " " + ckw_escape(b0) + " = " + access + "; "
+                        mbody = mbody + "; })"
+                    }
+                } else if mpat != "_" && mpat != "" && mscrut_ty != "" && contains_str(user_types, mscrut_ty) {
+                    let binds = pat_binds(marm.pat)
+                    if binds.len() > 0 {
+                        var pre2 = "({ "
+                        var bi = 0
+                        while bi < binds.len() {
+                            let acc = mscrut_c + ".data." + mpat + "._" + f"{bi}"
+                            pre2 = pre2 + "__typeof__(" + acc + ") " + binds[bi] + " = " + acc + "; "
+                            bi += 1
+                        }
+                        mpre = pre2
                         mbody = mbody + "; })"
                     }
                 }
@@ -1907,7 +1976,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                                                 None {}
                                             }
                                         } else {
-                                            vci = expr_value_ct(te, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, user_types)
+                                            vci = evc(te, enames, elists, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, user_types)
                                         }
                                         if vci != "" {
                                             ct_arm = vci

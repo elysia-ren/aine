@@ -585,7 +585,7 @@ fn pat_bind_lines(pat: String, scrut_c: String, mem: String, err_mem: String, vf
                 }
             }
         }
-        out.push(decl_ty + " " + b + " = " + access + ";")
+        out.push(decl_ty + " " + ckw_escape(b) + " = " + access + ";")
     }
     return out
 }
