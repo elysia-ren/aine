@@ -130,6 +130,8 @@ module alstr;
 module alcollect;
 module alee;
 fn main() -> Result<(), String> {
+    // 自测模式第 3 个参数: dump 生成的 C 源（verbose）
+    var verbose_dump = cli_args.len() >= 3
     // build 模式：aine build 经全局 args 传入 [目标文件, 输出 C 路径]
     if cli_args.len() >= 2 {
         let src = read_file(cli_args[0])
@@ -206,7 +208,7 @@ fn main() -> Result<(), String> {
     var p4a = c4.contains("al_substr")
     var p4b = c4.contains("char* g(")
     print("PROBE4 sub=" + f"{p4a}" + " g=" + f"{p4b}")
-    if !c4.contains("al_substr(s, i, (i + 2))") { return Err("case4 slice") }
+    if !c4.contains("al_substr_ch(s, i, (i + 2))") { return Err("case4 slice") }
     print("case4 if-slice OK")
     // case 5: array iteration
     let src5 = "fn sum(v: Vec<i32>) -> i32 {\n    var total = 0\n    for x in v {\n        total += x\n    }\n    return total\n}"
@@ -229,7 +231,7 @@ fn main() -> Result<(), String> {
     let p8 = parse_program(tokenize(src8))?
     let c8 = c_program(p8, collect_user_types(p8), collect_variant_names(p8), collect_variant_owners(p8), collect_fn_names(p8), collect_fn_returns(p8), collect_var_names(p8), collect_var_types(p8), collect_fn_ptypes(p8), collect_enum_ty_names(p8), collect_enum_variant_lists(p8))
     if !c8.contains("strcmp(two, \"==\") == 0") { return Err("case8 strcmp") }
-    if !c8.contains("al_substr(src, i, (i + 2))") { return Err("case8 slice") }
+    if !c8.contains("al_substr_ch(src, i, (i + 2))") { return Err("case8 slice") }
     print("case8 lexer-readop OK")
 
     // case 9: tokenize (struct + while + slice + strcmp + push)
@@ -272,33 +274,6 @@ fn main() -> Result<(), String> {
 
     // case 13: 自转译 — 读取自身源码并转译（自举闭环）
     let self_src = read_file("examples/transpiler.aine")
-    let mmr = parse_program(tokenize(read_file("tmp_mm.aine")))
-    match mmr {
-        Ok(mp3) => { print("PROBE mm ok")
-            var mi = 0
-            while mi < mp3.len() {
-                match mp3[mi] {
-                    SDef(fn3, pr3, rt3, bd3) { print("PROBE mm def: " + fn3) }
-                    _ {}
-                }
-                mi += 1
-            } }
-        Err(me3) => { print("PROBE mm ERR: " + me3) }
-    }
-    let alee_src = read_file("examples/alee.aine")
-    let alee_p = parse_program(tokenize(alee_src))
-    match alee_p {
-        Ok(fp) => { print("PROBE alee ok items=" + f"{fp.len()}")
-            var fi2 = 0
-            while fi2 < fp.len() {
-                match fp[fi2] {
-                    SDef(fn2, pr2, rt2, bd2) { print("PROBE alee def: " + fn2) }
-                    _ {}
-                }
-                fi2 += 1
-            } }
-        Err(fe) => { print("PROBE alee ERR: " + fe) }
-    }
     let toks13 = tokenize(self_src)
     let p13 = parse_program(toks13)?
     let c13 = c_program(p13, collect_user_types(p13), collect_variant_names(p13), collect_variant_owners(p13), collect_fn_names(p13), collect_fn_returns(p13), collect_var_names(p13), collect_var_types(p13), collect_fn_ptypes(p13), collect_enum_ty_names(p13), collect_enum_variant_lists(p13))
@@ -306,9 +281,11 @@ fn main() -> Result<(), String> {
     if !c13.contains("char* c_program(") { return Err("case13 self-sig") }
     if !c13.contains("read_file") { return Err("case13 read_file") }
     print("case13 self-transpile OK")
-    print("===SELF-BEGIN===")
-    print(c13)
-    print("===SELF-END===")
+    if verbose_dump {
+        print("===SELF-BEGIN===")
+        print(c13)
+        print("===SELF-END===")
+    }
 
     // case 14: 通用编译 — 编译真实 Aine 程序（fib.aine：递归 + for 区间 + f-string 调用插值）
     let fib_src = read_file("examples/fib.aine")
@@ -320,9 +297,11 @@ fn main() -> Result<(), String> {
     if !c14.contains("al_num(fib(i))") { return Err("case14 fstr-call") }
     if !c14.contains("printf(\"%s\\n\", ") { return Err("case14 print") }
     print("case14 fib-compile OK")
-    print("===FIB-BEGIN===")
-    print(c14)
-    print("===FIB-END===")
+    if verbose_dump {
+        print("===FIB-BEGIN===")
+        print(c14)
+        print("===FIB-END===")
+    }
 
     // case 15: 通用编译 — hello.aine（尾返回 + 中文 + if-else + for 区间 + f-string）
     let hello_src = read_file("examples/hello.aine")
@@ -334,9 +313,11 @@ fn main() -> Result<(), String> {
     if !c15.contains("for (int i = 0; i < 10; i++)") { return Err("case15 for-range") }
     if !c15.contains("al_num(result)") { return Err("case15 fstr-var") }
     print("case15 hello-compile OK")
-    print("===HELLO-BEGIN===")
-    print(c15)
-    print("===HELLO-END===")
+    if verbose_dump {
+        print("===HELLO-BEGIN===")
+        print(c15)
+        print("===HELLO-END===")
+    }
 
     // case 16: String split/trim/replace 方法
     let src16 = read_file("examples/strings.aine")
@@ -346,9 +327,11 @@ fn main() -> Result<(), String> {
     if !c16.contains("al_split(\"a,b,c\", \",\").len") { return Err("case16 split") }
     if !c16.contains("al_replace(\"hello world\", \"world\", \"aine\")") { return Err("case16 replace") }
     print("case16 strings OK")
-    print("===STRINGS-BEGIN===")
-    print(c16)
-    print("===STRINGS-END===")
+    if verbose_dump {
+        print("===STRINGS-BEGIN===")
+        print(c16)
+        print("===STRINGS-END===")
+    }
 
     // case 17: Vec<struct> 数组字面量（换行分隔 struct 项）
     let vs_src = read_file("examples/records.aine")
@@ -374,15 +357,14 @@ fn main() -> Result<(), String> {
     let toks18 = tokenize(ms_src)
     let p18 = parse_program(toks18)?
     let c18 = c_program(p18, collect_user_types(p18), collect_variant_names(p18), collect_variant_owners(p18), collect_fn_names(p18), collect_fn_returns(p18), collect_var_names(p18), collect_var_types(p18), collect_fn_ptypes(p18), collect_enum_ty_names(p18), collect_enum_variant_lists(p18))
-    if !c18.contains("__acc") { print("PROBE18 no-acc")
-        return Err("case18 mapsum") }
-    if !c18.contains("r.amount") { print("PROBE18 no-amount")
-        return Err("case18 closure-body") }
+    if !c18.contains("__acc") { return Err("case18 mapsum") }
     if !c18.contains("r.amount") { return Err("case18 closure-body") }
     print("case18 mapsum OK")
-    print("===MS-BEGIN===")
-    print(c18)
-    print("===MS-END===")
+    if verbose_dump {
+        print("===MS-BEGIN===")
+        print(c18)
+        print("===MS-END===")
+    }
 
     // case 19: 真实程序 todo.aine（方法链 + Result + ? 传播 + f64）
     let td_src = read_file("examples/todo.aine")
@@ -392,9 +374,11 @@ fn main() -> Result<(), String> {
     if !c19.contains("__acc") { return Err("case19 todo") }
     if !c19.contains("总余额") && !c19.contains("parse_amount") { return Err("case19 todo-src") }
     print("case19 todo OK")
-    print("===TD-BEGIN===")
-    print(c19)
-    print("===TD-END===")
+    if verbose_dump {
+        print("===TD-BEGIN===")
+        print(c19)
+        print("===TD-END===")
+    }
 
     // case 20: json.aine（Map 类型：set/keys/get + 枚举 Map 载荷）
     let js_src = read_file("stdlib/json.aine")
@@ -404,9 +388,11 @@ fn main() -> Result<(), String> {
     if !c20.contains("al_map") { return Err("case20 map-type") }
     if !c20.contains("m.keys") { return Err("case20 keys") }
     print("case20 json-map OK")
-    print("===JSON-BEGIN===")
-    print(c20)
-    print("===JSON-END===")
+    if verbose_dump {
+        print("===JSON-BEGIN===")
+        print(c20)
+        print("===JSON-END===")
+    }
 
     // case 21: char 实参 → String 形参自动转换（al_char_to_str）
     let ca_src = "fn is_digit(c: String) -> bool {\n    c >= \"0\" && c <= \"9\"\n}\n\nfn main() {\n    let s = \"a5\"\n    print(is_digit(s[0]))\n    print(is_digit(s[1]))\n}"
@@ -423,9 +409,11 @@ fn main() -> Result<(), String> {
     let c22 = c_program(p22, collect_user_types(p22), collect_variant_names(p22), collect_variant_owners(p22), collect_fn_names(p22), collect_fn_returns(p22), collect_var_names(p22), collect_var_types(p22), collect_fn_ptypes(p22), collect_enum_ty_names(p22), collect_enum_variant_lists(p22))
     if !c22.contains("parse_expr") { return Err("case22 parser-expr") }
     print("case22 parser-expr OK")
-    print("===PE-BEGIN===")
-    print(c22)
-    print("===PE-END===")
+    if verbose_dump {
+        print("===PE-BEGIN===")
+        print(c22)
+        print("===PE-END===")
+    }
 
     // case 23: 编译 Aine 组件 lexer.aine（B1 词法分析器）
     let lx_src = read_file("examples/lexer.aine")
@@ -433,9 +421,11 @@ fn main() -> Result<(), String> {
     let c23 = c_program(p23, collect_user_types(p23), collect_variant_names(p23), collect_variant_owners(p23), collect_fn_names(p23), collect_fn_returns(p23), collect_var_names(p23), collect_var_types(p23), collect_fn_ptypes(p23), collect_enum_ty_names(p23), collect_enum_variant_lists(p23))
     if !c23.contains("tokenize") { return Err("case23 lexer") }
     print("case23 lexer OK")
-    print("===LX-BEGIN===")
-    print(c23)
-    print("===LX-END===")
+    if verbose_dump {
+        print("===LX-BEGIN===")
+        print(c23)
+        print("===LX-END===")
+    }
 
     // case 24: 编译 Aine 组件 parser_stmt.aine（B4-M2 语句解析器）
     let ps_src = read_file("examples/parser_stmt.aine")
@@ -456,7 +446,9 @@ fn main() -> Result<(), String> {
 
     // case 26: 文件模块 —— mod name; 读入 examples/modtest_util.aine 打平编译
     let mt_src = read_file("examples/modtest_main.aine")
-    let p26 = parse_program(tokenize(mt_src))?
+    let mt_raw = parse_program(tokenize(mt_src))?
+    let mt_flt = flatten_stmts(mt_raw, "examples/", [])?
+    let p26 = mt_flt.out
     let c26 = c_program(p26, collect_user_types(p26), collect_variant_names(p26), collect_variant_owners(p26), collect_fn_names(p26), collect_fn_returns(p26), collect_var_names(p26), collect_var_types(p26), collect_fn_ptypes(p26), collect_enum_ty_names(p26), collect_enum_variant_lists(p26))
     if !c26.contains("char* shout(char* s);") { return Err("case26 module fn decl") }
     if !c26.contains("char* repeat(char* s, int n);") { return Err("case26 module fn decl2") }
@@ -466,15 +458,19 @@ fn main() -> Result<(), String> {
 
     // case 27: 标准库 —— mod 搜索路径（同目录 -> stdlib/），math/strutil/collections
     let std_src = read_file("examples/stdtest.aine")
-    let p27 = parse_program(tokenize(std_src))?
+    let std_raw = parse_program(tokenize(std_src))?
+    let std_flt = flatten_stmts(std_raw, "examples/", [])?
+    let p27 = std_flt.out
     let c27 = c_program(p27, collect_user_types(p27), collect_variant_names(p27), collect_variant_owners(p27), collect_fn_names(p27), collect_fn_returns(p27), collect_var_names(p27), collect_var_types(p27), collect_fn_ptypes(p27), collect_enum_ty_names(p27), collect_enum_variant_lists(p27))
     if !c27.contains("int gcd(int a, int b)") { return Err("case27 math") }
     if !c27.contains("char* reverse(char* s)") { return Err("case27 strutil") }
     if !c27.contains("al_vec range_vec(int n)") { return Err("case27 collections") }
     print("case27 stdlib OK")
-    print("===STD-BEGIN===")
-    print(c27)
-    print("===STD-END===")
+    if verbose_dump {
+        print("===STD-BEGIN===")
+        print(c27)
+        print("===STD-END===")
+    }
 
     // case 28: 闭包独立值 —— let 绑定 + 直接调用（非捕获、参数带注解、脱糖提升）
     let cl_src = read_file("examples/closuretest.aine")
@@ -484,9 +480,11 @@ fn main() -> Result<(), String> {
     if !c28.contains("char* greet(char* name)") { return Err("case28 lift-str") }
     if !c28.contains("f(21)") { return Err("case28 call") }
     print("case28 closure OK")
-    print("===CLS-BEGIN===")
-    print(c28)
-    print("===CLS-END===")
+    if verbose_dump {
+        print("===CLS-BEGIN===")
+        print(c28)
+        print("===CLS-END===")
+    }
 
     // case 29: 索引赋值 + assert —— v[i] = x 原地写入与断言内建（M4 用户导向补全）
     let idx_src = read_file("examples/idxtest.aine")
@@ -496,9 +494,11 @@ fn main() -> Result<(), String> {
     if !c29.contains("((int*)v.data)[1] += 1") { return Err("case29 idx-compound") }
     if !c29.contains("al_assert(") { return Err("case29 assert") }
     print("case29 idx-assign OK")
-    print("===IDX-BEGIN===")
-    print(c29)
-    print("===IDX-END===")
+    if verbose_dump {
+        print("===IDX-BEGIN===")
+        print(c29)
+        print("===IDX-END===")
+    }
 
     // case 30: 统一函数类型 —— fn(A,B)->R 参数发射为 C 函数指针（高阶函数）
     let ho_src = read_file("examples/hotest.aine")
@@ -507,9 +507,11 @@ fn main() -> Result<(), String> {
     if !c30.contains("int (*f)(int, int)") { return Err("case30 fn-ptr") }
     if !c30.contains("f(a, b)") { return Err("case30 fn-call") }
     print("case30 fn-type OK")
-    print("===HO-BEGIN===")
-    print(c30)
-    print("===HO-END===")
+    if verbose_dump {
+        print("===HO-BEGIN===")
+        print(c30)
+        print("===HO-END===")
+    }
 
     // case 31: 字面量 match 模式 —— 整数与负数模式发射值比较（B5-M33-2/3 固化）
     let lp_src = "fn sign(n: i32) -> String {\n    match n {\n        -1 => \"neg-one\"\n        0 => \"zero\"\n        1 => \"one\"\n        _ => \"other\"\n    }\n}"

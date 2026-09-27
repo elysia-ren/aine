@@ -397,14 +397,18 @@ fn al_unescape_body(body: String) -> String {
 
 // 十六进制数字 → 数值（非法返回 -1）
 fn al_hex_digit(ch: String) -> i32 {
-    if ch >= "0" && ch <= "9" {
-        return ch.to_i32()
+    if ch.len() == 0 {
+        return -1
     }
-    if ch >= "a" && ch <= "f" {
-        return 10 + (ch.to_i32() - "a".to_i32())
+    let cp = ch.codepoint_at(0)
+    if cp >= 48 && cp <= 57 {
+        return cp - 48
     }
-    if ch >= "A" && ch <= "F" {
-        return 10 + (ch.to_i32() - "A".to_i32())
+    if cp >= 97 && cp <= 102 {
+        return 10 + (cp - 97)
+    }
+    if cp >= 65 && cp <= 70 {
+        return 10 + (cp - 65)
     }
     return -1
 }

@@ -70,6 +70,10 @@ fn parse_postfix(tokens: Vec<Token>, mut base: Expr, mut i: i32) -> Result<EPRes
         if tok.text == "(" {
             i += 1
             var args: Vec<Expr> = []
+            // 实参表可跨行: ( 后、逗号后、) 前的换行都跳过
+            while tokens[i].kind == TSemi {
+                i += 1
+            }
             if tokens[i].text == ")" {
                 i += 1
                 base = ECall(base, args)
@@ -79,9 +83,20 @@ fn parse_postfix(tokens: Vec<Token>, mut base: Expr, mut i: i32) -> Result<EPRes
                 let r = parse_expr(tokens, i, 0)?
                 args.push(r.value)
                 i = r.next
+                while tokens[i].kind == TSemi {
+                    i += 1
+                }
                 let t = tokens[i]
                 if t.text == "," {
                     i += 1
+                    while tokens[i].kind == TSemi {
+                        i += 1
+                    }
+                    // 尾逗号: f(a, b,) 直接闭合
+                    if tokens[i].text == ")" {
+                        i += 1
+                        break
+                    }
                     continue
                 }
                 if t.text == ")" {
@@ -107,6 +122,16 @@ fn parse_postfix(tokens: Vec<Token>, mut base: Expr, mut i: i32) -> Result<EPRes
             continue
         }
         if tok.text == "[" {
+            // 开头省略切片 base[..b] ≡ base[0..b]
+            if tokens[i + 1].text == ".." {
+                let hi2 = parse_expr(tokens, i + 2, 0)?
+                if tokens[hi2.next].text != "]" {
+                    return Err("切片缺少 ]")
+                }
+                base = EIndex(base, ERange(EInt(0), hi2.value))
+                i = hi2.next + 1
+                continue
+            }
             // 索引或切片：base[idx] 或 base[a..b]
             let idx = parse_expr(tokens, i + 1, 0)?
             var j = idx.next
@@ -195,7 +220,7 @@ fn parse_closure(tokens: Vec<Token>, i: i32) -> Result<EPResult, String> {
                 continue
             }
             if tokens[j].kind != TIdent {
-                return Err(f"闭包参数需要名字 @'{tokens[j].text}'")
+                return Err(f"闭包参数需要名字 @'{tokens[j].text}' tok=" + f"{j}")
             }
             let pname = tokens[j].text
             j += 1
@@ -213,7 +238,7 @@ fn parse_closure(tokens: Vec<Token>, i: i32) -> Result<EPResult, String> {
         j += 1
     } else {
         if tokens[j].kind != TIdent {
-            return Err(f"闭包参数需要名字 @'{tokens[j].text}'")
+            return Err(f"闭包参数需要名字 @'{tokens[j].text}' tok=" + f"{j}")
         }
         params.push(Param { name: tokens[j].text ty: "" })
         j += 1
@@ -353,6 +378,11 @@ fn parse_prefix(tokens: Vec<Token>, i: i32) -> Result<EPResult, String> {
                     while tokens[j].kind == TSemi {
                         j += 1
                     }
+                    // 尾逗号: [a, b,] 直接闭合
+                    if tokens[j].text == "]" {
+                        j += 1
+                        break
+                    }
                     continue
                 }
                 if t.text == "]" {
@@ -365,7 +395,14 @@ fn parse_prefix(tokens: Vec<Token>, i: i32) -> Result<EPResult, String> {
             return Ok(EPResult { value: EVec(items) next: j })
         }
     }
-    return Err(f"无法解析前缀: '{tok.text}' pos=" + f"{i}")
+    var dbg = ""
+    var di = i - 8
+    if di < 0 { di = 0 }
+    while di < i + 8 && di < tokens.len() {
+        dbg = dbg + "[" + f"{di}" + "]" + tokens[di].text + " "
+        di += 1
+    }
+    return Err(f"无法解析前缀: '{tok.text}' pos=" + f"{i}" + " ctx: " + dbg)
 }
 
 
@@ -732,6 +769,13 @@ fn parse_fn(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {    let nam
     j += 1
     var params: Vec<Param> = []
     while tokens[j].text != ")" {
+        // 签名可跨行: 跳过参数表内换行
+        while tokens[j].kind == TSemi {
+            j += 1
+        }
+        if tokens[j].text == ")" {
+            break
+        }
         // mut 形参前缀（自解析 parse_let 等时必需）
         if tokens[j].text == "mut" {
             j += 1
@@ -757,6 +801,10 @@ fn parse_fn(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {    let nam
         j = ty_r.next
         if tokens[j].text == "," {
             j += 1
+            // 尾逗号 + 换行容忍
+            while tokens[j].kind == TSemi {
+                j += 1
+            }
         }
     }
     j += 1

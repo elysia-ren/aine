@@ -1,0 +1,21 @@
+// 自举tck 假错回归: 同名变量跨函数类型串扰
+// fn_a 的 s 是 String, fn_b 的 s 是 i32 — 修复前 fn_b 内 s - 1 误报"运算符 - 不支持字符串"
+fn fn_a(s: String) -> String {
+    return s + "!"
+}
+
+fn fn_b(s: i32) -> i32 {
+    return s - 1
+}
+
+fn fn_c(s: i32) -> i32 {
+    var t = s * 2
+    t = t / 2
+    return t
+}
+
+fn main() {
+    print(fn_a("hello"))
+    print(fn_b(10))
+    print(fn_c(4))
+}

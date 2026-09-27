@@ -1,0 +1,17 @@
+fn good(s: String) -> String {
+    return s + "!"
+}
+
+fn bad1(x: i32) -> i32 {
+    return y - 1
+}
+
+fn bad2() -> String {
+    return 5
+}
+
+fn main() {
+    print(good("a"))
+    print(bad1(3))
+    print(bad2())
+}

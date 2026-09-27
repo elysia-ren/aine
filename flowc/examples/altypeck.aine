@@ -332,8 +332,6 @@ fn tck_program(program: Vec<Stmt>) -> Vec<String> {
     let sftypes = collect_struct_ftypes(program)
     let enames = collect_enum_ty_names(program)
     let elists = collect_enum_variant_lists(program)
-    let vnames = collect_var_names(program)
-    let vtypes = collect_var_types(program)
     let varnames2 = collect_variant_names(program)
     let varowners2 = collect_variant_owners(program)
     // let 闭包名(脱糖前)视为已知函数
@@ -363,8 +361,33 @@ fn tck_program(program: Vec<Stmt>) -> Vec<String> {
         match s {
             SDef(name, params, ret, body) {
                 var pnames: Vec<String> = []
-                for pp in params { pnames.push(pp.name) }
-                let sub = tck_stmts(body, name, fnames_all, fptypes, freturns, pnames, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
+                var ptypes: Vec<String> = []
+                for pp in params {
+                    pnames.push(pp.name)
+                    ptypes.push(pp.ty)
+                }
+                // 函数作用域变量表: 全局 + 本函数参数/局部变量
+                // (消除跨函数同名变量类型串扰的假错, 如他函数 String 参数污染本函数同名变量)
+                var seed_n: Vec<String> = []
+                var seed_t: Vec<String> = []
+                for sg in program {
+                    match sg {
+                        SGlobalVar(gn, gt, gi2) {
+                            seed_n.push(gn)
+                            match gt {
+                                Some(gtv) { seed_t.push(gtv) }
+                                None { seed_t.push("infer") }
+                            }
+                        }
+                        _ {}
+                    }
+                }
+                for pi in 0..pnames.len() {
+                    seed_n.push(pnames[pi])
+                    seed_t.push(ptypes[pi])
+                }
+                let fn_vi = var_info_of_stmts(body, fnames_all, freturns, seed_n, seed_t, collect_enum_variant_names(program), collect_enum_variant_ftypes(program), snames, sfnames, sftypes)
+                let sub = tck_stmts(body, name, fnames_all, fptypes, freturns, pnames, fn_vi.names, fn_vi.types, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
                 for d in sub { diags.push(d) }
             }
             _ {}
