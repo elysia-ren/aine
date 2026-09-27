@@ -2478,7 +2478,7 @@ struct LexOutput lex(char* src) {
         continue;
       }
       diags = al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_error("表格块内只能包含表格行(以 | 开始和结束)或 @[/table]", (lineno - 1)); &_t; })));
-      blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_Paragraph(((al_vec){ 1, sizeof(int), (int[]){ Inline_AwTxt(line) } }))}));
+      blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_Paragraph(({ al_vec __v = { 0, sizeof(struct Inline), NULL }; { struct Inline _e0 = Inline_AwTxt(line); al_push(&__v, sizeof(_e0), &_e0); } __v; }))}));
       continue;
     }
     struct LineClass cls = classify(line); // let cls
@@ -2576,7 +2576,7 @@ struct CmdOutcome lex_command_line(char* chars, int lineno, al_vec diags, al_opt
         }
       }
       diags = al_push(&diags, sizeof(struct Diagnostic), &mut_d);
-      blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = lineno, .block = Block_Paragraph(((al_vec){ 1, sizeof(int), (int[]){ Inline_AwTxt(chars) } }))}));
+      blocks = al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = lineno, .block = Block_Paragraph(({ al_vec __v = { 0, sizeof(struct Inline), NULL }; { struct Inline _e0 = Inline_AwTxt(chars); al_push(&__v, sizeof(_e0), &_e0); } __v; }))}));
       return ((struct CmdOutcome){.blocks = blocks, .diags = diags, .raw = raw, .table = table});
     }
   }
@@ -2737,7 +2737,7 @@ int main(int _argc, char** _argv) {
   char* src = read_file("corpus/all_syntax.awen"); // let src
   if ((strstr(src, "[read_file error") != NULL)) {
     printf("%s\n", al_strcat(al_strcat("[corpus 加载失败: ", src), "](应以 awen-proto 为工作目录运行)"));
-    return;
+    return 0;
   }
   struct LexOutput out = lex(src); // let out
   int errors = 0; // var errors

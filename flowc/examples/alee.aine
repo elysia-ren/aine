@@ -1403,10 +1403,58 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         etag = "(struct " + t0 + "[])"
                         esz = "struct " + t0
                     }
+                    ECall(cf0, _) {
+                        // 变体构造元素(裸变体名) → 所属枚举 struct[]
+                        match cf0 {
+                            EIdent(cfn0) {
+                                var oi0 = 0
+                                for en0 in enames {
+                                    for pp0 in str_split(elists[oi0], ",") {
+                                        if pp0 == cfn0 {
+                                            etag = "(struct " + en0 + "[])"
+                                            esz = "struct " + en0
+                                        }
+                                    }
+                                    oi0 += 1
+                                }
+                            }
+                            _ {}
+                        }
+                    }
                     _ {}
                 }
             }
             var parts: Vec<String> = []
+            // 任一元素是变体构造(右值结构体) → 语句表达式逐元素 push(数组初始化器不接受右值结构体)
+            var has_ctor = false
+            for it in items {
+                match it {
+                    ECall(cf1, _) {
+                        match cf1 {
+                            EIdent(cfn1) {
+                                // 大写开头 = 变体构造(右值结构体)
+                                if cfn1.len() > 0 {
+                                    let c0 = cfn1[0]
+                                    if c0 >= "A" && c0 <= "Z" { has_ctor = true }
+                                }
+                            }
+                            _ {}
+                        }
+                    }
+                    _ {}
+                }
+            }
+            if has_ctor {
+                var st = "({ al_vec __v = { 0, sizeof(" + esz + "), NULL }; "
+                var ei = 0
+                for it in items {
+                    let ec = c_expr(it, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists)
+                    st = st + "{ " + esz + " _e" + f"{ei}" + " = " + ec + "; al_push(&__v, sizeof(_e" + f"{ei}" + "), &_e" + f"{ei}" + "); } "
+                    ei += 1
+                }
+                st = st + "__v; })"
+                return st
+            }
             for it in items {
                 parts.push(c_expr(it, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists))
             }
@@ -2331,7 +2379,10 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                     }
                     return pad + "return " + c_expr(x, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists) + ";"
                 }
-                None { return pad + "return;" }
+                None {
+                    if cur == "main" { return pad + "return 0;" }
+                    return pad + "return;"
+                }
             }
         }
         SExpr(e) {
