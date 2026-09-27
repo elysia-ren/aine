@@ -1,0 +1,16 @@
+struct R {
+    v: i32
+}
+
+fn edit(
+    prev: R,
+    node_id: i32,
+    new_text: i32,
+) -> R {
+    return prev
+}
+
+fn main() {
+    let r = edit(R { v: 1 }, 2, 3)
+    print(f"{r.v}")
+}

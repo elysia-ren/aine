@@ -1,0 +1,16 @@
+struct Issue {
+    severity: i32
+    code: String
+    line: i32
+}
+
+fn main() {
+    let issues: Vec<Issue> = []
+    var out = f"发现 {issues.len()} 个问题:\n"
+    for issue in issues {
+        var line_info = ""
+        if issue.line > 0 { line_info = f" (行 {issue.line + 1})" }
+        out = out + f"  [{issue.code}]{line_info}\n"
+    }
+    print(out)
+}

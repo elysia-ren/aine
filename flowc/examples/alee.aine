@@ -2277,7 +2277,7 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
     out = out + "  v->len++;\n"
     out = out + "}\n"
     out = out + "int al_chars_len(const char* s) { int n = 0; for (; *s; s++) { if ((*s & 0xC0) != 0x80) n++; } return n; }\n"
-    out = out + "long al_vec_get(void* vec, long idx) { long len = *(long*)vec; if (idx < 0 || idx >= len) return 0; long* data = (long*)((char*)vec + sizeof(long)); return data[idx]; }\n"
+    out = out + "void* al_vec_get(al_vec* vec, long idx) { if (idx < 0 || (size_t)idx >= vec->len) return NULL; return (void*)((char*)vec->data + idx * vec->elem_size); }\n"
     out = out + "const char* al_char_off(const char* s, long i) { while (i > 0 && *s) { s++; while ((*s & 0xC0) == 0x80) s++; i--; } return s; }\n"
     out = out + "char* al_char_at(const char* s, long i) { const char* p = al_char_off(s, i); long n = 1; while ((p[n] & 0xC0) == 0x80) n++; char* r = (char*)malloc(n + 1); memcpy(r, p, n); r[n] = 0; return r; }\n"
     out = out + "char* al_substr_ch(const char* s, long a, long b) { if (a < 0) a = 0; const char* p = al_char_off(s, a); const char* q = al_char_off(p, b - a); long n = q - p; char* r = (char*)malloc(n + 1); memcpy(r, p, n); r[n] = 0; return r; }\n"

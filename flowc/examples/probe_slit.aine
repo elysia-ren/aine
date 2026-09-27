@@ -1,0 +1,21 @@
+struct P {
+    x: i32
+    y: i32
+}
+
+fn take(p: P) -> i32 {
+    return p.x
+}
+
+fn main() {
+    let v: Vec<P> = []
+    v.push(P {
+        x: 1,
+        y: 2,
+    })
+    let n = take(P {
+        x: 3,
+        y: 4,
+    })
+    print(n)
+}

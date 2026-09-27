@@ -1,0 +1,15 @@
+struct A {
+    v: i32
+}
+
+struct B {
+    w: i32
+}
+
+fn two(a: A, b: Vec<B>) -> i32 {
+    return a.v
+}
+
+fn main() {
+    print(two(A { v: 1 }, []))
+}
