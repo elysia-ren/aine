@@ -75,6 +75,20 @@ fn c_op(op: String) -> String {
 }
 
 
+// 变体构造调用名(Owner_Variant 形态)的归属枚举名; 非此形态返回 ""
+fn ctor_owner_of(cfn: String, enames: Vec<String>) -> String {
+    var i = 0
+    for en in enames {
+        let prefix = en + "_"
+        if cfn.starts_with(prefix) && cfn.len() > prefix.len() {
+            return en
+        }
+        i += 1
+    }
+    return ""
+}
+
+
 // 表达式的 C 结果类型(兜底零值/临时声明用); 未知返回 ""
 fn expr_value_ct(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, user_types: Vec<String>) -> String {
     match e {
@@ -732,6 +746,52 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     let rc2 = c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                     // 两侧都取 .tag: 变量侧是枚举结构体, 变体侧是构造调用返回的结构体
                     return "(((" + lc2 + ").tag) " + c_op(op) + " ((" + rc2 + ").tag))"
+                }
+                // 枚举值 vs 变体构造调用(Owner_Variant(...) 形态, 操作数类型表不可用时的分派):
+                // a_kind == MarkerKind_MkExplicit(u.cmd) → al_eq_MarkerKind(a_kind, ctor_call)
+                if op == "==" || op == "!=" {
+                    var ctor_owner = ""
+                    var other_is_val = false
+                    match l {
+                        ECall(lcf, _) {
+                            match lcf {
+                                EIdent(lcn) { ctor_owner = ctor_owner_of(lcn, enames) }
+                                _ {}
+                            }
+                        }
+                        _ {}
+                    }
+                    match r {
+                        EIdent(_) { other_is_val = true }
+                        EField(_, _) { other_is_val = true }
+                        ECall(_, _) { other_is_val = true }
+                        _ {}
+                    }
+                    if ctor_owner == "" {
+                        match r {
+                            ECall(rcf, _) {
+                                match rcf {
+                                    EIdent(rcn) { ctor_owner = ctor_owner_of(rcn, enames) }
+                                    _ {}
+                                }
+                            }
+                            _ {}
+                        }
+                        match l {
+                            EIdent(_) { other_is_val = true }
+                            EField(_, _) { other_is_val = true }
+                            ECall(_, _) { other_is_val = true }
+                            _ {}
+                        }
+                    }
+                    if ctor_owner != "" && other_is_val {
+                        let lc3 = c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        let rc3 = c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        if op == "!=" {
+                            return "(!al_eq_" + ctor_owner + "(" + lc3 + ", " + rc3 + "))"
+                        }
+                        return "(al_eq_" + ctor_owner + "(" + lc3 + ", " + rc3 + "))"
+                    }
                 }
                 // 枚举类型值比较: al_eq_T(a, b)（C 结构体无 ==; T 为用户枚举）
                 let l_bt = base_type(l, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
@@ -1720,6 +1780,23 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                             bind_var = b0
                         }
                     }
+                    // 用户变体臂绑定: __typeof__ 声明 + 类型入表
+                    if mpat != "_" && mpat != "" && mpat != "Some" && mpat != "Ok" && mpat != "None" && mpat != "Err" && mscrut_ty != "" && contains_str(user_types, mscrut_ty) {
+                        let binds = pat_binds(marm.pat)
+                        if binds.len() > 0 {
+                            var bl2 = ""
+                            var bi2 = 0
+                            while bi2 < binds.len() {
+                                let acc = mscrut_c + ".data." + mpat + "._" + f"{bi2}"
+                                bl2 = bl2 + "__typeof__(" + acc + ") " + ckw_escape(binds[bi2]) + " = " + acc + "; "
+                                varnames.push(binds[bi2])
+                                vartypes.push(mscrut_ty)
+                                bi2 += 1
+                            }
+                            bind_line = bl2
+                            bind_var = binds[0]
+                        }
+                    }
                     // 臂体: 值语句赋 _mv; return 原样; 其余语句透传
                     var body_stmts = ""
                     match marm.body {
@@ -1803,15 +1880,8 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 }
                 // 臂绑定 → 语句表达式前缀。绑定类型用 __typeof__(union 成员):
                 // 无需字段类型元数据, 对 Some/Ok 与用户变体一视同仁
+                // 绑定同步推入解释器侧变量表(Vec 共享) — 后续发射按真实类型分派
                 var mpre = ""
-                if mscrut_ty == "" {
-                    match mscrut {
-                        EField(EIdent(bn), _) {
-                            print("DBG-MPRE-FAIL base=" + bn + " vt=" + f"{var_type(bn, varnames, vartypes)}")
-                        }
-                        _ {}
-                    }
-                }
                 if (mpat == "Some" || mpat == "Ok") && mscrut_ty.starts_with("Option<") {
                     let binds = pat_binds(marm.pat)
                     if binds.len() > 0 {
@@ -1823,6 +1893,8 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         if mem.starts_with("t_") { access = "*" + access }
                         mpre = "({ " + vct + " " + ckw_escape(b0) + " = " + access + "; "
                         mbody = mbody + "; })"
+                        varnames.push(b0)
+                        vartypes.push(vt)
                     }
                 } else if mpat != "_" && mpat != "" && mscrut_ty != "" && contains_str(user_types, mscrut_ty) {
                     let binds = pat_binds(marm.pat)
@@ -1831,7 +1903,9 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         var bi = 0
                         while bi < binds.len() {
                             let acc = mscrut_c + ".data." + mpat + "._" + f"{bi}"
-                            pre2 = pre2 + "__typeof__(" + acc + ") " + binds[bi] + " = " + acc + "; "
+                            pre2 = pre2 + "__typeof__(" + acc + ") " + ckw_escape(binds[bi]) + " = " + acc + "; "
+                            varnames.push(binds[bi])
+                            vartypes.push(mscrut_ty)
                             bi += 1
                         }
                         mpre = pre2
