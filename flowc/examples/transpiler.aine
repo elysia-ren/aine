@@ -323,7 +323,7 @@ fn main() -> Result<(), String> {
     let src3 = "fn build() -> Vec<i32> {\n    var v = []\n    v.push(1)\n    return v\n}"
     let p3 = parse_program(tokenize(src3))?
     let c3 = c_program(p3, collect_user_types(p3), collect_variant_names(p3), collect_variant_owners(p3), collect_fn_names(p3), collect_fn_returns(p3), collect_var_names(p3), collect_var_types(p3), collect_fn_ptypes(p3), collect_enum_ty_names(p3), collect_enum_variant_lists(p3))
-    if !c3.contains("al_push(&v, sizeof(int), &(int){ 1 })") { return Err("case3 push") }
+    if !c3.contains("al_vec_clone(v)") || !c3.contains("al_push(&_b, sizeof(int), &(int){ 1 })") { return Err("case3 push") }
     print("case3 vec OK")
 
     // case 4: if-expression and slice

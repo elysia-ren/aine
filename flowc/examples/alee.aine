@@ -1146,8 +1146,10 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                             _ {}
                         }
                         // push 表达式语义(Aine: push 返回 Vec 本身) → 语句表达式:
-                        // 语句+取值, 不依赖 al_push 的 C 返回值; base 须为 lvalue
-                        return "({ al_push(&" + c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ", " + es + ", " + addr + "); " + c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + "; })"
+                        // clone-再-push: C 值语义下 base 的 data 指针可能被多处共享
+                        // (struct 拷贝/let 别名), 原地 realloc 会使其他持有者悬挂
+                        let base_c = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        return "({ al_vec _b = al_vec_clone(" + base_c + "); al_push(&_b, " + es + ", " + addr + "); _b; })"
                     }
                     if mname == "to_i32" && args.len() == 0 {
                         return "atoi(" + c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
