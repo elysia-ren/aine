@@ -3021,7 +3021,8 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                 let arm_binds = pat_binds(arm.pat)
                 let arm_nl = arm_ctors.len()
                 for arm_bi in 0..arm_binds.len() {
-                    let b0 = arm_binds[arm_bi]
+                    // 键用 ckw_escape 后的名字(与 pat_bind_lines 声明行及臂体引用一致)
+                    let b0 = ckw_escape(arm_binds[arm_bi])
                     var bt2 = ""
                     if arm_nl > 0 {
                         let last_ctor = arm_ctors[arm_nl - 1]
