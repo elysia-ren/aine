@@ -2758,7 +2758,7 @@ al_opt buffer_apply(struct Buffer b, struct TextPatch p) {
   return al_some_t_Buffer(((struct Buffer){.content = al_strcat(al_strcat(al_substr_ch(b.content, 0, p.start), p.new), al_substr_ch(b.content, (p.start + al_chars_len(p.old)), al_chars_len(b.content)))}));
   }
 }
-int main(int _argc, char** _argv) {
+int main(int _argc, char** _argv) { setvbuf(stdout, NULL, _IONBF, 0);
   al_cli_args = (al_vec){ 0, sizeof(char*), NULL };
   for (int _ai = 1; _ai < _argc; _ai++) { char* _av = _argv[_ai]; al_push(&al_cli_args, sizeof(char*), (void*)&_av); }
   {

@@ -1,0 +1,30 @@
+struct Inner {
+    tag: i32
+}
+
+struct Holder {
+    children: Vec<Inner>
+}
+
+fn scan_field(h: Holder) -> i32 {
+    var n = 0
+    for c in h.children {
+        n = n + c.tag
+    }
+    return n
+}
+
+fn scan_local(h: Holder) -> i32 {
+    var n = 0
+    let cs = h.children
+    for c in cs {
+        n = n + c.tag
+    }
+    return n
+}
+
+fn main() {
+    let h = Holder { children: [] }
+    print(scan_field(h))
+    print(scan_local(h))
+}

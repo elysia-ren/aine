@@ -1,0 +1,40 @@
+struct Inline {
+    kind: i32
+    text: String
+}
+
+fn inline_plain(items: Vec<Inline>) -> String {
+    var out = ""
+    for it in items {
+        out = out + it.text
+    }
+    return out
+}
+
+struct Frame {
+    kind: Option<MK2>
+    children: Vec<Node2>
+}
+
+struct Node2 {
+    tag: i32
+}
+
+enum MK2 {
+    MkBold
+}
+
+fn build(children: Vec<Node2>) -> i32 {
+    var n = 0
+    for child in children {
+        n = n + child.tag
+    }
+    return n
+}
+
+fn main() {
+    let v: Vec<Inline> = []
+    print(inline_plain(v))
+    let c: Vec<Node2> = []
+    print(build(c))
+}

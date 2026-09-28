@@ -1,0 +1,19 @@
+enum MK {
+    MkBold
+    MkExplicit(Cmd)
+}
+
+struct Frame {
+    kind: Option<MK>
+    children: Vec<i32>
+}
+
+fn check(frames: Vec<Frame>, a_kind: MK) -> bool {
+    let top = frames[frames.len() - 1].kind
+    return top == Some(a_kind)
+}
+
+fn main() {
+    let fs: Vec<Frame> = []
+    print(check(fs, MkBold))
+}
