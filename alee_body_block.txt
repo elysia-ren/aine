@@ -1,0 +1,161 @@
+                // 臂体：绑定解构 + 语句/返回值
+                var ab: Vec<String> = []
+
+                let blines = pat_bind_lines(arm.pat, scrut_c, mem, err_mem, vfnames, vftypes, user_types, scrut_ty, vnames, vowners)
+
+                for bl in blines { ab.push(pad + "  " + bl) }
+                // 全值捕获臂(非变体标识符, 如 other { ... }): 绑定 scrut 整体
+                match variant_owner(pat_name, vnames, vowners) {
+                    None {
+                        if pat_name != "_" && pat_name != "" && pat_name != "Some" && pat_name != "Ok" && pat_name != "None" && pat_name != "Err" && scrut_ty != "" && contains_str(user_types, scrut_ty) {
+                            ab.push(pad + "  " + c_type(Some(scrut_ty), user_types) + " " + pat_name + " = " + scrut_c + ";")
+                        }
+                    }
+                    Some(_) {}
+                }
+                // 臂局部变量表: 模式绑定类型取自 pat_bind_lines 声明行("T name = ...;")
+                var arm_names: Vec<String> = []
+                var arm_types: Vec<String> = []
+                for a2 in varnames { arm_names.push(a2) }
+                for a3 in vartypes { arm_types.push(a3) }
+                for bl in blines {
+                    var eqi = 0 - 1
+                    var ci2 = 0
+                    while ci2 < bl.len() {
+                        if bl[ci2..ci2 + 3] == " = " {
+                            eqi = ci2
+                            ci2 = bl.len()
+                        }
+                        ci2 += 1
+                    }
+                    if eqi > 0 {
+                        let lhs = bl[0..eqi]
+                        var lsi = 0 - 1
+                        var ci3 = 0
+                        while ci3 < lhs.len() {
+                            if lhs[ci3..ci3 + 1] == " " { lsi = ci3 }
+                            ci3 += 1
+                        }
+                        if lsi > 0 {
+                            // 声明行的 C 类型 → 表约定的 Aine 类型(下游 c_type 再映射)
+                            var bty = lhs[0..lsi]
+                            let bnm = lhs[lsi + 1..lhs.len()]
+                            if bty.starts_with("struct ") {
+                                bty = bty[7..bty.len()]
+                            } else if bty == "char*" {
+                                bty = "String"
+                            } else if bty == "int" {
+                                bty = "i32"
+                            } else if bty == "double" {
+                                bty = "f64"
+                            }
+                            var hit2 = 0 - 1
+                            var ci4 = 0
+                            while ci4 < arm_names.len() {
+                                if arm_names[ci4] == bnm { hit2 = ci4 }
+                                ci4 += 1
+                            }
+                            if hit2 >= 0 {
+                                arm_types[hit2] = bty
+                            } else {
+                                arm_names.push(bnm)
+                                arm_types.push(bty)
+                            }
+                        }
+                    }
+                }
+                match arm.body {
+                    SExpr(be) {
+                        var is_ctrl = false
+                        match be {
+                            EIdent(beid) {
+                                if beid == "break" {
+                                    ab.push(pad + "  break;")
+                                    is_ctrl = true
+                                } else if beid == "continue" {
+                                    ab.push(pad + "  continue;")
+                                    is_ctrl = true
+                                }
+                            }
+                            _ {}
+                        }
+                        if !is_ctrl {
+                            if is_print_call(be) {
+                                match be {
+                                    ECall(c3, a3) {
+                                        ab.push(c_print_stmt(a3, pad + "  ", user_types, vnames, vowners, fnames, freturns, arm_names, arm_types, snames, sfnames, sftypes, fptypes, enames, elists, vfnames, vftypes))
+                                    }
+                                    _ {}
+                                }
+                            } else {
+                                var is_method = false
+                                match be {
+                                    ECall(mc, ma) {
+                                        match mc {
+                                            EField(_, _) { is_method = true }
+                                            _ {}
+                                        }
+                                    }
+                                    _ {}
+                                }
+                                if is_method {
+                                    // 方法调用语句（如 v.push(x)）→ 非返回值
+                                    ab.push(pad + "  " + c_expr(be, user_types, vnames, vowners, arm_names, arm_types, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";")
+                                } else {
+                                    ab.push(pad + "  return " + c_expr(be, user_types, vnames, vowners, arm_names, arm_types, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";")
+                                }
+                            }
+                        }
+                    }
+                    _ {
+                        // 尾 match：臂体 SBlock 块尾为值表达式 → 块前段正常发射 + 尾值 return
+                        //（B5-M33：match 尾构造调用此前被当语句发射，丢返回值）
+                        var bd = c_stmt(arm.body, pad + "  ", user_types, vnames, vowners, fnames, freturns, arm_names, arm_types, cur, vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false)
+                        if tail {
+                            match arm.body {
+                                SBlock(stmts2) {
+                                    if stmts2.len() > 0 {
+                                        let last2 = stmts2[stmts2.len() - 1]
+                                        match last2 {
+                                            SExpr(be2) {
+                                                var is_ctrl2 = false
+                                                match be2 {
+                                                    EIdent(beid2) {
+                                                        if beid2 == "break" || beid2 == "continue" { is_ctrl2 = true }
+                                                    }
+                                                    _ {}
+                                                }
+                                                var is_print2 = is_print_call(be2)
+                                                var is_meth2 = false
+                                                match be2 {
+                                                    ECall(mc2, ma2) {
+                                                        match mc2 {
+                                                            EField(_, _) { is_meth2 = true }
+                                                            _ {}
+                                                        }
+                                                    }
+                                                    _ {}
+                                                }
+                                                if !is_ctrl2 && !is_print2 && !is_meth2 {
+                                                    // 前段语句正常发射（非尾）
+                                                    var pre: Vec<String> = []
+                                                    var pi = 0
+                                                    while pi < stmts2.len() - 1 {
+                                                        pre.push(c_stmt(stmts2[pi], pad + "  ", user_types, vnames, vowners, fnames, freturns, arm_names, arm_types, cur, vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false))
+                                                        pi += 1
+                                                    }
+                                                    var bd2 = ""
+                                                    for pl in pre { bd2 = bd2 + pl + "\n" }
+                                                    bd = bd2 + pad + "  return " + c_expr(be2, user_types, vnames, vowners, arm_names, arm_types, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";"
+                                                }
+                                            }
+                                            _ {}
+                                        }
+                                    }
+                                }
+                                _ {}
+                            }
+                        }
+                        ab.push(bd)
+                    }
+                }

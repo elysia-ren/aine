@@ -3011,69 +3011,6 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                     }
                     Some(_) {}
                 }
-                // 臂局部变量表: 模式绑定类型经 enum_field_ty 直出 Aine 类型
-                // (Vec<Inline> 等泛型完整保留; 此前解析 C 声明行会丢泛型 → for-in 退字符串模板)
-                var arm_names: Vec<String> = []
-                var arm_types: Vec<String> = []
-                for a2 in varnames { arm_names.push(a2) }
-                for a3 in vartypes { arm_types.push(a3) }
-                let arm_ctors = pat_ctors(arm.pat)
-                let arm_binds = pat_binds(arm.pat)
-                let arm_nl = arm_ctors.len()
-                for arm_bi in 0..arm_binds.len() {
-                    let b0 = arm_binds[arm_bi]
-                    var bt2 = ""
-                    if arm_nl > 0 {
-                        let last_ctor = arm_ctors[arm_nl - 1]
-                        if last_ctor == "Some" || last_ctor == "Ok" {
-                            if scrut_ty.starts_with("Option<") || scrut_ty.starts_with("Result<") {
-                                bt2 = first_type_arg(scrut_ty)
-                            }
-                        } else if last_ctor == "Err" {
-                            if scrut_ty.starts_with("Result<") {
-                                bt2 = second_type_arg(scrut_ty)
-                            }
-                        } else {
-                            let path2 = pat_bind_path(arm.pat, b0)
-                            let idxs2 = str_split(path2, ",")
-                            let last_idx2 = idxs2[idxs2.len() - 1]
-                            let ft2 = enum_field_ty(last_ctor, last_idx2, vfnames, vftypes)
-                            match ft2 {
-                                Some(ftv2) { bt2 = ftv2 }
-                                None {}
-                            }
-                        }
-                    }
-                    if bt2 != "" {
-                        var hit3 = 0 - 1
-                        var ci4 = 0
-                        while ci4 < arm_names.len() {
-                            if arm_names[ci4] == b0 { hit3 = ci4 }
-                            ci4 += 1
-                        }
-                        if hit3 >= 0 {
-                            arm_types[hit3] = bt2
-                        } else {
-                            arm_names.push(b0)
-                            arm_types.push(bt2)
-                        }
-                    }
-                }
-                // 臂体：绑定解构 + 语句/返回值
-                var ab: Vec<String> = []
-
-                let blines = pat_bind_lines(arm.pat, scrut_c, mem, err_mem, vfnames, vftypes, user_types, scrut_ty, vnames, vowners)
-
-                for bl in blines { ab.push(pad + "  " + bl) }
-                // 全值捕获臂(非变体标识符, 如 other { ... }): 绑定 scrut 整体
-                match variant_owner(pat_name, vnames, vowners) {
-                    None {
-                        if pat_name != "_" && pat_name != "" && pat_name != "Some" && pat_name != "Ok" && pat_name != "None" && pat_name != "Err" && scrut_ty != "" && contains_str(user_types, scrut_ty) {
-                            ab.push(pad + "  " + c_type(Some(scrut_ty), user_types) + " " + pat_name + " = " + scrut_c + ";")
-                        }
-                    }
-                    Some(_) {}
-                }
                 // 臂局部变量表: 模式绑定类型取自 pat_bind_lines 声明行("T name = ...;")
                 var arm_names: Vec<String> = []
                 var arm_types: Vec<String> = []
