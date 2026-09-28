@@ -781,6 +781,24 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     // 两侧都取 .tag: 变量侧是枚举结构体, 变体侧是构造调用返回的结构体
                     return "(((" + lc2 + ").tag) " + c_op(op) + " ((" + rc2 + ").tag))"
                 }
+                if op == "==" || op == "!=" {
+                    // 诊断: Option 比较若未走 al_eq 分派, 报告两侧解析状态
+                    var r_some = false
+                    match r {
+                        ECall(rcf2, _) {
+                            match rcf2 {
+                                EIdent(rn2) { if rn2 == "Some" || rn2 == "Ok" { r_some = true } }
+                                _ {}
+                            }
+                        }
+                        _ {}
+                    }
+                    if r_some {
+                        let lb3 = base_type(l, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                        let rb3 = base_type(r, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                        print("[aine-diag] raw== opt pair: l_bt=", f"{lb3}", " r_bt=", f"{rb3}")
+                    }
+                }
                 // 枚举值 vs 变体构造调用(Owner_Variant(...) 形态, 操作数类型表不可用时的分派):
                 // a_kind == MarkerKind_MkExplicit(u.cmd) → al_eq_MarkerKind(a_kind, ctor_call)
                 if op == "==" || op == "!=" {
@@ -2502,6 +2520,11 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
             var len_expr = "strlen(" + iter_c + ")"
             var acc_expr = iter_c + "[_i]"
             let itt = base_type(iter, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+            if itt == None {
+                // 诊断: 迭代类型推断失败(将退字符串模板) — 报告可迭代与表值
+                print("[aine-diag] for-in elem unresolved: iter=", iter_c)
+
+            }
             match itt {
                 Some(t) {
                     if t.starts_with("Vec<") {
