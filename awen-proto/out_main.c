@@ -2666,7 +2666,7 @@ struct CmdOutcome lex_command_line(char* chars, int lineno, al_vec diags, al_opt
       if (is_raw_block(u.cmd)) {
         int header_empty = (u.content.tag == 0 ? 1 : (u.content.tag == 1 ? ({ char* c = u.content.data.s; (strlen(c) == 0); }) : 0)); // let header_empty
         char* rest = al_substr_ch(chars, consumed, strlen(chars)); // let rest
-        if ((header_empty && (al_chars_len(al_trim(rest)) == 0))) {
+        if ((header_empty && (strlen(al_trim(rest)) == 0))) {
           al_opt lang = al_none(); // var lang
           if (((u.cmd.tag == Code) && (u.args.len > 0))) {
             lang = al_some_s(arg_plain(((struct Arg*)(u.args.data))[0]));
@@ -2813,7 +2813,7 @@ al_opt buffer_apply(struct Buffer b, struct TextPatch p) {
   }
   return al_none();
 }
-int main(int _argc, char** _argv) {
+int main(int _argc, char** _argv) { setvbuf(stdout, NULL, _IONBF, 0);
   al_cli_args = (al_vec){ 0, sizeof(char*), NULL };
   for (int _ai = 1; _ai < _argc; _ai++) { char* _av = _argv[_ai]; al_push(&al_cli_args, sizeof(char*), (void*)&_av); }
   {

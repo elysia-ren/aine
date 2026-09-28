@@ -1329,7 +1329,28 @@ fn base_type(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<
         EIdent(n) { return var_type(n, varnames, vartypes) }
         ECall(callee, args) {
             match callee {
-                EIdent(fname) { return fn_return(fname, fnames, freturns) }
+                EIdent(fname) {
+                    // 变体构造调用: Some(x)/Ok(x) → Option<typeof(x)>
+                    if fname == "Some" || fname == "Ok" {
+                        if args.len() == 1 {
+                            let at = base_type(args[0], varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                            match at {
+                                Some(atv) { return Some("Option<" + atv + ">") }
+                                None { return None }
+                            }
+                        }
+                        return None
+                    }
+                    return fn_return(fname, fnames, freturns)
+                }
+                EField(ib, mname) {
+                    // 方法调用 → method_ret(仅具体类型; 裸 Vec/Option/infer 不作数)
+                    let mr = method_ret(mname, args.len())
+                    if mr == "infer" || mr == "()" || mr == "" || mr == "Vec" || mr == "Option" || mr == "Map" {
+                        return None
+                    }
+                    return Some(mr)
+                }
                 _ { return None }
             }
         }

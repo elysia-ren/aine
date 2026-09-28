@@ -27,4 +27,13 @@ fn main() {
     let h = Holder { children: [] }
     print(scan_field(h))
     print(scan_local(h))
+    print(split_iter("a,bb,ccc"))
+}
+
+fn split_iter(s: String) -> i32 {
+    var n = 0
+    for seg in s.split(",") {
+        n = n + seg.len()
+    }
+    return n
 }
