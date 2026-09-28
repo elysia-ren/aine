@@ -1279,16 +1279,19 @@ struct Diagnostic diag_error(char* message, int line) {
   {
   return ((struct Diagnostic){.severity = ((struct Severity){ .tag = SevError }), .message = message, .hint = al_none(), .line = line});
   }
+  return ((struct Diagnostic){ 0 });
 }
 struct Diagnostic diag_warning(char* message, int line) {
   {
   return ((struct Diagnostic){.severity = ((struct Severity){ .tag = SevWarning }), .message = message, .hint = al_none(), .line = line});
   }
+  return ((struct Diagnostic){ 0 });
 }
 struct Diagnostic diag_hint(struct Diagnostic d, char* hint) {
   {
   return ((struct Diagnostic){.severity = d.severity, .message = d.message, .hint = al_some_s(hint), .line = d.line});
   }
+  return ((struct Diagnostic){ 0 });
 }
 al_opt lookup(char* name) {
   {
@@ -1363,21 +1366,25 @@ al_opt lookup(char* name) {
   }
   return al_none();
   }
+  return al_none();
 }
 int is_raw_block(struct ExplicitCommand cmd) {
   {
   return (((((cmd).tag) == ((ExplicitCommand_Math()).tag)) || (((cmd).tag) == ((ExplicitCommand_Code()).tag))) || (((cmd).tag) == ((ExplicitCommand_Comment()).tag)));
   }
+  return 0;
 }
 int is_doc_level(struct ExplicitCommand cmd) {
   {
   return ((((((((((cmd).tag) == ((ExplicitCommand_Page()).tag)) || (((cmd).tag) == ((ExplicitCommand_Margin()).tag))) || (((cmd).tag) == ((ExplicitCommand_Font()).tag))) || (((cmd).tag) == ((ExplicitCommand_Size()).tag))) || (((cmd).tag) == ((ExplicitCommand_LineSpacing()).tag))) || (((cmd).tag) == ((ExplicitCommand_FirstLine()).tag))) || (((cmd).tag) == ((ExplicitCommand_Theme()).tag))) || (((cmd).tag) == ((ExplicitCommand_Numbering()).tag)));
   }
+  return 0;
 }
 int is_scoped(struct ExplicitCommand cmd) {
   {
   return (((((((cmd).tag) == ((ExplicitCommand_Bold()).tag)) || (((cmd).tag) == ((ExplicitCommand_Font()).tag))) || (((cmd).tag) == ((ExplicitCommand_Size()).tag))) || (((cmd).tag) == ((ExplicitCommand_Color()).tag))) || (((cmd).tag) == ((ExplicitCommand_U()).tag)));
   }
+  return 0;
 }
 int close_matches(struct ExplicitCommand cmd, char* close_name) {
   {
@@ -1389,6 +1396,7 @@ int close_matches(struct ExplicitCommand cmd, char* close_name) {
   }
   return __extension__ ({ al_opt _l = (lookup(close_name)); al_opt _r = (al_some_t_ExplicitCommand(cmd)); (_l.tag == _r.tag && (_l.tag == 0 || al_eq_ExplicitCommand(*_l.data.t_ExplicitCommand, *_r.data.t_ExplicitCommand))); });
   }
+  return 0;
 }
 al_opt positional_arity(struct ExplicitCommand cmd) {
   {
@@ -1403,6 +1411,7 @@ al_opt positional_arity(struct ExplicitCommand cmd) {
   }
   return al_none();
   }
+  return al_none();
 }
 al_opt fw_normalize_in_command(char* c) {
   {
@@ -1414,6 +1423,7 @@ al_opt fw_normalize_in_command(char* c) {
   }
   return al_none();
   }
+  return al_none();
 }
 al_opt fw_normalize_comma_in_row(char* c) {
   {
@@ -1422,19 +1432,22 @@ al_opt fw_normalize_comma_in_row(char* c) {
   }
   return al_none();
   }
+  return al_none();
 }
 int fw_is_ideo_space(char* c) {
   {
   return (strcmp(c, "　") == 0);
   }
+  return 0;
 }
 int starts_with_at(char* s, int i, char* pat) {
   {
-  if (((i < 0) || ((i + al_chars_len(pat)) > al_chars_len(s)))) {
+  if (((i < 0) || ((i + strlen(pat)) > strlen(s)))) {
     return 0;
   }
-  return (strcmp(al_substr_ch(s, i, (i + al_chars_len(pat))), pat) == 0);
+  return (strcmp(al_substr_ch(s, i, (i + strlen(pat))), pat) == 0);
   }
+  return 0;
 }
 al_opt escape_scan(char* s, int i) {
   {
@@ -1460,14 +1473,15 @@ al_opt escape_scan(char* s, int i) {
     return al_some_t_EscapeHit(((struct EscapeHit){.consumed = 2, .text = "`"}));
   }
   int j = (i + 1); // var j
-  while ((((j < al_chars_len(s)) && (s[j] >= '0')) && (s[j] <= '9'))) {
+  while ((((j < strlen(s)) && (s[j] >= '0')) && (s[j] <= '9'))) {
     j += 1;
   }
-  if ((((j > (i + 1)) && (j < al_chars_len(s))) && (s[j] == '.'))) {
+  if ((((j > (i + 1)) && (j < strlen(s))) && (s[j] == '.'))) {
     return al_some_t_EscapeHit(((struct EscapeHit){.consumed = ((j - i) + 1), .text = al_substr_ch(s, (i + 1), (j + 1))}));
   }
   return al_none();
   }
+  return al_none();
 }
 char* arg_plain(struct Arg a) {
   {
@@ -1484,6 +1498,7 @@ char* arg_plain(struct Arg a) {
     }
   }
   }
+  return "";
 }
 int ex_is_name_char(char* c) {
   {
@@ -1510,6 +1525,7 @@ int ex_is_name_char(char* c) {
   }
   return 0;
   }
+  return 0;
 }
 int ex_is_atom_char(char* c) {
   {
@@ -1524,18 +1540,20 @@ int ex_is_atom_char(char* c) {
   }
   return 1;
   }
+  return 0;
 }
 struct ParseErr space_err() {
   {
   return ((struct ParseErr){.msg = "全角空格(U+3000)不是语法分隔符", .hint = al_some_s("未加引号的值不能包含空格,请使用双引号(规范 §6.10)")});
   }
+  return ((struct ParseErr){ 0 });
 }
 al_opt ex_scan_balanced(char* s, int start) {
   {
   int depth = 1; // var depth
   char* out = al_strdup_lit(""); // var out
   int i = start; // var i
-  while ((i < al_chars_len(s))) {
+  while ((i < strlen(s))) {
     char c = s[i]; // let c
     if ((c == '[')) {
       depth += 1;
@@ -1555,6 +1573,7 @@ al_opt ex_scan_balanced(char* s, int start) {
   }
   return al_none();
   }
+  return al_none();
 }
 al_opt read_value(char* s, int start) {
   {
@@ -1564,9 +1583,10 @@ al_opt read_value(char* s, int start) {
   if ((strcmp(quote, "\"") == 0)) {
     int i = (start + 1); // var i
     char* out = al_strdup_lit(""); // var out
-    while ((i < al_chars_len(s))) {
+    while ((i < strlen(s))) {
       al_opt cq_opt = fw_normalize_in_command(al_char_to_str(s[i])); // let cq_opt
       char* cq = (cq_opt.tag == 1 ? ({ char* q = cq_opt.data.s; q; }) : (cq_opt.tag == 0 ? al_char_to_str(s[i]) : "")); // let cq
+      printf("%s %d\n", "@RVQ i=", i);
       if ((strcmp(cq, "\"") == 0)) {
         return al_some_t_ValParsed(((struct ValParsed){.arg = Arg_Str(out), .consumed = ((i + 1) - start)}));
       }
@@ -1576,7 +1596,7 @@ al_opt read_value(char* s, int start) {
     return al_none();
   }
   int i = start; // var i
-  while (((i < al_chars_len(s)) && ex_is_atom_char(al_char_to_str(s[i])))) {
+  while (((i < strlen(s)) && ex_is_atom_char(al_char_to_str(s[i])))) {
     i += 1;
   }
   if ((i == start)) {
@@ -1584,20 +1604,24 @@ al_opt read_value(char* s, int start) {
   }
   return al_some_t_ValParsed(((struct ValParsed){.arg = Arg_Atom(al_substr_ch(s, start, i)), .consumed = (i - start)}));
   }
+  return al_none();
 }
 al_opt parse_header(char* s, int at) {
   {
   int i = (at + 2); // var i
   int name_start = i; // let name_start
-  while (((i < al_chars_len(s)) && ex_is_name_char(al_char_to_str(s[i])))) {
+  while (((i < strlen(s)) && ex_is_name_char(al_char_to_str(s[i])))) {
     i += 1;
   }
   char* name = al_substr_ch(s, name_start, i); // let name
-  if ((al_chars_len(name) == 0)) {
+  if ((strlen(name) == 0)) {
     return al_none();
   }
+  printf("%s\n", "@P1 name-ok");
   al_opt cmd_opt = lookup(name); // let cmd_opt
+  printf("%s\n", "@P2 lookup-ok");
   struct ExplicitCommand cmd = __extension__ ({ struct ExplicitCommand _mv = ((struct ExplicitCommand){ 0 }); if (cmd_opt.tag == 1) { struct ExplicitCommand c = *cmd_opt.data.t_ExplicitCommand; _mv = c; } else if (cmd_opt.tag == 0) { return al_none(); } _mv; }); // let cmd
+  printf("%s\n", "@P3 cmd-typed");
   if (((((cmd).tag) == ((ExplicitCommand_Comment()).tag)) || (((cmd).tag) == ((ExplicitCommand_Footnote()).tag)))) {
     al_opt bal_opt = ex_scan_balanced(s, i); // let bal_opt
     struct Balanced bal = __extension__ ({ struct Balanced _mv = ((struct Balanced){ 0 }); if (bal_opt.tag == 1) { struct Balanced b = *bal_opt.data.t_Balanced; _mv = b; } else if (bal_opt.tag == 0) { return al_none(); } _mv; }); // let bal
@@ -1608,10 +1632,10 @@ al_opt parse_header(char* s, int at) {
   al_vec args = ((al_vec){ 0, 0, NULL }); // var args
   al_vec attrs = ((al_vec){ 0, 0, NULL }); // var attrs
   while (1) {
-    while (((i < al_chars_len(s)) && ((s[i] == ' ') || (s[i] == '\t')))) {
+    while (((i < strlen(s)) && ((s[i] == ' ') || (s[i] == '\t')))) {
       i += 1;
     }
-    if ((i >= al_chars_len(s))) {
+    if ((i >= strlen(s))) {
       return al_none();
     }
     char c = s[i]; // let c
@@ -1632,16 +1656,16 @@ al_opt parse_header(char* s, int at) {
     struct Arg tok = vp.arg; // let tok
     i = (i + vp.consumed);
     int j = i; // var j
-    while (((j < al_chars_len(s)) && ((s[j] == ' ') || (s[j] == '\t')))) {
+    while (((j < strlen(s)) && ((s[j] == ' ') || (s[j] == '\t')))) {
       j += 1;
     }
-    int is_colon = ((j < al_chars_len(s)) && ((s[j] == ':') || __extension__ ({ al_opt _l = (fw_normalize_in_command(al_char_to_str(s[j]))); al_opt _r = (al_some_s(":")); (_l.tag == _r.tag && (_l.tag == 0 || strcmp(_l.data.s, _r.data.s) == 0)); }))); // let is_colon
+    int is_colon = ((j < strlen(s)) && ((s[j] == ':') || __extension__ ({ al_opt _l = (fw_normalize_in_command(al_char_to_str(s[j]))); al_opt _r = (al_some_s(":")); (_l.tag == _r.tag && (_l.tag == 0 || strcmp(_l.data.s, _r.data.s) == 0)); }))); // let is_colon
     if (is_colon) {
       j += 1;
-      while (((j < al_chars_len(s)) && ((s[j] == ' ') || (s[j] == '\t')))) {
+      while (((j < strlen(s)) && ((s[j] == ' ') || (s[j] == '\t')))) {
         j += 1;
       }
-      if ((j >= al_chars_len(s))) {
+      if ((j >= strlen(s))) {
         return al_none();
       }
       if (fw_is_ideo_space(al_char_to_str(s[j]))) {
@@ -1664,6 +1688,7 @@ al_opt parse_header(char* s, int at) {
   }
   return al_some_t_HeaderParsed(((struct HeaderParsed){.cu = ((struct CommandUse){.cmd = cmd, .name_raw = name, .args = args, .attrs = attrs, .content = al_none()}), .consumed = (i - at)}));
   }
+  return al_none();
 }
 char* inline_plain(al_vec items) {
   {
@@ -1724,15 +1749,16 @@ char* inline_plain(al_vec items) {
   }
   return out;
   }
+  return "";
 }
 struct LineClass classify(char* line) {
   {
-  if ((al_chars_len(line) == 0)) {
+  if ((strlen(line) == 0)) {
     return LineClass_LcBlank();
   }
   int all_ws = 1; // var all_ws
   int qi = 0; // var qi
-  while ((qi < al_chars_len(line))) {
+  while ((qi < strlen(line))) {
     if (((line[qi] != ' ') && (line[qi] != '\t'))) {
       all_ws = 0;
     }
@@ -1741,18 +1767,18 @@ struct LineClass classify(char* line) {
   if (all_ws) {
     return LineClass_LcBlank();
   }
-  if ((((al_chars_len(line) >= 2) && (line[0] == '@')) && (line[1] == '['))) {
+  if ((((strlen(line) >= 2) && (line[0] == '@')) && (line[1] == '['))) {
     return LineClass_LcCommand();
   }
   int lead = 0; // var lead
-  while (((lead < al_chars_len(line)) && (line[lead] == ' '))) {
+  while (((lead < strlen(line)) && (line[lead] == ' '))) {
     lead += 1;
   }
   if ((lead <= 3)) {
-    int rest_len = (al_chars_len(line) - lead); // let rest_len
+    int rest_len = (strlen(line) - lead); // let rest_len
     int only_dash = (rest_len >= 3); // var only_dash
     int k = lead; // var k
-    while ((k < al_chars_len(line))) {
+    while ((k < strlen(line))) {
       if ((line[k] != '-')) {
         only_dash = 0;
       }
@@ -1764,47 +1790,49 @@ struct LineClass classify(char* line) {
   }
   if ((line[0] == '#')) {
     int n = 0; // var n
-    while (((n < al_chars_len(line)) && (line[n] == '#'))) {
+    while (((n < strlen(line)) && (line[n] == '#'))) {
       n += 1;
     }
-    if ((((n <= 6) && (n < al_chars_len(line))) && (line[n] == ' '))) {
+    if ((((n <= 6) && (n < strlen(line))) && (line[n] == ' '))) {
       return LineClass_LcHeading(n);
     }
     return LineClass_LcText();
   }
   if ((line[0] == '>')) {
     int d = 0; // var d
-    while (((d < al_chars_len(line)) && (line[d] == '>'))) {
+    while (((d < strlen(line)) && (line[d] == '>'))) {
       d += 1;
     }
-    if (((d < al_chars_len(line)) && (line[d] == ' '))) {
+    if (((d < strlen(line)) && (line[d] == ' '))) {
       return LineClass_LcQuote(d);
     }
     return LineClass_LcText();
   }
-  if ((((al_chars_len(line) >= 2) && (line[0] == '-')) && (line[1] == ' '))) {
+  if ((((strlen(line) >= 2) && (line[0] == '-')) && (line[1] == ' '))) {
     return LineClass_LcListItem(0);
   }
   int digits = 0; // var digits
-  while ((((digits < al_chars_len(line)) && (line[digits] >= '0')) && (line[digits] <= '9'))) {
+  while ((((digits < strlen(line)) && (line[digits] >= '0')) && (line[digits] <= '9'))) {
     digits += 1;
   }
-  if ((((digits > 0) && (digits < al_chars_len(line))) && (line[digits] == '.'))) {
-    if ((((digits + 1) < al_chars_len(line)) && (line[(digits + 1)] == ' '))) {
+  if ((((digits > 0) && (digits < strlen(line))) && (line[digits] == '.'))) {
+    if ((((digits + 1) < strlen(line)) && (line[(digits + 1)] == ' '))) {
       return LineClass_LcListItem(1);
     }
   }
   return LineClass_LcText();
   }
+  return ((struct LineClass){ 0 });
 }
 int ordered_marker_len(char* line) {
   {
   int digits = 0; // var digits
-  while ((((digits < al_chars_len(line)) && (line[digits] >= '0')) && (line[digits] <= '9'))) {
+  while ((((digits < strlen(line)) && (line[digits] >= '0')) && (line[digits] <= '9'))) {
     digits += 1;
   }
   return (digits + 2);
   }
+  return 0;
 }
 int lw_is_word_char(char* c) {
   {
@@ -1822,17 +1850,19 @@ int lw_is_word_char(char* c) {
   }
   return 0;
   }
+  return 0;
 }
 struct ScanOut lw_scan_inline(char* chars, int line, al_vec diags) {
   {
   struct AtomOut ao = lw_atomize(chars, line, diags); // let ao
   return lw_resolve(ao.atoms, ao.diags, line);
   }
+  return ((struct ScanOut){ 0 });
 }
 al_opt lw_find_char(char* s, int from, char* target) {
   {
   int i = from; // var i
-  while ((i < al_chars_len(s))) {
+  while ((i < strlen(s))) {
     if ((s[i] == (target)[0])) {
       return al_some_i(i);
     }
@@ -1840,6 +1870,7 @@ al_opt lw_find_char(char* s, int from, char* target) {
   }
   return al_none();
   }
+  return al_none();
 }
 al_opt lw_code_lang(struct CommandUse u) {
   {
@@ -1848,17 +1879,18 @@ al_opt lw_code_lang(struct CommandUse u) {
   }
   return al_none();
   }
+  return al_none();
 }
 al_opt lw_find_inline_close(char* s, int from, struct ExplicitCommand cmd) {
   {
   int i = from; // var i
-  while (((i + 1) < al_chars_len(s))) {
+  while (((i + 1) < strlen(s))) {
     if ((((s[i] == '@') && (s[(i + 1)] == '[')) && starts_with_at(s, i, "@[/"))) {
       int j = (i + 3); // var j
-      while (((j < al_chars_len(s)) && (s[j] != ']'))) {
+      while (((j < strlen(s)) && (s[j] != ']'))) {
         j += 1;
       }
-      if ((j >= al_chars_len(s))) {
+      if ((j >= strlen(s))) {
         return al_none();
       }
       char* name = al_substr_ch(s, (i + 3), j); // let name
@@ -1870,12 +1902,13 @@ al_opt lw_find_inline_close(char* s, int from, struct ExplicitCommand cmd) {
   }
   return al_none();
   }
+  return al_none();
 }
 al_opt lw_scan_literal_object(char* s, int start) {
   {
   int i = (start + 3); // var i
   int depth = 0; // var depth
-  while ((i < al_chars_len(s))) {
+  while ((i < strlen(s))) {
     if (starts_with_at(s, i, "@[")) {
       depth += 1;
       i += 2;
@@ -1891,20 +1924,22 @@ al_opt lw_scan_literal_object(char* s, int start) {
   }
   return al_none();
   }
+  return al_none();
 }
 al_opt lw_read_close_tag(char* s, int start) {
   {
   int j = (start + 3); // var j
-  while (((j < al_chars_len(s)) && (s[j] != ']'))) {
+  while (((j < strlen(s)) && (s[j] != ']'))) {
     j += 1;
   }
-  if ((j >= al_chars_len(s))) {
+  if ((j >= strlen(s))) {
     return al_none();
   }
   char* name = al_substr_ch(s, (start + 3), j); // let name
   al_opt cmd_opt = lookup(name); // let cmd_opt
   return (cmd_opt.tag == 1 ? ({ struct ExplicitCommand cmd = *cmd_opt.data.t_ExplicitCommand; al_some_t_CloseHit(((struct CloseHit){.cmd = cmd, .end = (j + 1)})); }) : (cmd_opt.tag == 0 ? al_none() : al_none()));
   }
+  return al_none();
 }
 struct AtomOut lw_atomize(char* chars, int line, al_vec diags) {
   {
@@ -1912,11 +1947,11 @@ struct AtomOut lw_atomize(char* chars, int line, al_vec diags) {
   char* text = al_strdup_lit(""); // var text
   al_vec diags = diags; // var diags
   int i = 0; // var i
-  while ((i < al_chars_len(chars))) {
+  while ((i < strlen(chars))) {
     char c = chars[i]; // let c
     if ((c == '@')) {
       if (starts_with_at(chars, i, "@@[")) {
-        if ((al_chars_len(text) > 0)) {
+        if ((strlen(text) > 0)) {
           atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; }))); atoms; });
           text = "";
         }
@@ -1938,7 +1973,7 @@ struct AtomOut lw_atomize(char* chars, int line, al_vec diags) {
         continue;
       }
       if (starts_with_at(chars, i, "@[/")) {
-        if ((al_chars_len(text) > 0)) {
+        if ((strlen(text) > 0)) {
           atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; }))); atoms; });
           text = "";
         }
@@ -1953,14 +1988,14 @@ struct AtomOut lw_atomize(char* chars, int line, al_vec diags) {
         else if (hit.tag == 0) {
           {
             diags = ({ al_push(&diags, sizeof(struct Diagnostic), (__extension__ ({ struct Diagnostic _t = diag_warning("关闭标签缺少 ']',按字面处理", line); &_t; }))); diags; });
-            atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(al_substr_ch(chars, i, al_chars_len(chars))); &_t; }))); atoms; });
-            i = al_chars_len(chars);
+            atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(al_substr_ch(chars, i, strlen(chars))); &_t; }))); atoms; });
+            i = strlen(chars);
           }
         }
         continue;
       }
       if (starts_with_at(chars, i, "@[")) {
-        if ((al_chars_len(text) > 0)) {
+        if ((strlen(text) > 0)) {
           atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; }))); atoms; });
           text = "";
         }
@@ -2011,11 +2046,11 @@ struct AtomOut lw_atomize(char* chars, int line, al_vec diags) {
             }
             diags = ({ al_push(&diags, sizeof(struct Diagnostic), &mut_d); diags; });
             int j = (i + 2); // var j
-            while (((j < al_chars_len(chars)) && (chars[j] != ']'))) {
+            while (((j < strlen(chars)) && (chars[j] != ']'))) {
               j += 1;
             }
             int end = (j + 1); // let end
-            int stop = ((end > al_chars_len(chars)) ? al_chars_len(chars) : end); // let stop
+            int stop = ((end > strlen(chars)) ? strlen(chars) : end); // let stop
             atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(al_substr_ch(chars, i, stop)); &_t; }))); atoms; });
             i = stop;
           }
@@ -2023,7 +2058,7 @@ struct AtomOut lw_atomize(char* chars, int line, al_vec diags) {
         continue;
       }
       if (starts_with_at(chars, i, "@@")) {
-        if ((al_chars_len(text) > 0)) {
+        if ((strlen(text) > 0)) {
           atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; }))); atoms; });
           text = "";
         }
@@ -2049,7 +2084,7 @@ struct AtomOut lw_atomize(char* chars, int line, al_vec diags) {
         }
       }
       if (esc_hit) {
-        if ((al_chars_len(text) > 0)) {
+        if ((strlen(text) > 0)) {
           atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; }))); atoms; });
           text = "";
         }
@@ -2062,7 +2097,7 @@ struct AtomOut lw_atomize(char* chars, int line, al_vec diags) {
       continue;
     }
     if ((c == '`')) {
-      if ((al_chars_len(text) > 0)) {
+      if ((strlen(text) > 0)) {
         atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; }))); atoms; });
         text = "";
       }
@@ -2104,12 +2139,12 @@ struct AtomOut lw_atomize(char* chars, int line, al_vec diags) {
         i += 1;
         continue;
       }
-      if ((al_chars_len(text) > 0)) {
+      if ((strlen(text) > 0)) {
         atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; }))); atoms; });
         text = "";
       }
       int can_open = ((i == 0) || (!lw_is_word_char(al_char_to_str(chars[(i - 1)])))); // let can_open
-      int can_close = (((i + mlen) >= al_chars_len(chars)) || (!lw_is_word_char(al_char_to_str(chars[(i + mlen)])))); // let can_close
+      int can_close = (((i + mlen) >= strlen(chars)) || (!lw_is_word_char(al_char_to_str(chars[(i + mlen)])))); // let can_close
       atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtMarker(((struct MarkerAtom){.kind = mk, .literal = al_substr_ch(chars, i, (i + mlen)), .can_open = can_open, .can_close = can_close})); &_t; }))); atoms; });
       i += mlen;
       continue;
@@ -2117,11 +2152,12 @@ struct AtomOut lw_atomize(char* chars, int line, al_vec diags) {
     text = al_strcat(text, al_char_to_str(c));
     i += 1;
   }
-  if ((al_chars_len(text) > 0)) {
+  if ((strlen(text) > 0)) {
     atoms = ({ al_push(&atoms, sizeof(struct LwAtom), (__extension__ ({ struct LwAtom _t = LwAtom_AtText(text); &_t; }))); atoms; });
   }
   return ((struct AtomOut){.atoms = atoms, .diags = diags});
   }
+  return ((struct AtomOut){ 0 });
 }
 al_vec lw_vec_set(al_vec v, int i, struct Frame f) {
   {
@@ -2137,6 +2173,7 @@ al_vec lw_vec_set(al_vec v, int i, struct Frame f) {
   }
   return out;
   }
+  return ((al_vec){ 0, 0, NULL });
 }
 al_vec lw_vec_drop_last(al_vec v) {
   {
@@ -2148,6 +2185,7 @@ al_vec lw_vec_drop_last(al_vec v) {
   }
   return out;
   }
+  return ((al_vec){ 0, 0, NULL });
 }
 char* lw_atom_raw(struct LwAtom a) {
   {
@@ -2194,6 +2232,7 @@ char* lw_atom_raw(struct LwAtom a) {
     }
   }
   }
+  return "";
 }
 al_vec lw_literalize(al_vec atoms) {
   {
@@ -2204,6 +2243,7 @@ al_vec lw_literalize(al_vec atoms) {
   }
   return ((al_vec){ 1, sizeof(struct Inline), (struct Inline[]){ mk_text(out) } });
   }
+  return ((al_vec){ 0, 0, NULL });
 }
 al_vec lw_merge_texts(al_vec items) {
   {
@@ -2243,6 +2283,7 @@ al_vec lw_merge_texts(al_vec items) {
   }
   return merged;
   }
+  return ((al_vec){ 0, 0, NULL });
 }
 al_vec lw_vec_set_inline(al_vec v, int i, struct Inline item) {
   {
@@ -2258,11 +2299,13 @@ al_vec lw_vec_set_inline(al_vec v, int i, struct Inline item) {
   }
   return out;
   }
+  return ((al_vec){ 0, 0, NULL });
 }
 struct Inline mk_text(char* s) {
   {
   return Inline_AwTxt(s);
   }
+  return ((struct Inline){ 0 });
 }
 struct ScanOut lw_resolve(al_vec atoms, al_vec diags, int line) {
   {
@@ -2377,6 +2420,7 @@ struct ScanOut lw_resolve(al_vec atoms, al_vec diags, int line) {
   }
   return ((struct ScanOut){.inline_a = lw_merge_texts(((struct Frame*)(frames.data))[0].children), .diags = diags});
   }
+  return ((struct ScanOut){ 0 });
 }
 int lw_frames_contain(al_vec frames, struct MarkerKind kind) {
   {
@@ -2389,31 +2433,34 @@ int lw_frames_contain(al_vec frames, struct MarkerKind kind) {
   }
   return 0;
   }
+  return 0;
 }
 char* lex_strip_cr(char* line) {
   {
-  if (((al_chars_len(line) > 0) && (line[(al_chars_len(line) - 1)] == '\r'))) {
-    return al_substr_ch(line, 0, (al_chars_len(line) - 1));
+  if (((strlen(line) > 0) && (line[(strlen(line) - 1)] == '\r'))) {
+    return al_substr_ch(line, 0, (strlen(line) - 1));
   }
   return line;
   }
+  return "";
 }
 al_opt lex_close_tag_name(char* line) {
   {
   char* t = al_trim(line); // let t
   if (starts_with_at(t, 0, "@[/")) {
-    if (((al_chars_len(t) >= 4) && (t[(al_chars_len(t) - 1)] == ']'))) {
-      return al_some_s(al_substr_ch(t, 3, (al_chars_len(t) - 1)));
+    if (((strlen(t) >= 4) && (t[(strlen(t) - 1)] == ']'))) {
+      return al_some_s(al_substr_ch(t, 3, (strlen(t) - 1)));
     }
   }
   return al_none();
   }
+  return al_none();
 }
 int lex_is_delimiter_cell(char* c) {
   {
   int has_dash = 0; // var has_dash
   int k = 0; // var k
-  while ((k < al_chars_len(c))) {
+  while ((k < strlen(c))) {
     char ch = c[k]; // let ch
     if ((ch == '-')) {
       has_dash = 1;
@@ -2426,6 +2473,7 @@ int lex_is_delimiter_cell(char* c) {
   }
   return has_dash;
   }
+  return 0;
 }
 struct LexOutput lex(char* src) {
   {
@@ -2436,6 +2484,7 @@ struct LexOutput lex(char* src) {
   al_vec lines = al_split(src, "\n"); // let lines
   int lineno = 0; // var lineno
   while ((lineno < lines.len)) {
+    printf("%s\n", al_strcat("@L", al_num(lineno)));
     char* line = lex_strip_cr(((char**)(lines.data))[lineno]); // let line
     lineno += 1;
     int in_raw = (raw.tag == 1 ? ({ struct ExplicitCommand cmd = *raw.data.t_ExplicitCommand; 1; }) : (raw.tag == 0 ? 0 : 0)); // let in_raw
@@ -2471,12 +2520,12 @@ struct LexOutput lex(char* src) {
         table = 0;
         continue;
       }
-      if ((al_chars_len(t) == 0)) {
+      if ((strlen(t) == 0)) {
         blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = ((struct Block){ .tag = Blank })})); blocks; });
         continue;
       }
-      if (((starts_with_at(t, 0, "|") && (t[(al_chars_len(t) - 1)] == '|')) && (al_chars_len(t) >= 2))) {
-        char* inner = al_substr_ch(t, 1, (al_chars_len(t) - 1)); // let inner
+      if (((starts_with_at(t, 0, "|") && (t[(strlen(t) - 1)] == '|')) && (strlen(t) >= 2))) {
+        char* inner = al_substr_ch(t, 1, (strlen(t) - 1)); // let inner
         al_vec cells_text = ((al_vec){ 0, 0, NULL }); // var cells_text
         char* cur = al_strdup_lit(""); // var cur
         for (size_t _i = 0; _i < strlen(inner); _i++) {
@@ -2524,7 +2573,7 @@ struct LexOutput lex(char* src) {
     else if (cls.tag == LcHeading) {
       int level = cls.data.LcHeading._0;
       {
-        struct ScanOut so = lw_scan_inline(al_substr_ch(line, (level + 1), al_chars_len(line)), (lineno - 1), diags); // let so
+        struct ScanOut so = lw_scan_inline(al_substr_ch(line, (level + 1), strlen(line)), (lineno - 1), diags); // let so
         diags = so.diags;
         blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_Heading(level, so.inline_a)})); blocks; });
       }
@@ -2532,7 +2581,7 @@ struct LexOutput lex(char* src) {
     else if (cls.tag == LcQuote) {
       int depth = cls.data.LcQuote._0;
       {
-        struct ScanOut so = lw_scan_inline(al_substr_ch(line, (depth + 1), al_chars_len(line)), (lineno - 1), diags); // let so
+        struct ScanOut so = lw_scan_inline(al_substr_ch(line, (depth + 1), strlen(line)), (lineno - 1), diags); // let so
         diags = so.diags;
         blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_Quote(depth, so.inline_a)})); blocks; });
       }
@@ -2541,7 +2590,7 @@ struct LexOutput lex(char* src) {
       int ordered = cls.data.LcListItem._0;
       {
         int skip = (ordered ? ordered_marker_len(line) : 2); // let skip
-        struct ScanOut so = lw_scan_inline(al_substr_ch(line, skip, al_chars_len(line)), (lineno - 1), diags); // let so
+        struct ScanOut so = lw_scan_inline(al_substr_ch(line, skip, strlen(line)), (lineno - 1), diags); // let so
         diags = so.diags;
         blocks = ({ al_push(&blocks, sizeof(struct LexedBlock), &((struct LexedBlock){.line = (lineno - 1), .block = Block_ListItem(ordered, so.inline_a)})); blocks; });
       }
@@ -2583,6 +2632,7 @@ struct LexOutput lex(char* src) {
   }
   return ((struct LexOutput){.blocks = blocks, .diags = diags});
   }
+  return ((struct LexOutput){ 0 });
 }
 struct CmdOutcome lex_command_line(char* chars, int lineno, al_vec diags, al_opt raw, int table) {
   {
@@ -2619,8 +2669,8 @@ struct CmdOutcome lex_command_line(char* chars, int lineno, al_vec diags, al_opt
         return ((struct CmdOutcome){.blocks = blocks, .diags = diags, .raw = raw, .table = 1});
       }
       if (is_raw_block(u.cmd)) {
-        int header_empty = (u.content.tag == 0 ? 1 : (u.content.tag == 1 ? ({ char* c = u.content.data.s; (al_chars_len(c) == 0); }) : 0)); // let header_empty
-        char* rest = al_substr_ch(chars, consumed, al_chars_len(chars)); // let rest
+        int header_empty = (u.content.tag == 0 ? 1 : (u.content.tag == 1 ? ({ char* c = u.content.data.s; (strlen(c) == 0); }) : 0)); // let header_empty
+        char* rest = al_substr_ch(chars, consumed, strlen(chars)); // let rest
         if ((header_empty && (al_chars_len(al_trim(rest)) == 0))) {
           al_opt lang = al_none(); // var lang
           if (((u.cmd.tag == Code) && (u.args.len > 0))) {
@@ -2662,6 +2712,7 @@ struct CmdOutcome lex_command_line(char* chars, int lineno, al_vec diags, al_opt
     }
   }
   }
+  return ((struct CmdOutcome){ 0 });
 }
 al_opt span_new(int start, int end) {
   {
@@ -2670,6 +2721,7 @@ al_opt span_new(int start, int end) {
   }
   return al_none();
   }
+  return al_none();
 }
 al_opt span_after_edit(struct SourceSpan s, int e_start, int e_end, int new_len) {
   {
@@ -2682,6 +2734,7 @@ al_opt span_after_edit(struct SourceSpan s, int e_start, int e_end, int new_len)
   }
   return al_none();
   }
+  return al_none();
 }
 int label_char_ok(char* c) {
   {
@@ -2702,14 +2755,15 @@ int label_char_ok(char* c) {
   }
   return 0;
   }
+  return 0;
 }
 al_opt label_parse(char* s) {
   {
-  if ((al_chars_len(s) == 0)) {
+  if ((strlen(s) == 0)) {
     return al_none();
   }
   int i = 0; // var i
-  while ((i < al_chars_len(s))) {
+  while ((i < strlen(s))) {
     if ((!label_char_ok(al_char_to_str(s[i])))) {
       return al_none();
     }
@@ -2717,46 +2771,52 @@ al_opt label_parse(char* s) {
   }
   return al_some_s(s);
   }
+  return al_none();
 }
 struct TextPatch patch_invert(struct TextPatch p) {
   {
   return ((struct TextPatch){.start = p.start, .old = p.new, .new = p.old});
   }
+  return ((struct TextPatch){ 0 });
 }
 struct Buffer buffer_new(char* s) {
   {
   return ((struct Buffer){.content = s});
   }
+  return ((struct Buffer){ 0 });
 }
 al_opt buffer_insert(struct Buffer b, int start, char* s) {
   {
-  if (((start < 0) || (start > al_chars_len(b.content)))) {
+  if (((start < 0) || (start > strlen(b.content)))) {
     return al_none();
   }
-  struct Buffer nl = ((struct Buffer){.content = al_strcat(al_strcat(al_substr_ch(b.content, 0, start), s), al_substr_ch(b.content, start, al_chars_len(b.content)))}); // let nl
+  struct Buffer nl = ((struct Buffer){.content = al_strcat(al_strcat(al_substr_ch(b.content, 0, start), s), al_substr_ch(b.content, start, strlen(b.content)))}); // let nl
   return al_some_t_BufWithPatch(((struct BufWithPatch){.buf = nl, .patch = ((struct TextPatch){.start = start, .old = "", .new = s})}));
   }
+  return al_none();
 }
 al_opt buffer_delete(struct Buffer b, int start, int end) {
   {
-  if ((((start < 0) || (end > al_chars_len(b.content))) || (start > end))) {
+  if ((((start < 0) || (end > strlen(b.content))) || (start > end))) {
     return al_none();
   }
   char* old = al_substr_ch(b.content, start, end); // let old
-  struct Buffer nl = ((struct Buffer){.content = al_strcat(al_substr_ch(b.content, 0, start), al_substr_ch(b.content, end, al_chars_len(b.content)))}); // let nl
+  struct Buffer nl = ((struct Buffer){.content = al_strcat(al_substr_ch(b.content, 0, start), al_substr_ch(b.content, end, strlen(b.content)))}); // let nl
   return al_some_t_BufWithPatch(((struct BufWithPatch){.buf = nl, .patch = ((struct TextPatch){.start = start, .old = old, .new = ""})}));
   }
+  return al_none();
 }
 al_opt buffer_apply(struct Buffer b, struct TextPatch p) {
   {
-  if (((p.start < 0) || ((p.start + al_chars_len(p.old)) > al_chars_len(b.content)))) {
+  if (((p.start < 0) || ((p.start + strlen(p.old)) > strlen(b.content)))) {
     return al_none();
   }
-  if ((strcmp(al_substr_ch(b.content, p.start, (p.start + al_chars_len(p.old))), p.old) != 0)) {
+  if ((strcmp(al_substr_ch(b.content, p.start, (p.start + strlen(p.old))), p.old) != 0)) {
     return al_none();
   }
-  return al_some_t_Buffer(((struct Buffer){.content = al_strcat(al_strcat(al_substr_ch(b.content, 0, p.start), p.new), al_substr_ch(b.content, (p.start + al_chars_len(p.old)), al_chars_len(b.content)))}));
+  return al_some_t_Buffer(((struct Buffer){.content = al_strcat(al_strcat(al_substr_ch(b.content, 0, p.start), p.new), al_substr_ch(b.content, (p.start + strlen(p.old)), strlen(b.content)))}));
   }
+  return al_none();
 }
 int main(int _argc, char** _argv) { setvbuf(stdout, NULL, _IONBF, 0);
   al_cli_args = (al_vec){ 0, sizeof(char*), NULL };

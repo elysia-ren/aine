@@ -1,1 +1,284 @@
 Awen 原型词法器(Aine 移植版,核心规范 v0.4)
+@L0
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@L1
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@L2
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@RVQ i= 8
+@RVQ i= 9
+@RVQ i= 10
+@RVQ i= 11
+@RVQ i= 12
+@RVQ i= 13
+@RVQ i= 14
+@RVQ i= 15
+@RVQ i= 16
+@RVQ i= 17
+@RVQ i= 18
+@RVQ i= 19
+@RVQ i= 20
+@RVQ i= 21
+@RVQ i= 22
+@RVQ i= 23
+@RVQ i= 24
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@RVQ i= 8
+@RVQ i= 9
+@RVQ i= 10
+@RVQ i= 11
+@RVQ i= 12
+@RVQ i= 13
+@RVQ i= 14
+@RVQ i= 15
+@RVQ i= 16
+@RVQ i= 17
+@RVQ i= 18
+@RVQ i= 19
+@RVQ i= 20
+@RVQ i= 21
+@RVQ i= 22
+@RVQ i= 23
+@RVQ i= 24
+@L3
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@L4
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@L5
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@L6
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@L7
+@L8
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@L9
+@L10
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@RVQ i= 20
+@RVQ i= 21
+@RVQ i= 22
+@RVQ i= 23
+@RVQ i= 24
+@RVQ i= 25
+@RVQ i= 26
+@RVQ i= 27
+@RVQ i= 28
+@RVQ i= 29
+@RVQ i= 30
+@RVQ i= 31
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@RVQ i= 20
+@RVQ i= 21
+@RVQ i= 22
+@RVQ i= 23
+@RVQ i= 24
+@RVQ i= 25
+@RVQ i= 26
+@RVQ i= 27
+@RVQ i= 28
+@RVQ i= 29
+@RVQ i= 30
+@RVQ i= 31
+@L11
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@RVQ i= 19
+@RVQ i= 20
+@RVQ i= 21
+@RVQ i= 22
+@RVQ i= 23
+@RVQ i= 24
+@RVQ i= 25
+@RVQ i= 26
+@RVQ i= 27
+@RVQ i= 28
+@RVQ i= 29
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@RVQ i= 19
+@RVQ i= 20
+@RVQ i= 21
+@RVQ i= 22
+@RVQ i= 23
+@RVQ i= 24
+@RVQ i= 25
+@RVQ i= 26
+@RVQ i= 27
+@RVQ i= 28
+@RVQ i= 29
+@L12
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@RVQ i= 22
+@RVQ i= 23
+@RVQ i= 24
+@RVQ i= 25
+@RVQ i= 26
+@RVQ i= 27
+@RVQ i= 28
+@RVQ i= 29
+@RVQ i= 30
+@RVQ i= 31
+@RVQ i= 32
+@RVQ i= 33
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@RVQ i= 22
+@RVQ i= 23
+@RVQ i= 24
+@RVQ i= 25
+@RVQ i= 26
+@RVQ i= 27
+@RVQ i= 28
+@RVQ i= 29
+@RVQ i= 30
+@RVQ i= 31
+@RVQ i= 32
+@RVQ i= 33
+@L13
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@RVQ i= 30
+@RVQ i= 31
+@RVQ i= 32
+@RVQ i= 33
+@RVQ i= 34
+@RVQ i= 35
+@RVQ i= 36
+@RVQ i= 37
+@RVQ i= 38
+@RVQ i= 39
+@RVQ i= 40
+@RVQ i= 41
+@RVQ i= 42
+@RVQ i= 43
+@RVQ i= 44
+@RVQ i= 45
+@RVQ i= 46
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@RVQ i= 30
+@RVQ i= 31
+@RVQ i= 32
+@RVQ i= 33
+@RVQ i= 34
+@RVQ i= 35
+@RVQ i= 36
+@RVQ i= 37
+@RVQ i= 38
+@RVQ i= 39
+@RVQ i= 40
+@RVQ i= 41
+@RVQ i= 42
+@RVQ i= 43
+@RVQ i= 44
+@RVQ i= 45
+@RVQ i= 46
+@L14
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@RVQ i= 30
+@RVQ i= 31
+@RVQ i= 32
+@RVQ i= 33
+@RVQ i= 34
+@RVQ i= 35
+@RVQ i= 36
+@RVQ i= 37
+@RVQ i= 38
+@RVQ i= 39
+@RVQ i= 40
+@RVQ i= 41
+@RVQ i= 42
+@RVQ i= 43
+@RVQ i= 44
+@RVQ i= 45
+@RVQ i= 46
+@RVQ i= 47
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@RVQ i= 30
+@RVQ i= 31
+@RVQ i= 32
+@RVQ i= 33
+@RVQ i= 34
+@RVQ i= 35
+@RVQ i= 36
+@RVQ i= 37
+@RVQ i= 38
+@RVQ i= 39
+@RVQ i= 40
+@RVQ i= 41
+@RVQ i= 42
+@RVQ i= 43
+@RVQ i= 44
+@RVQ i= 45
+@RVQ i= 46
+@RVQ i= 47
+@L15
+@L16
+@L17
+@L18
+@L19
+@L20
+@L21
+@L22
+@L23
+@L24
+@L25
+@L26
+@L27
+@L28
+@L29
+@L30

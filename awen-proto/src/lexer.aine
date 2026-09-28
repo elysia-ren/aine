@@ -90,6 +90,7 @@ fn lex(src: String) -> LexOutput {
     var lineno = 0
     // 行号先行自增:后续所有 continue 都在 while 顶层的 if 内(规避 match 臂限制)
     while lineno < lines.len() {
+        print(f"@L{lineno}")
         let line = lex_strip_cr(lines[lineno])
         lineno += 1
 

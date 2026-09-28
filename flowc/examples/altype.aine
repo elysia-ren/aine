@@ -949,7 +949,15 @@ fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Ve
                                 if is_cmp {
                                     types.push("bool")
                                 } else {
-                                    types.push("infer")
+                                    // 算术: 按操作数类型提示(i32/f64); 未知保持 infer
+                                    let hint2 = expr_num_hint(EBin(op2, l2, r2), names, types, all_fnames, all_freturns)
+                                    if hint2 == "i32" {
+                                        types.push("i32")
+                                    } else if hint2 == "f64" {
+                                        types.push("f64")
+                                    } else {
+                                        types.push("infer")
+                                    }
                                 }
                             }
                             _ { types.push("infer") }

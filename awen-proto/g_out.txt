@@ -1,1 +1,20 @@
 Awen 原型词法器(Aine 移植版,核心规范 v0.4)
+@L0
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@L1
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@L2
+@P1 name-ok
+@P2 lookup-ok
+@P3 cmd-typed
+@RVQ i= 

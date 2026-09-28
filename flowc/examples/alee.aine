@@ -626,6 +626,7 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
             }
             EIdent(nm) {
                 let vt = var_type(nm, varnames, vartypes)
+                print("DBG-FMT nm=" + nm + " vt=" + f"{vt}")
                 match vt {
                     Some("i32") { f1 = "%d" }
                     Some("f64") {
@@ -633,7 +634,18 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
                         part = "al_fnum(" + pc + ")"
                     }
                     Some("bool") { f1 = "%d" }
-                    _ {}
+                    _ {
+                        // 表查询失败/类型不明的标识符: expr_ctype 兜底(防 int 实参落 %s)
+                        if f1 == "%s" {
+                            let ect = expr_ctype(a, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, user_types)
+                            if ect == "int" { f1 = "%d" }
+                            else if ect == "double" {
+                                f1 = "%s"
+                                part = "al_fnum(" + pc + ")"
+                            }
+                            else if ect == "char" { f1 = "%d" }
+                        }
+                    }
                 }
             }
             _ {}
@@ -1007,9 +1019,9 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         match bt {
                             Some(btv) {
                                 if btv == "String" {
-                                    // D15：C 路径暂维持字节形态（与 s[i] 字节索引自洽；
-                                    // 字符级统一切换待 M6-TCK 类型表）；解释器为字符语义
-                                    return "al_chars_len(" + base_c + ")"
+                                    // D15 字节形态完整落地: len() 与 s[i] 字节索引自洽
+                                    // (此前 al_chars_len 字符数 vs 字节下标混用 → CJK 行关闭引号扫描错位)
+                                    return "strlen(" + base_c + ")"
                                 }
                                 if btv.starts_with("Vec<") {
                                     return base_c + ".len"
@@ -1779,7 +1791,12 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     var mcond2 = ""
                     if mpat == "_" { mcond2 = "1" }
                     else if mpat == "Some" || mpat == "Ok" { mcond2 = mscrut_c + ".tag == 1" }
-                    else if mpat == "None" || mpat == "Err" { mcond2 = mscrut_c + ".tag == 0" }
+                    else if mpat == "None" || mpat == "Err" {
+                        // Option 的 None 与 Result 的 Err 同为 tag 0: 交叉臂按解释器语义必不匹配
+                        if mpat == "Err" && mscrut_ty.starts_with("Option<") { mcond2 = "0" }
+                        else if mpat == "None" && mscrut_ty.starts_with("Result<") { mcond2 = "0" }
+                        else { mcond2 = mscrut_c + ".tag == 0" }
+                    }
                     else { mcond2 = mscrut_c + ".tag == " + mpat }
                     // Some(x)/Ok(x)/Err(e) 绑定声明(分支内)
                     var bind_line = ""
@@ -2776,6 +2793,17 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
             }
             out = out + "\n" + pad + "  {\n" + join(body, "\n") + "\n" + pad + "  }"
             if name == "main" { out = out + "\n" + pad + "  return 0;" }
+            else if ct != "void" {
+                // 非void 函数尾部安全零值 return: match 非穷尽/条件不中跌穿时返回垃圾 → 调用方解引用崩
+                var zr = "0"
+                if ct == "char*" { zr = "\"\"" }
+                else if ct == "al_vec" { zr = "((al_vec){ 0, 0, NULL })" }
+                else if ct == "al_map" { zr = "((al_map){ { 0, 0, NULL }, { 0, 0, NULL } })" }
+                else if ct == "al_opt" { zr = "al_none()" }
+                else if ct.starts_with("struct ") { zr = "((" + ct + "){ 0 })" }
+                else if ct == "double" { zr = "0" }
+                out = out + "\n" + pad + "  return " + zr + ";"
+            }
             out = out + "\n" + pad + "}"
             return out
         }
