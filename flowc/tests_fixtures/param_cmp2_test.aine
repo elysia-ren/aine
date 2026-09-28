@@ -1,0 +1,39 @@
+enum Cmd {
+    Math
+    Code
+}
+
+enum MK {
+    MkBold
+    MkExplicit(Cmd)
+}
+
+struct Frame {
+    kind: Option<MK>
+    children: Vec<Node>
+}
+
+struct Node {
+    tag: i32
+}
+
+fn scan(m: Frame, a_close_cmd: Cmd, top: Option<MK>) -> bool {
+    let a_kind = match m.kind {
+        Some(k) { k }
+        None { MkBold }
+    }
+    let out = match m.kind {
+        Some(x) {
+            let e1 = a_kind == MkExplicit(a_close_cmd)
+            let e2 = top == Some(a_kind)
+            e1 && e2
+        }
+        None { false }
+    }
+    return out
+}
+
+fn main() {
+    let f = Frame { kind: Some(MkBold), children: [] }
+    print(scan(f, Math, None))
+}

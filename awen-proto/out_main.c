@@ -2758,21 +2758,17 @@ al_opt buffer_apply(struct Buffer b, struct TextPatch p) {
   return al_some_t_Buffer(((struct Buffer){.content = al_strcat(al_strcat(al_substr_ch(b.content, 0, p.start), p.new), al_substr_ch(b.content, (p.start + al_chars_len(p.old)), al_chars_len(b.content)))}));
   }
 }
-int main(int _argc, char** _argv) { setvbuf(stdout, NULL, _IONBF, 0);
+int main(int _argc, char** _argv) {
   al_cli_args = (al_vec){ 0, sizeof(char*), NULL };
   for (int _ai = 1; _ai < _argc; _ai++) { char* _av = _argv[_ai]; al_push(&al_cli_args, sizeof(char*), (void*)&_av); }
   {
   printf("%s\n", "Awen 原型词法器(Aine 移植版,核心规范 v0.4)");
-  fprintf(stderr, "T1"); fflush(stderr);
-fprintf(stderr, "T2"); fflush(stderr);
-char* src = read_file("corpus/all_syntax.awen"); // let src
+  char* src = read_file("corpus/all_syntax.awen"); // let src
   if ((strstr(src, "[read_file error") != NULL)) {
     printf("%s\n", al_strcat(al_strcat("[corpus 加载失败: ", src), "](应以 awen-proto 为工作目录运行)"));
     return 0;
   }
-  fprintf(stderr, "T3"); fflush(stderr);
-struct LexOutput out = lex(src);
-fprintf(stderr, "T4"); fflush(stderr); // let out
+  struct LexOutput out = lex(src); // let out
   int errors = 0; // var errors
   int warnings = 0; // var warnings
   for (size_t _i = 0; _i < out.diags.len; _i++) {

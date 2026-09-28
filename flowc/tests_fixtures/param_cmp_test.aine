@@ -1,0 +1,22 @@
+enum Cmd {
+    Math
+    Code
+}
+
+enum MK {
+    MkBold
+    MkExplicit(Cmd)
+}
+
+fn check(a_kind: MK, top: Option<MK>, a_close_cmd: Cmd) -> bool {
+    let kind = MkExplicit(a_close_cmd)
+    let e1 = a_kind == kind
+    let e2 = top == Some(kind)
+    let e3 = a_kind == kind
+    let e4 = top == Some(a_kind)
+    return e1 && e2 && e3 && e4
+}
+
+fn main() {
+    print(check(MkBold, None, Math))
+}

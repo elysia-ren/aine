@@ -76,12 +76,34 @@ fn c_op(op: String) -> String {
 
 
 // 变体构造调用名(Owner_Variant 形态)的归属枚举名; 非此形态返回 ""
+// String → Option<String>(空串 → None)
+fn maybe_some(s: String) -> Option<String> {
+    if s == "" { return None }
+    return Some(s)
+}
+
+
 fn ctor_owner_of(cfn: String, enames: Vec<String>) -> String {
     var i = 0
     for en in enames {
         let prefix = en + "_"
         if cfn.starts_with(prefix) && cfn.len() > prefix.len() {
             return en
+        }
+        i += 1
+    }
+    return ""
+}
+
+
+// 裸变体名(NB/MkBold 等)的归属枚举名(elists 变体名单扫描)
+fn elists_owner(vname: String, enames: Vec<String>, elists: Vec<String>) -> String {
+    var i = 0
+    for en in enames {
+        for pp in str_split(elists[i], ",") {
+            if pp == vname {
+                return en
+            }
         }
         i += 1
     }
@@ -755,7 +777,10 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     match l {
                         ECall(lcf, _) {
                             match lcf {
-                                EIdent(lcn) { ctor_owner = ctor_owner_of(lcn, enames) }
+                                EIdent(lcn) {
+                                    ctor_owner = ctor_owner_of(lcn, enames)
+                                    if ctor_owner == "" { ctor_owner = elists_owner(lcn, enames, elists) }
+                                }
                                 _ {}
                             }
                         }
@@ -771,7 +796,10 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         match r {
                             ECall(rcf, _) {
                                 match rcf {
-                                    EIdent(rcn) { ctor_owner = ctor_owner_of(rcn, enames) }
+                                    EIdent(rcn) {
+                                        ctor_owner = ctor_owner_of(rcn, enames)
+                                        if ctor_owner == "" { ctor_owner = elists_owner(rcn, enames, elists) }
+                                    }
                                     _ {}
                                 }
                             }
@@ -1714,10 +1742,12 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 let marm = marms[mi]
                 match marm.body {
                     SReturn(_) { has_ctrl = true }
+                    SLet(_, _, _, _) { has_ctrl = true }
                     SBlock(mss2) {
                         for s2 in mss2 {
                             match s2 {
                                 SReturn(_) { has_ctrl = true }
+                                SLet(_, _, _, _) { has_ctrl = true }
                                 _ {}
                             }
                         }
@@ -1810,10 +1840,46 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                                     SReturn(Some(mx2)) { parts2.push("return " + c_expr(mx2, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";") }
                                     SReturn(None) { parts2.push("return _mv;") }
                                     SExpr(mbe2) { parts2.push("_mv = " + c_expr(mbe2, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";") }
+                                    SLet(ln2, _, lty2, linit2) {
+                                        // 块内 let: 推断声明类型并发射(类型同步入表供后续语句)
+                                        let lc3 = c_expr(linit2, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                                        var lt_aine = ""
+                                        match lty2 {
+                                            Some(lt3) { lt_aine = lt3 }
+                                            None {
+                                                match linit2 {
+                                                    ECall(lcf3, _) {
+                                                        match lcf3 {
+                                                            EIdent(lcn3) {
+                                                                match fn_return(lcn3, fnames, freturns) {
+                                                                    Some(rt3) { lt_aine = rt3 }
+                                                                    None {}
+                                                                }
+                                                            }
+                                                            _ {}
+                                                        }
+                                                    }
+                                                    _ {}
+                                                }
+                                                if lt_aine == "" {
+                                                    let tvt = expr_value_ct(linit2, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, user_types)
+                                                    if tvt == "char*" { lt_aine = "String" }
+                                                    else if tvt == "int" { lt_aine = "i32" }
+                                                    else if tvt == "double" { lt_aine = "f64" }
+                                                    else if tvt.starts_with("struct ") { lt_aine = tvt[7..tvt.len()] }
+                                                }
+                                            }
+                                        }
+                                        if lt_aine != "" {
+                                            varnames.push(ln2)
+                                            vartypes.push(lt_aine)
+                                        }
+                                        parts2.push(c_type(maybe_some(lt_aine), user_types) + " " + ln2 + " = " + lc3 + ";")
+                                    }
                                     _ {}
                                 }
+                                body_stmts = join(parts2, " ")
                             }
-                            body_stmts = join(parts2, " ")
                         }
                         _ {}
                     }
