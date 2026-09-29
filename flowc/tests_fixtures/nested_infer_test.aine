@@ -1,0 +1,32 @@
+enum MK {
+    MkBold
+    MkExplicit(Cmd)
+}
+
+enum Cmd {
+    Math
+    Code
+}
+
+struct Frame {
+    kind: Option<MK>
+    children: Vec<i32>
+}
+
+fn process(frames: Vec<Frame>, a_type: i32, a_kind: MK, a_close_cmd: Cmd) -> bool {
+    if a_type == 3 {
+        let top = frames[frames.len() - 1].kind
+        return top == Some(a_kind)
+    }
+    if a_type == 5 {
+        let kind = MkExplicit(a_close_cmd)
+        let top2 = frames[frames.len() - 1].kind
+        return top2 == Some(kind)
+    }
+    return false
+}
+
+fn main() {
+    let fs: Vec<Frame> = []
+    print(process(fs, 3, MkBold, Math))
+}
