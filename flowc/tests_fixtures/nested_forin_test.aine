@@ -1,0 +1,33 @@
+enum Inline {
+    AwTxt(String)
+    Command(String)
+}
+
+enum DocNode {
+    Text(String)
+    Element(Vec<Inline>)
+}
+
+struct DocState {
+    nodes: Vec<DocNode>
+    label: String
+}
+
+fn build_node(state: DocState) -> i32 {
+    var count = 0
+    for node in state.nodes {
+        match node {
+            Text(s) { count = count + s.len() }
+            Element(inline) {
+                for item in inline {
+                    count = count + 1
+                }
+            }
+        }
+    }
+    return count
+}
+
+fn main() {
+    print("test")
+}
