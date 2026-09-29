@@ -1395,7 +1395,7 @@ int close_matches(struct ExplicitCommand cmd, char* close_name) {
   if ((((cmd).tag) == ((ExplicitCommand_Math()).tag))) {
     return ((strcmp(close_name, "m") == 0) || (strcmp(close_name, "math") == 0));
   }
-  return __extension__ ({ al_opt _l = (lookup(close_name)); al_opt _r = (al_some_t_ExplicitCommand(cmd)); (_l.tag == _r.tag && (_l.tag == 0 || al_eq_ExplicitCommand(*_l.data.t_ExplicitCommand, *_r.data.t_ExplicitCommand))); });
+  return __extension__ ({ al_opt _l = (lookup(close_name)); al_opt _r = (al_some_t_ExplicitCommand(cmd)); (_l.tag == _r.tag && (_l.tag == 0 || (al_eq_ExplicitCommand(*_l.data.t_ExplicitCommand, *_r.data.t_ExplicitCommand)))); });
   }
   return 0;
 }
@@ -1599,7 +1599,7 @@ al_opt read_value(char* s, int start) {
   while (((i < strlen(s)) && ex_is_atom_char(al_char_to_str(s[i])))) {
     i += 1;
   }
-  if ((i == start)) {
+  if ((al_eq_i32(i, start))) {
     return al_none();
   }
   return al_some_t_ValParsed(((struct ValParsed){.arg = Arg_Atom(al_substr_ch(s, start, i)), .consumed = (i - start)}));
@@ -2161,7 +2161,7 @@ al_vec lw_vec_set(al_vec v, int i, struct Frame f) {
   al_vec out = ((al_vec){ 0, 0, NULL }); // var out
   int k = 0; // var k
   while ((k < v.len)) {
-    if ((k == i)) {
+    if ((al_eq_i32(k, i))) {
       out = ({ al_vec _b = al_vec_clone(out); al_push(&_b, sizeof(struct Frame), &f); _b; });
     } else {
       out = ({ al_vec _b = al_vec_clone(out); al_push(&_b, sizeof(struct Frame), &((struct Frame*)(v.data))[k]); _b; });
@@ -2287,7 +2287,7 @@ al_vec lw_vec_set_inline(al_vec v, int i, struct Inline item) {
   al_vec out = ((al_vec){ 0, 0, NULL }); // var out
   int k = 0; // var k
   while ((k < v.len)) {
-    if ((k == i)) {
+    if ((al_eq_i32(k, i))) {
       out = ({ al_vec _b = al_vec_clone(out); al_push(&_b, sizeof(struct Inline), &item); _b; });
     } else {
       out = ({ al_vec _b = al_vec_clone(out); al_push(&_b, sizeof(struct Inline), &((struct Inline*)(v.data))[k]); _b; });
@@ -2361,7 +2361,7 @@ struct ScanOut lw_resolve(al_vec atoms, al_vec diags, int line) {
       {
         struct MarkerKind kind = MarkerKind_MkExplicit(cmd); // let kind
         al_opt top = ((struct Frame*)(frames.data))[(frames.len - 1)].kind; // let top
-        if (__extension__ ({ al_opt _l = (top); al_opt _r = (al_some_t_MarkerKind(kind)); (_l.tag == _r.tag && (_l.tag == 0 || al_eq_MarkerKind(*_l.data.t_MarkerKind, *_r.data.t_MarkerKind))); })) {
+        if (__extension__ ({ al_opt _l = (top); al_opt _r = (al_some_t_MarkerKind(kind)); (_l.tag == _r.tag && (_l.tag == 0 || (al_eq_MarkerKind(*_l.data.t_MarkerKind, *_r.data.t_MarkerKind)))); })) {
           struct Frame f = ((struct Frame*)(frames.data))[(frames.len - 1)]; // let f
           frames = lw_vec_drop_last(frames);
           int fi = (frames.len - 1); // let fi
@@ -2384,7 +2384,7 @@ struct ScanOut lw_resolve(al_vec atoms, al_vec diags, int line) {
       struct MarkerAtom m = atom.data.AtMarker._0;
       {
         al_opt top = ((struct Frame*)(frames.data))[(frames.len - 1)].kind; // let top
-        if ((__extension__ ({ al_opt _l = (top); al_opt _r = (al_some_t_MarkerKind(m.kind)); (_l.tag == _r.tag && (_l.tag == 0 || al_eq_MarkerKind(*_l.data.t_MarkerKind, *_r.data.t_MarkerKind))); }) && m.can_close)) {
+        if ((__extension__ ({ al_opt _l = (top); al_opt _r = (al_some_t_MarkerKind(m.kind)); (_l.tag == _r.tag && (_l.tag == 0 || (al_eq_MarkerKind(*_l.data.t_MarkerKind, *_r.data.t_MarkerKind)))); }) && m.can_close)) {
           struct Frame f = ((struct Frame*)(frames.data))[(frames.len - 1)]; // let f
           frames = lw_vec_drop_last(frames);
           int fi = (frames.len - 1); // let fi

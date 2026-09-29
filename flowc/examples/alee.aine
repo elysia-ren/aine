@@ -854,12 +854,44 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 // 枚举类型值比较: al_eq_T(a, b)（C 结构体无 ==; T 为用户枚举）
                 let l_bt = base_type(l, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
                 let r_bt = base_type(r, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                var l_opt_form = false
+                var r_opt_form = false
+                match l {
+                    ECall(lcf0, _) {
+                        match lcf0 {
+                            EIdent(ln0) { if ln0 == "Some" || ln0 == "Ok" { l_opt_form = true } }
+                            _ {}
+                        }
+                    }
+                    _ {}
+                }
+                match r {
+                    ECall(rcf0, _) {
+                        match rcf0 {
+                            EIdent(rn0) { if rn0 == "Some" || rn0 == "Ok" { r_opt_form = true } }
+                            _ {}
+                        }
+                    }
+                    _ {}
+                }
                 let l_is_enum = match l_bt {
-                    Some(lt) { contains_str(enames, lt) }
+                    Some(lt) {
+                        if l_opt_form && (lt.starts_with("Option<") || lt.starts_with("Result<")) {
+                            contains_str(enames, first_type_arg(lt))
+                        } else {
+                            contains_str(enames, lt)
+                        }
+                    }
                     None { false }
                 }
                 let r_is_enum = match r_bt {
-                    Some(rt) { contains_str(enames, rt) }
+                    Some(rt) {
+                        if r_opt_form && (rt.starts_with("Option<") || rt.starts_with("Result<")) {
+                            contains_str(enames, first_type_arg(rt))
+                        } else {
+                            contains_str(enames, rt)
+                        }
+                    }
                     None { false }
                 }
                 if l_is_enum && r_is_enum {
@@ -870,6 +902,16 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                                     if rt == lt {
                                         let lc3 = c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                                         let rc3 = c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                                        // 一侧为 Some(x) 构造 → 两侧都是 al_opt, 解包比较
+                                        if l_opt_form || r_opt_form {
+                                            let lt_u = first_type_arg(lt)
+                                            let inner = "(al_eq_" + lt_u + "(*_l.data.t_" + lt_u + ", *_r.data.t_" + lt_u + "))"
+                                            var core = "(_l.tag == _r.tag && (_l.tag == 0 || " + inner + "))"
+                                            if op == "!=" {
+                                                core = "!(" + core + ")"
+                                            }
+                                            return "__extension__ ({ al_opt _l = (" + lc3 + "); al_opt _r = (" + rc3 + "); " + core + "; })"
+                                        }
                                         if op == "!=" {
                                             return "(!al_eq_" + lt + "(" + lc3 + ", " + rc3 + "))"
                                         }
