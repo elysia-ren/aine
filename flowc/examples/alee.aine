@@ -876,7 +876,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 }
                 let l_is_enum = match l_bt {
                     Some(lt) {
-                        if l_opt_form && (lt.starts_with("Option<") || lt.starts_with("Result<")) {
+                        if (l_opt_form || r_opt_form) && (lt.starts_with("Option<") || lt.starts_with("Result<")) {
                             contains_str(enames, first_type_arg(lt))
                         } else {
                             contains_str(enames, lt)
@@ -886,7 +886,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 }
                 let r_is_enum = match r_bt {
                     Some(rt) {
-                        if r_opt_form && (rt.starts_with("Option<") || rt.starts_with("Result<")) {
+                        if (l_opt_form || r_opt_form) && (rt.starts_with("Option<") || rt.starts_with("Result<")) {
                             contains_str(enames, first_type_arg(rt))
                         } else {
                             contains_str(enames, rt)
