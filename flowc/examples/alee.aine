@@ -2658,6 +2658,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                 }
 
             }
+            var et_out = ""
             match itt {
                 Some(t) {
                     if t.starts_with("Vec<") {
@@ -2671,20 +2672,21 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                         elem = ect
                         len_expr = iter_c + ".len"
                         acc_expr = "((" + ect + "*)(" + iter_c + ".data))[_i]"
+                        et_out = et
                     }
                 }
                 None {}
             }
             var out = pad + "for (size_t _i = 0; _i < " + len_expr + "; _i++) {"
             out = out + "\n" + pad + "  " + elem + " " + vv + " = " + acc_expr + ";"
-            // 循环变量入表(elem 为 C 类型 → Aine 类型)
+            // 循环变量入表(et_out 为 Aine 元素类型, 泛型 Vec<...> 完整保留)
             var vv_ty = ""
             if elem == "char*" { vv_ty = "String" }
             else if elem == "int" { vv_ty = "i32" }
             else if elem == "double" { vv_ty = "f64" }
             else if elem == "char" { vv_ty = "char" }
             else if elem.starts_with("struct ") { vv_ty = elem[7..elem.len()] }
-            else if elem == "al_vec" { vv_ty = "Vec<infer>" }
+            else if elem == "al_vec" { vv_ty = et_out }
             var fn_names2: Vec<String> = []
             var fn_types2: Vec<String> = []
             for a4 in varnames { fn_names2.push(a4) }
