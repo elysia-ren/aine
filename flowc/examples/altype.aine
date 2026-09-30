@@ -1447,3 +1447,21 @@ fn bind_index(pat: String, name: String) -> String {
     }
     return "0"
 }
+
+
+// 未注解全局变量的字面量初值推断（最小覆盖）:
+// EStr→String, EInt→i32, EFloat→f64, true/false→bool; 其余(调用/Vec/复杂)保持 None→infer
+fn global_lit_type(init: Expr) -> Option<String> {
+    match init {
+        EStr(_) { return Some("String") }
+        EInt(_) { return Some("i32") }
+        EFloat(_) { return Some("f64") }
+        EIdent(n) {
+            if n == "true" || n == "false" {
+                return Some("bool")
+            }
+        }
+        _ {}
+    }
+    return None
+}

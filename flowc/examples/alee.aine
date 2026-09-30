@@ -646,7 +646,6 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
             }
             EIdent(nm) {
                 let vt = var_type(nm, varnames, vartypes)
-                print("DBG-FMT nm=" + nm + " vt=" + f"{vt}")
                 match vt {
                     Some("i32") { f1 = "%d" }
                     Some("f64") {
@@ -1060,7 +1059,8 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         return "al_some_" + some_member(args[0], user_types, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, vnames, vowners) + "(" + c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
                     }
                     if bname == "Err" && args.len() == 1 {
-                        return "al_none()"
+                        // Err 携带载荷(tag 0 + data): 调用侧 Err(e) 臂会解引用 data 成员
+                        return "al_err_" + some_member(args[0], user_types, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, vnames, vowners) + "(" + c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
                     }
                     // 断言内建：统一发射为 al_assert(cond, msg)，缺省补消息
                     if bname == "assert" {
@@ -1189,6 +1189,10 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         }
                         // rvalue 实参（函数调用/数字字面量）→ 复合字面量取址
                         var addr = "&" + arg_c
+                        // 结构体右值实参: 临时 _t 必须落在 al_push 所在的同一层语句表达式里
+                        // (嵌套 __extension__({ T _t = ..; &_t; }) 作实参时 clang -O1+ 会在
+                        //  外层调用前对 _t 注入 lifetime-end, memcpy 读到已死存储 → 全零/崩溃)
+                        var push_pre = ""
                         match args[0] {
                             ECall(callee2, _) {
                                 match callee2 {
@@ -1202,16 +1206,19 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                                                 else if rt.starts_with("Vec<") { addr = "&(al_vec){ " + arg_c + " }" }
                                                 else if contains_str(user_types, rt) {
                                                     // 结构体右值 → 语句表达式落临时取址(C 结构体不能内嵌右值初始化)
-                                                    addr = "(__extension__ ({ struct " + rt + " _t = " + arg_c + "; &_t; }))"
+                                                    push_pre = "struct " + rt + " _t = " + arg_c + "; "
+                                                    addr = "&_t"
                                                 }
                                                 else { addr = "&" + arg_c }
                                             }
                                             None {
                                                 // 枚举构造器（Owner_Name()）返回结构体右值 → 语句表达式内落临时取其地址
-                                                print("DBG-PUSH fname=" + fname2 + " es=" + es)
                                                 let vown = variant_owner(fname2, vnames, vowners)
                                                 match vown {
-                                                    Some(ow2) { addr = "(__extension__ ({ struct " + ow2 + " _t = " + arg_c + "; &_t; }))" }
+                                                    Some(ow2) {
+                                                        push_pre = "struct " + ow2 + " _t = " + arg_c + "; "
+                                                        addr = "&_t"
+                                                    }
                                                     None {
                                                         if es == "sizeof(char*)" {
                                                             addr = "&(char*){ " + arg_c + " }"
@@ -1223,7 +1230,8 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                                                                 addr = "&" + arg_c
                                                             } else {
                                                                 // 右值结构体(函数返回值等) → 语句表达式落临时取址
-                                                                addr = "(__extension__ ({ " + tn3 + " _t = " + arg_c + "; &_t; }))"
+                                                                push_pre = tn3 + " _t = " + arg_c + "; "
+                                                                addr = "&_t"
                                                             }
                                                         }
                                                     }
@@ -1268,6 +1276,9 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         // clone-再-push: C 值语义下 base 的 data 指针可能被多处共享
                         // (struct 拷贝/let 别名), 原地 realloc 会使其他持有者悬挂
                         let base_c = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        if push_pre != "" {
+                            return "({ al_vec _b = al_vec_clone(" + base_c + "); " + push_pre + " al_push(&_b, " + es + ", " + addr + "); _b; })"
+                        }
                         return "({ al_vec _b = al_vec_clone(" + base_c + "); al_push(&_b, " + es + ", " + addr + "); _b; })"
                     }
                     if mname == "to_i32" && args.len() == 0 {
@@ -2884,6 +2895,14 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
             // (fn_var_infos 索引与 fn_names_all 枚举错位 — SImpl 方法/闭包名 — 多模块下取错表)
             var seed_n: Vec<String> = []
             var seed_t: Vec<String> = []
+            // 全局前置: fn_var_infos 末位是纯全局表(alcollect 追加), 先于形参(形参可遮蔽全局)
+            if fn_var_infos.len() > 0 {
+                let gvi = fn_var_infos[fn_var_infos.len() - 1]
+                for gk in 0..gvi.names.len() {
+                    seed_n.push(gvi.names[gk])
+                    seed_t.push(gvi.types[gk])
+                }
+            }
             for p in params {
                 seed_n.push(p.name)
                 seed_t.push(p.ty)
@@ -4004,9 +4023,16 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
     out = out + "#define al_some_s(x) ((al_opt){ .tag = 1, .data.s = (x) })\n"
     out = out + "#define al_some_v(x) ((al_opt){ .tag = 1, .data.v = (x) })\n"
     out = out + "#define al_some_p(x) ((al_opt){ .tag = 1, .data.p = (void*)(x) })\n"
+    // Err 系: tag 0 携带载荷(Result 的 E) — Option None 用 al_none()(无载荷), 两者共用 tag 0
+    out = out + "#define al_err_i(x) ((al_opt){ .tag = 0, .data.i = (x) })\n"
+    out = out + "#define al_err_f(x) ((al_opt){ .tag = 0, .data.f = (x) })\n"
+    out = out + "#define al_err_s(x) ((al_opt){ .tag = 0, .data.s = (x) })\n"
+    out = out + "#define al_err_v(x) ((al_opt){ .tag = 0, .data.v = (x) })\n"
+    out = out + "#define al_err_p(x) ((al_opt){ .tag = 0, .data.p = (void*)(x) })\n"
     for t in user_types {
         // 语句表达式: 先落临时再取地址 — 实参可为函数调用等右值
         out = out + "#define al_some_t_" + t + "(x) __extension__ ({ struct " + t + " _t = (x); (al_opt){ .tag = 1, .data.t_" + t + " = al_dup(&_t, sizeof(struct " + t + ")) }; })\n"
+        out = out + "#define al_err_t_" + t + "(x) __extension__ ({ struct " + t + " _t = (x); (al_opt){ .tag = 0, .data.t_" + t + " = al_dup(&_t, sizeof(struct " + t + ")) }; })\n"
     }
     out = out + "#define al_none() ((al_opt){ .tag = 0 })\n"
     // 用户类型前向声明(定义顺序问题永久消失)
@@ -4033,15 +4059,50 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
     // 用户类型定义
 
     // 全局变量(S1c): 类型定义后、函数前发射 C 文件作用域变量
+    // String 字面量初值不能进静态初始化(非常量) 也不能留 .rdata 指针(strcat_own realloc 崩):
+    // 声明置 NULL, 真实值延迟到 constructor 里 al_strdup_lit
+    var gstr_names: Vec<String> = []
+    var gstr_vals: Vec<String> = []
     for s in program {
         match s {
             SGlobalVar(name, ty, init) {
-                let ct = c_type(ty, user_types)
-                let ic = c_expr(init, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                // 未注解全局不能默认 int: 字面量初值推断(String/i32/f64/bool), 否则维持旧行为
+                var ty2 = ty
+                match ty {
+                    None {
+                        match global_lit_type(init) {
+                            Some(gt) { ty2 = Some(gt) }
+                            None {}
+                        }
+                    }
+                    _ {}
+                }
+                let ct = c_type(ty2, user_types)
+                var ic = c_expr(init, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                if ct == "char*" {
+                    match init {
+                        EStr(_) {
+                            gstr_names.push(name)
+                            gstr_vals.push(ic)
+                            out = out + ct + " " + name + " = NULL;\n"
+                            continue
+                        }
+                        _ {}
+                    }
+                }
                 out = out + ct + " " + name + " = " + ic + ";\n"
             }
             _ {}
         }
+    }
+    if gstr_names.len() > 0 {
+        out = out + "__attribute__((constructor)) static void al_global_str_init(void) {\n"
+        var gi = 0
+        for gsn in gstr_names {
+            out = out + "  " + gsn + " = al_strdup_lit(" + gstr_vals[gi] + ");\n"
+            gi += 1
+        }
+        out = out + "}\n"
     }
     for s in program {
         match s {

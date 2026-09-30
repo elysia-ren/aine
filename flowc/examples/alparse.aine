@@ -1820,23 +1820,24 @@ fn valueal_lite(program: Vec<Stmt>) -> VALiteResult {
             SDef(fname, params, ret, body_s) {
                 let scan = va_scan(body_s)
                 var accs: Vec<String> = []
-                // 数值类型守卫: i32/f64/bool 的自我累加是算术, 不是字符串拼接
-                // (否则 count = count + 1 被误改写为 al_strcat_own)
                 let all_vn = collect_var_names(program)
                 let all_vt = collect_var_types(program)
+                // 白名单式判定: 只有类型确知为 String 的自我累加才改写 strcat_own;
+                // 数值/infer/查不到一律保持 C (+) —— 数值 + 远多于字符串 +,
+                // 未注解全局(g_count = 0 → "infer")曾滑进黑名单被误改写
                 for v in scan.selfs {
                     if va_is_acc(v, scan.selfs, scan.others, scan.alias, scan.decls) {
-                        var v_is_num = false
+                        var v_is_str = false
                         let vt3 = var_type(v, all_vn, all_vt)
                         match vt3 {
                             Some(t3) {
-                                if t3 == "i32" || t3 == "i64" || t3 == "f64" || t3 == "bool" {
-                                    v_is_num = true
+                                if t3 == "String" {
+                                    v_is_str = true
                                 }
                             }
                             None {}
                         }
-                        if !v_is_num && !contains_str(accs, v) {
+                        if v_is_str && !contains_str(accs, v) {
                             accs.push(v)
                         }
                     }

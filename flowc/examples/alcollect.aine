@@ -259,7 +259,13 @@ fn collect_var_types(program: Vec<Stmt>) -> Vec<String> {
             SGlobalVar(name, ty, init) {
                 match ty {
                     Some(t) { ts.push(t) }
-                    None { ts.push("infer") }
+                    None {
+                        // 未注解全局: 字面量初值可推断(String/i32/f64/bool), 否则 infer
+                        match global_lit_type(init) {
+                            Some(gt) { ts.push(gt) }
+                            None { ts.push("infer") }
+                        }
+                    }
                 }
             }
             SDef(name, params, ret, body_s) {
@@ -288,7 +294,13 @@ fn collect_fn_var_infos(program: Vec<Stmt>) -> Vec<VarInfo> {
                 g_names.push(gn)
                 match gt {
                     Some(gtv) { g_types.push(gtv) }
-                    None { g_types.push("infer") }
+                    None {
+                        // 与 collect_var_types 同步: 未注解全局用字面量初值推断
+                        match global_lit_type(gi2) {
+                            Some(gtv2) { g_types.push(gtv2) }
+                            None { g_types.push("infer") }
+                        }
+                    }
                 }
             }
             _ {}
@@ -330,7 +342,11 @@ fn collect_fn_var_infos(program: Vec<Stmt>) -> Vec<VarInfo> {
             _ {}
         }
     }
-    return infos
+    // 末位追加纯全局表: alee c_stmt SDef 臂以此为种子把全局前置进每函数语句表
+    // (fn_var_infos 从不按下标读取, 末位追加不扰动既有消费方)
+    var ginfo = infos
+    ginfo.push(VarInfo { names: g_names types: g_types })
+    return ginfo
 }
 
 // impl 方法表：编码 "Type.method"（alee 方法调用发射兜底查表用）
