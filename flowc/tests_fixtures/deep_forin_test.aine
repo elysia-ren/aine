@@ -1,0 +1,26 @@
+
+struct Row {
+    cells: Vec<i32>
+}
+
+struct Tbl {
+    rows: Vec<Row>
+}
+
+fn deep(t: Tbl) -> i32 {
+    var total = 0
+    for row in t.rows {
+        if total == 0 {
+            for cell in row.cells {
+                for it in cell.items {
+                    total = total + it
+                }
+            }
+        }
+    }
+    return total
+}
+
+fn main() {
+    print(deep(Tbl { rows: [] }))
+}

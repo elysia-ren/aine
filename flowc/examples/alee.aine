@@ -453,7 +453,27 @@ fn fstr_c(s: String, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<S
         var piece = ""
         if is_lit {
             let val = if p.len() > 4 { p[4..p.len()] } else { return "" }
-            piece = "\"" + val + "\""
+            // 字面量片段 C 转义: 解码后的控制字符转回转义序列(防跨行字符串字面量)
+            var esc = ""
+            var ci = 0
+            while ci < val.len() {
+                let ch = val[ci..ci + 1]
+                if ch == "\n" {
+                    esc = esc + "\\n"
+                } else if ch == "\t" {
+                    esc = esc + "\\t"
+                } else if ch == "\r" {
+                    esc = esc + "\\r"
+                } else if ch == "\"" {
+                    esc = esc + "\\\""
+                } else if ch == "\\" {
+                    esc = esc + "\\\\"
+                } else {
+                    esc = esc + ch
+                }
+                ci += 1
+            }
+            piece = "\"" + esc + "\""
         } else {
             let val = if p.len() > 5 { p[5..p.len()] } else { return "" }
 
@@ -874,6 +894,41 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     }
                     _ {}
                 }
+                if op == "==" {
+                    match l {
+                        EIdent(ln5) {
+                            let vt5 = var_type(ln5, varnames, vartypes)
+                            print("[diag7] l=", ln5, " vt=", f"{vt5}")
+                        }
+                        _ {}
+                    }
+                    match r {
+                        ECall(rcf5, _) {
+                            match rcf5 {
+                                EIdent(rn5) {
+                                    if rn5 == "Some" {
+                                        print("[diag7] r=Some arg=", f"{r}")
+                                        match r {
+                                            ECall(_, ra5) {
+                                                if ra5.len() > 0 {
+                                                    match ra5[0] {
+                                                        EIdent(an5) {
+                                                            print("[diag7] Some-arg=", an5, " vt=", f"{var_type(an5, varnames, vartypes)}")
+                                                        }
+                                                        _ {}
+                                                    }
+                                                }
+                                            }
+                                            _ {}
+                                        }
+                                    }
+                                }
+                                _ {}
+                            }
+                        }
+                        _ {}
+                    }
+                }
                 let l_is_enum = match l_bt {
                     Some(lt) {
                         if (l_opt_form || r_opt_form) && (lt.starts_with("Option<") || lt.starts_with("Result<")) {
@@ -1075,7 +1130,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     if mname == "len" && args.len() == 0 {
                         // String.len() → strlen(s)；Vec.len() → v.len
                         let base_c = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
-                        let bt = base_type(base, varnames, vartypes, [], [], snames, sfnames, sftypes)
+                        let bt = base_type(base, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
                         match bt {
                             Some(btv) {
                                 if btv == "String" {
@@ -1096,8 +1151,12 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                                 match base {
                                     ECall(EField(_, mname2), _) {
                                         if mname2 == "trim" || mname2 == "replace" || mname2 == "substr" {
-                                            return "al_chars_len(" + base_c + ")"
+                                            return "strlen(" + base_c + ")"
                                         }
+                                    }
+                                    ECall(EIdent(_), _) {
+                                        // 用户函数调用链返回 String: strlen 与 s[i] 字节自洽
+                                        return "strlen(" + base_c + ")"
                                     }
                                     _ {}
                                 }
@@ -2562,10 +2621,41 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
             var len_expr = "strlen(" + iter_c + ")"
             var acc_expr = iter_c + "[_i]"
             let itt = base_type(iter, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
-            print("[aine-diag] for-in: iter_c=", iter_c, " itt=", f"{itt}")
+            match iter {
+                EIdent(in9) {
+                }
+                _ {}
+            }
             if itt == None {
                 // 诊断: 迭代类型推断失败(将退字符串模板) — 报告可迭代与表值
-                print("[aine-diag] for-in elem unresolved: iter=", iter_c)
+                match iter {
+                    EField(ib9, if9) {
+                        let b9 = base_type(ib9, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                        var b9s = ""
+                        match b9 {
+                            Some(b9v) { b9s = b9v }
+                            None {}
+                        }
+                    }
+                    _ {}
+                }
+                match iter {
+                    EField(EIdent(fb9), ff9) {
+                        print("[diag11] base=", fb9, " base-vt=", f"{var_type(fb9, varnames, vartypes)}", " field=", ff9)
+                    }
+                    EIdent(id9) {
+                        print("[diag12] iter-ident=", id9, " vt=", f"{var_type(id9, varnames, vartypes)}")
+                    }
+                    _ {
+                        print("[diag13] iter-other=", f"{iter}")
+                    }
+                }
+                print("[diag8] varnames-snapshot:")
+                var si8 = 0
+                while si8 < varnames.len() && si8 < 60 {
+                    print("[diag8] ", varnames[si8], ":", vartypes[si8])
+                    si8 += 1
+                }
 
             }
             match itt {
@@ -3141,7 +3231,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                     }
                     Some(_) {}
                 }
-                // // 臂局部变量表: enum_field_ty 直出 Aine 类型(泛型保留)
+                // 臂局部变量表: enum_field_ty 直出 Aine 类型(泛型保留)
                 var arm_names: Vec<String> = []
                 var arm_types: Vec<String> = []
                 for a2 in varnames { arm_names.push(a2) }
@@ -3185,52 +3275,6 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                         } else {
                             arm_names.push(b0)
                             arm_types.push(bt2)
-                        }
-                    }
-                }
-                for bl in blines {
-                    var eqi = 0 - 1
-                    var ci2 = 0
-                    while ci2 < bl.len() {
-                        if bl[ci2..ci2 + 3] == " = " {
-                            eqi = ci2
-                            ci2 = bl.len()
-                        }
-                        ci2 += 1
-                    }
-                    if eqi > 0 {
-                        let lhs = bl[0..eqi]
-                        var lsi = 0 - 1
-                        var ci3 = 0
-                        while ci3 < lhs.len() {
-                            if lhs[ci3..ci3 + 1] == " " { lsi = ci3 }
-                            ci3 += 1
-                        }
-                        if lsi > 0 {
-                            // 声明行的 C 类型 → 表约定的 Aine 类型(下游 c_type 再映射)
-                            var bty = lhs[0..lsi]
-                            let bnm = lhs[lsi + 1..lhs.len()]
-                            if bty.starts_with("struct ") {
-                                bty = bty[7..bty.len()]
-                            } else if bty == "char*" {
-                                bty = "String"
-                            } else if bty == "int" {
-                                bty = "i32"
-                            } else if bty == "double" {
-                                bty = "f64"
-                            }
-                            var hit2 = 0 - 1
-                            var ci4 = 0
-                            while ci4 < arm_names.len() {
-                                if arm_names[ci4] == bnm { hit2 = ci4 }
-                                ci4 += 1
-                            }
-                            if hit2 >= 0 {
-                                arm_types[hit2] = bty
-                            } else {
-                                arm_names.push(bnm)
-                                arm_types.push(bty)
-                            }
                         }
                     }
                 }

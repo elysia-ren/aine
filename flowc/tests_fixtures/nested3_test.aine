@@ -1,0 +1,60 @@
+
+enum Cmd {
+    Math
+    Code
+}
+
+enum MK {
+    MkBold
+    MkExplicit(Cmd)
+}
+
+struct Frame {
+    kind: Option<MK>
+    children: Vec<i32>
+}
+
+enum Atom {
+    AtText(String)
+    AtMarker(MK, String, bool, bool)
+    AtClose(Cmd, String)
+}
+
+fn process(atoms: Vec<Atom>, a_kind_arg: MK, a_close_cmd_arg: Cmd) -> bool {
+    var frames: Vec<Frame> = [Frame { kind: None, children: [] }]
+    for atom in atoms {
+        var a_type = 0
+        var a_kind = MkBold
+        var a_close_cmd = Code
+        var a_can_close = false
+        match atom {
+            AtText(s) { a_type = 1 }
+            AtMarker(mk, lit, co, cc) {
+                a_type = 3
+                a_kind = mk
+                a_can_close = cc
+            }
+            AtClose(cmd, lit) {
+                a_type = 5
+                a_close_cmd = cmd
+            }
+        }
+        if a_type == 5 {
+            let kind = MkExplicit(a_close_cmd)
+            let top: Option<MK> = frames[frames.len() - 1].kind
+            if top == Some(kind) {
+                return true
+            }
+        } else if a_type == 3 {
+            let top2: Option<MK> = frames[frames.len() - 1].kind
+            if top2 == Some(a_kind) && a_can_close {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+fn main() {
+    print(process([], MkBold, Math))
+}

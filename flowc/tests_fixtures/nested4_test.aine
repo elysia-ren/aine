@@ -1,0 +1,28 @@
+
+struct Cell {
+    items: Vec<i32>
+}
+
+struct Row {
+    cells: Vec<Cell>
+}
+
+struct Tbl {
+    rows: Vec<Row>
+}
+
+fn count(t: Tbl) -> i32 {
+    var total = 0
+    for row in t.rows {
+        for cell in row.cells {
+            for it in cell.items {
+                total = total + it
+            }
+        }
+    }
+    return total
+}
+
+fn main() {
+    print("x")
+}
