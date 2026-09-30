@@ -54,3 +54,13 @@ flowc/.git_backup/
 # 杂项临时文件
 flowc/tmp_*
 flowc/*.check
+
+awen-proto/*.exe
+awen-proto/*.pdb
+awen-proto/*.c
+awen-proto/*_out.txt
+awen-proto/*_err.txt
+awen-proto/asan_out.txt
+awen-proto/dbg_out.txt
+awen-proto/g_out.txt
+awen-proto/g_err.txt
