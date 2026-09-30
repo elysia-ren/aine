@@ -2684,6 +2684,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
             else if elem == "double" { vv_ty = "f64" }
             else if elem == "char" { vv_ty = "char" }
             else if elem.starts_with("struct ") { vv_ty = elem[7..elem.len()] }
+            else if elem == "al_vec" { vv_ty = "Vec<infer>" }
             var fn_names2: Vec<String> = []
             var fn_types2: Vec<String> = []
             for a4 in varnames { fn_names2.push(a4) }
