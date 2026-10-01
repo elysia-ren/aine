@@ -175,7 +175,7 @@ fn expr_ctype(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec
             match bt {
                 Some(t) {
                     if t.starts_with("Vec<") { return c_type(Some(first_type_arg(t)), user_types) }
-                    if t == "String" { return "char" }
+                    if t == "String" { return "char*" }
                     return "int"
                 }
                 None { return "int" }
@@ -237,6 +237,7 @@ fn some_member(e: Expr, user_types: Vec<String>, varnames: Vec<String>, vartypes
         }
         // Vec 元素索引实参 Some(xs[i]) → 按元素类型选槽
         // (此前无臂落默认 "p"/"v" → int 元素写进 .v 槽/void* → 读回垃圾/段错误)
+        // String[i] → D15 字符语义: 单字符 String → .s 槽
         EIndex(ib, ii) {
             match ii {
                 ERange(_, _) { return "s" }
@@ -254,7 +255,7 @@ fn some_member(e: Expr, user_types: Vec<String>, varnames: Vec<String>, vartypes
                     if t2.starts_with("Vec<") {
                         return payload_member(Some(first_type_arg(t2)), user_types)
                     }
-                    if t2 == "String" { return "i" }
+                    if t2 == "String" { return "s" }
                 }
                 None {}
             }
@@ -890,7 +891,7 @@ fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Ve
                                 match idx2 {
                                     ERange(a2, h2) { types.push("String") }
                                     _ {
-                                        // Vec<T>[i] → T；String[i] → char
+                                        // Vec<T>[i] → T；String[i] → String(D15 字符语义)
                                         match b2 {
                                             EIdent(bn2) {
                                                 // 内建全局 cli_args[i] → String
@@ -901,6 +902,7 @@ fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Ve
                                                     match bt {
                                                         Some(t2) {
                                                             if t2.starts_with("Vec<") { types.push(first_type_arg(t2)) }
+                                                            else if t2 == "String" { types.push("String") }
                                                             else { types.push("char") }
                                                         }
                                                         None { types.push("char") }
@@ -908,7 +910,7 @@ fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Ve
                                                 }
                                             }
                                             EField(fb, fname2) {
-                                                // v.fields[i] → 结构体 Vec 字段的元素类型；String 字段单索引 → char
+                                                // v.fields[i] → 结构体 Vec 字段的元素类型；String 字段单索引 → String
                                                 let bt = base_type(fb, names, types, all_fnames, all_freturns, snames, sfnames, sftypes)
                                                 match bt {
                                                     Some(t) {
@@ -916,6 +918,7 @@ fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Ve
                                                         match ft {
                                                             Some(ftv) {
                                                                 if ftv.starts_with("Vec<") { types.push(first_type_arg(ftv)) }
+                                                                else if ftv == "String" { types.push("String") }
                                                                 else { types.push("char") }
                                                             }
                                                             None { types.push("char") }
@@ -1014,8 +1017,9 @@ fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Ve
             }
             SFor(vn, iter, body2) {
                 names.push(vn)
-                // 循环变量类型：Vec<T> → T；String → char；EField(v.fields) → 字段类型；区间 → i32
-                var et = "char"
+                // 循环变量类型：Vec<T> → T；String → String(D15 字符语义, 单字符 String)；
+                // EField(v.fields) → 字段类型；区间 → i32
+                var et = "String"
                 match iter {
                     EIdent(iv) {
                         let vt = var_type(iv, names, types)
@@ -1241,6 +1245,24 @@ fn arg_elem_size(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners:
 fn expr_is_string(e: Expr, other: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>) -> bool {
     match e {
         EStr(s) { return true }
+        // s[i] String 单索引 → D15 字符语义: 产单字符 String(比较走 strcmp)
+        EIndex(b2, idx2) {
+            match idx2 {
+                ERange(_, _) { return true }
+                _ {
+                    match b2 {
+                        EIdent(bn2) {
+                            let vt2 = var_type(bn2, varnames, vartypes)
+                            match vt2 {
+                                Some(t2) { return t2 == "String" }
+                                None { return false }
+                            }
+                        }
+                        _ { return false }
+                    }
+                }
+            }
+        }
         EIdent(n) {
             let vt = var_type(n, varnames, vartypes)
             match vt {
@@ -1367,7 +1389,7 @@ fn is_char_typed(e: Expr, varnames: Vec<String>, vartypes: Vec<String>) -> bool 
                 None { return false }
             }
         }
-        // src[i]（String 单索引）→ char
+        // src[i]（String 单索引）→ D15 字符语义: 产单字符 String(al_char_at), 非 C char
         EIndex(b, idx) {
             match idx {
                 ERange(_, _) { return false }
@@ -1376,7 +1398,7 @@ fn is_char_typed(e: Expr, varnames: Vec<String>, vartypes: Vec<String>) -> bool 
                         EIdent(bn) {
                             let bt = var_type(bn, varnames, vartypes)
                             match bt {
-                                Some(t) { return t == "String" }
+                                Some(t) { return t == "char" }
                                 None { return false }
                             }
                         }
@@ -1454,12 +1476,15 @@ fn base_type(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<
             }
         }
         EIndex(b3, idx3) {
-            // Vec<T>[i] → T
+            // Vec<T>[i] → T; String[i] → String(D15 字符语义, 单字符产 String)
             let bt = base_type(b3, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
             match bt {
                 Some(t) {
                     if t.starts_with("Vec<") {
                         return Some(first_type_arg(t))
+                    }
+                    if t == "String" {
+                        return Some("String")
                     }
                     return None
                 }

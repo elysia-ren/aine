@@ -331,8 +331,8 @@ fn main() -> Result<(), String> {
     let p4 = parse_program(tokenize(src4))?
     let c4 = c_program(p4, collect_user_types(p4), collect_variant_names(p4), collect_variant_owners(p4), collect_fn_names(p4), collect_fn_returns(p4), collect_var_names(p4), collect_var_types(p4), collect_fn_ptypes(p4), collect_enum_ty_names(p4), collect_enum_variant_lists(p4))
     if !c4.contains("(x > 0) ? 1 : 2") { return Err("case4 if-expr") }
-    // D15 过渡态: 切片统一字节形态 al_substr(此前 al_substr_ch 字符位与字节下标混用)
-    if !c4.contains("al_substr(s, i, (i + 2))") { return Err("case4 slice") }
+    // D15 定稿字符语义: 切片 al_substr_ch(字符位), 与 al_chars_len/al_char_at 同计量
+    if !c4.contains("al_substr_ch(s, i, (i + 2))") { return Err("case4 slice") }
     print("case4 if-slice OK")
     // case 5: array iteration
     let src5 = "fn sum(v: Vec<i32>) -> i32 {\n    var total = 0\n    for x in v {\n        total += x\n    }\n    return total\n}"
@@ -355,7 +355,7 @@ fn main() -> Result<(), String> {
     let p8 = parse_program(tokenize(src8))?
     let c8 = c_program(p8, collect_user_types(p8), collect_variant_names(p8), collect_variant_owners(p8), collect_fn_names(p8), collect_fn_returns(p8), collect_var_names(p8), collect_var_types(p8), collect_fn_ptypes(p8), collect_enum_ty_names(p8), collect_enum_variant_lists(p8))
     if !c8.contains("strcmp(two, \"==\") == 0") { return Err("case8 strcmp") }
-    if !c8.contains("al_substr(src, i, (i + 2))") { return Err("case8 slice") }
+    if !c8.contains("al_substr_ch(src, i, (i + 2))") { return Err("case8 slice") }
     print("case8 lexer-readop OK")
 
     // case 9: tokenize (struct + while + slice + strcmp + push)
@@ -522,9 +522,10 @@ fn main() -> Result<(), String> {
     let ca_src = "fn is_digit(c: String) -> bool {\n    c >= \"0\" && c <= \"9\"\n}\n\nfn main() {\n    let s = \"a5\"\n    print(is_digit(s[0]))\n    print(is_digit(s[1]))\n}"
     let p21 = parse_program(tokenize(ca_src))?
     let c21 = c_program(p21, collect_user_types(p21), collect_variant_names(p21), collect_variant_owners(p21), collect_fn_names(p21), collect_fn_returns(p21), collect_var_names(p21), collect_var_types(p21), collect_fn_ptypes(p21), collect_enum_ty_names(p21), collect_enum_variant_lists(p21))
+    // D15 字符语义: s[0] 产 String(al_char_at), String 形参直传, 无需 al_char_to_str
     var p21_in_c = c21.contains("is_digit")
-    var p21_conv = c21.contains("al_char_to_str(s[0])")
-    if !c21.contains("al_char_to_str(s[0])") { return Err("case21 char-arg") }
+    var p21_conv = c21.contains("al_char_at(s, 0)")
+    if !c21.contains("al_char_at(s, 0)") { return Err("case21 char-arg") }
     print("case21 char-arg OK")
 
     // case 22: 编译 Aine 组件 parser_expr.aine（B4-M1 表达式解析器）
