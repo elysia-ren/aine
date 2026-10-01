@@ -181,7 +181,12 @@ impl Resolver {
                     if let Some(name) = item_name(other) {
                         let kind = item_kind(other);
                         let span = item_span(other);
-                        let sym = self.intern(&name, kind, span, false);
+                        // @global var 的可变性必须传到符号表(typeck 赋值检查依赖)
+                        let g_mut = match other {
+                            Item::GlobalState(g) => g.is_mut,
+                            _ => false,
+                        };
+                        let sym = self.intern(&name, kind, span, g_mut);
                         if let Err(existing) = self.define(&name, sym) {
                             self.dup_definition_diag(&name, existing, span);
                         }

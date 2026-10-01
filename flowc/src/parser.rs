@@ -724,8 +724,7 @@ impl<'a> Parser<'a> {
             None
         };
         let end = self.cur().span.end;
-        let _ = is_mut;
-        Some(Item::GlobalState(GlobalStateDef { name, ty, init, span: Span::new(start, end) }))
+        Some(Item::GlobalState(GlobalStateDef { name, ty, init, is_mut, span: Span::new(start, end) }))
     }
 
     // ---- types ----

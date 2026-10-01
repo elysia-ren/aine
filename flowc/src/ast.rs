@@ -155,6 +155,7 @@ pub struct GlobalStateDef {
     pub name: String,
     pub ty: Option<Type>,
     pub init: Option<Expr>,
+    pub is_mut: bool,
     pub span: Span,
 }
 
