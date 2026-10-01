@@ -823,6 +823,17 @@ fn evec_c(items: Vec<Expr>, heap: bool, user_types: Vec<String>, vnames: Vec<Str
                 _ {}
             }
         }
+        // 裸变体标识符元素(如 [Add, Sub]) → 所属枚举 struct
+        // (c_expr EIdent 臂发 Owner_Variant() 构造调用, 元素大小须匹配)
+        EIdent(vn0) {
+            match variant_owner(vn0, vnames, vowners) {
+                Some(o0) {
+                    etag = "(struct " + o0 + "[])"
+                    esz = "struct " + o0
+                }
+                None {}
+            }
+        }
         _ {}
     }
     if !heap {
@@ -1180,6 +1191,12 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                             return "al_assert(" + ac + ", " + mc + ")"
                         }
                         return "al_assert(" + ac + ", \"断言失败\")"
+                    }
+                    // print 在表达式位(匹配臂值→三元/语句表达式) → 语句表达式形态
+                    // (print 是 C 语句 printf, 无表达式形式; 臂值经 c_expr 发射时兜住)
+                    if bname == "print" {
+                        let pc2 = c_print_stmt(args, "", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, snames, sfnames, sftypes, fptypes, enames, elists, vfnames, vftypes)
+                        return "({ " + pc2 + " 0; })"
                     }
                 }
                 _ {}
@@ -2554,11 +2571,13 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
             }
             var kv = "let "
             if is_mut { kv = "var " }
-            // 无初始化器声明：let x: T → T x;
+            // 无初始化器声明：let x: T → T x = {0};
+            // 零初始化防未初始化字段读垃圾(struct 成员/al_opt tag/Vec len 皆受益,
+            // C 聚合初始化 brace-elision 对标量也合法)
             match init {
                 EIdent(nn) {
                     if nn == "__noinit__" {
-                        return pad + ct + " " + name + "; // " + kv + name
+                        return pad + ct + " " + name + " = {0}; // " + kv + name
                     }
                 }
                 _ {}
@@ -3358,7 +3377,14 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                                     // 方法调用语句（如 v.push(x)）→ 非返回值
                                     ab.push(pad + "  " + c_expr(be, user_types, vnames, vowners, arm_names, arm_types, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";")
                                 } else {
-                                    ab.push(pad + "  return " + c_expr(be, user_types, vnames, vowners, arm_names, arm_types, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";")
+                                    // 值臂: 仅函数尾位(tail)发 return; 语句位发裸表达式
+                                    // (解释器语义: 语句位 match 的臂值丢弃, 继续执行 —
+                                    // 无条件 return 会从函数中段提前退出)
+                                    if tail {
+                                        ab.push(pad + "  return " + c_expr(be, user_types, vnames, vowners, arm_names, arm_types, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";")
+                                    } else {
+                                        ab.push(pad + "  " + c_expr(be, user_types, vnames, vowners, arm_names, arm_types, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";")
+                                    }
                                 }
                             }
                         }
@@ -3647,9 +3673,11 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
     out = out + "  while (s[i] && i <= idx) {\n"
     out = out + "    unsigned char c = (unsigned char)s[i];\n"
     out = out + "    if (c < 0x80) { cp = c; i += 1; }\n"
-    out = out + "    else if ((c & 0xE0) == 0xC0) { cp = (c & 0x1F); i += 2; }\n"
-    out = out + "    else if ((c & 0xF0) == 0xE0) { cp = (c & 0x0F); i += 3; }\n"
-    out = out + "    else if ((c & 0xF8) == 0xF0) { cp = (c & 0x07); i += 4; }\n"
+    // 多字节序列: 首字节取前缀位后, 逐个消费后续续字节 (b & 0x3F) 累加进低位
+    // (此前只取首字节前缀 → 中文码点系统性偏小 → 宽度计算错)
+    out = out + "    else if ((c & 0xE0) == 0xC0) { cp = (c & 0x1F); if (s[i+1]) cp = (cp << 6) | ((unsigned char)s[i+1] & 0x3F); i += 2; }\n"
+    out = out + "    else if ((c & 0xF0) == 0xE0) { cp = (c & 0x0F); if (s[i+1]) cp = (cp << 6) | ((unsigned char)s[i+1] & 0x3F); if (s[i+2]) cp = (cp << 6) | ((unsigned char)s[i+2] & 0x3F); i += 3; }\n"
+    out = out + "    else if ((c & 0xF8) == 0xF0) { cp = (c & 0x07); if (s[i+1]) cp = (cp << 6) | ((unsigned char)s[i+1] & 0x3F); if (s[i+2]) cp = (cp << 6) | ((unsigned char)s[i+2] & 0x3F); if (s[i+3]) cp = (cp << 6) | ((unsigned char)s[i+3] & 0x3F); i += 4; }\n"
     out = out + "    else { cp = c; i += 1; }\n"
     out = out + "    if (i > idx) break;\n"
     out = out + "  }\n"

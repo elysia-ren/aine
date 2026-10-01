@@ -235,6 +235,31 @@ fn some_member(e: Expr, user_types: Vec<String>, varnames: Vec<String>, vartypes
                 }
             }
         }
+        // Vec 元素索引实参 Some(xs[i]) → 按元素类型选槽
+        // (此前无臂落默认 "p"/"v" → int 元素写进 .v 槽/void* → 读回垃圾/段错误)
+        EIndex(ib, ii) {
+            match ii {
+                ERange(_, _) { return "s" }
+                _ {}
+            }
+            var is_cli = false
+            match ib {
+                EIdent(cn) { if cn == "cli_args" { is_cli = true } }
+                _ {}
+            }
+            if is_cli { return "s" }
+            let bt = base_type(ib, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+            match bt {
+                Some(t2) {
+                    if t2.starts_with("Vec<") {
+                        return payload_member(Some(first_type_arg(t2)), user_types)
+                    }
+                    if t2 == "String" { return "i" }
+                }
+                None {}
+            }
+            return "p"
+        }
         EField(base2, fname2) {
             match base2 {
                 EIdent(bn2) {
