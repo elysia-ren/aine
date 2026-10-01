@@ -674,6 +674,40 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
             EField(b2, m2) {
                 if m2 == "len" { f1 = "%zu" }
             }
+            EIndex(ib, ii) {
+                // Vec 元素实参按元素类型分派(cli_args 为 char*; 元素查不到时默认数值,
+                // 防 int 落 %s 段错误 — 未注解全局 Vec 实测踩过)
+                var is_cli = false
+                match ib {
+                    EIdent(cn) { if cn == "cli_args" { is_cli = true } }
+                    _ {}
+                }
+                if is_cli {
+                    f1 = "%s"
+                } else {
+                    let bt = base_type(ib, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                    match bt {
+                        Some(t) {
+                            if t.starts_with("Vec<") {
+                                let et = first_type_arg(t)
+                                if et == "String" {
+                                    f1 = "%s"
+                                } else if et == "f64" {
+                                    f1 = "%s"
+                                    part = "al_fnum(" + pc + ")"
+                                } else {
+                                    f1 = "%d"
+                                }
+                            } else if t == "String" {
+                                f1 = "%d"
+                            } else {
+                                f1 = "%d"
+                            }
+                        }
+                        None { f1 = "%d" }
+                    }
+                }
+            }
             EIdent(nm) {
                 let vt = var_type(nm, varnames, vartypes)
                 match vt {
@@ -714,6 +748,101 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
         fmts.push(f1)
     }
     return pad + "printf(\"" + join(fmts, " ") + "\\n\", " + join(parts, ", ") + ");"
+}
+
+
+// Vec 字面量 → C。heap=true: 语句表达式逐元素 al_push 落堆 —— 复合字面量
+// (T[]){...} 是块作用域栈对象, data 一逃出所在块即悬空(内层块声明/实参/返回
+// 值/move 场景), 后续 clone/set 逐步污染 → 段错误(-O0 同崩, 生命周期与优化
+// 无关)。heap=false: 保留复合字面量(文件作用域静态存储, 供全局初始化器 —
+// 静态初始化器不接受语句表达式)。
+fn evec_c(items: Vec<Expr>, heap: bool, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>, vfnames: Vec<String>, vftypes: Vec<String>) -> String {
+    if items.len() == 0 {
+        return "((al_vec){ 0, 0, NULL })"
+    }
+    // 元素类型：首元素为用户类型 → struct T[]
+    var etag = "(int[])"
+    var esz = "int"
+    let et0 = base_type(items[0], varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+    match et0 {
+        Some(t0) {
+            if t0.starts_with("Option<") || t0.starts_with("Result<") {
+                // Option/Result 元素 → al_opt (tag+union, 非 int)
+                etag = "(al_opt[])"
+                esz = "al_opt"
+            }
+            else if contains_str(user_types, t0) {
+                etag = "(struct " + t0 + "[])"
+                esz = "struct " + t0
+            }
+            else if t0 == "String" {
+                etag = "(char*[])"
+                esz = "char*"
+            }
+            else if t0 == "f64" {
+                etag = "(double[])"
+                esz = "double"
+            }
+            else if t0 == "bool" {
+                etag = "(int[])"
+                esz = "int"
+            }
+        }
+        None {}
+    }
+    match items[0] {
+        EStr(_) {
+            // 字符串字面量元素 → char*（字面量静态存储）
+            etag = "(char*[])"
+            esz = "char*"
+        }
+        EStruct(t0, _) {
+            etag = "(struct " + t0 + "[])"
+            esz = "struct " + t0
+        }
+        ECall(cf0, _) {
+            // 变体构造元素(裸变体名) → 所属枚举 struct;Some/Ok/None → al_opt
+            match cf0 {
+                EIdent(cfn0) {
+                    if cfn0 == "Some" || cfn0 == "Ok" || cfn0 == "None" {
+                        etag = "(al_opt[])"
+                        esz = "al_opt"
+                    } else {
+                        var oi0 = 0
+                        for en0 in enames {
+                            for pp0 in str_split(elists[oi0], ",") {
+                                if pp0 == cfn0 {
+                                    etag = "(struct " + en0 + "[])"
+                                    esz = "struct " + en0
+                                }
+                            }
+                            oi0 += 1
+                        }
+                    }
+                }
+                _ {}
+            }
+        }
+        _ {}
+    }
+    if !heap {
+        // 静态路径(全局初始化器): 复合字面量在文件作用域有静态存储期, 合法且无悬空
+        var parts: Vec<String> = []
+        for it in items {
+            parts.push(c_expr(it, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes))
+        }
+        return "((al_vec){ " + f"{items.len()}" + ", sizeof(" + esz + "), " + etag + "{ " + join(parts, ", ") + " } })"
+    }
+    // 堆物化: 逐元素落临时再 al_push(realloc 到堆), data 指向堆内存可安全逃逸
+    var st = "({ al_vec __v = { 0, sizeof(" + esz + "), NULL }; "
+    var ei = 0
+    for it in items {
+        let ec = c_expr(it, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+        st = st + "{ " + esz + " _e" + f"{ei}" + " = " + ec + "; al_push(&__v, sizeof(_e" + f"{ei}" + "), &_e" + f"{ei}" + "); } "
+        ei += 1
+    }
+    st = st + "__v; })"
+    return st
 }
 
 
@@ -1600,112 +1729,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
         }
         EUnit { return "0" }
         EVec(items) {
-            if items.len() == 0 {
-                return "((al_vec){ 0, 0, NULL })"
-            }
-            // 元素类型：首元素为用户类型 → struct T[]
-            var etag = "(int[])"
-            var esz = "int"
-            if items.len() > 0 {
-                let et0 = base_type(items[0], varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
-                match et0 {
-                    Some(t0) {
-                        if t0.starts_with("Option<") || t0.starts_with("Result<") {
-                            // Option/Result 元素 → al_opt[] (tag+union, 非 int)
-                            etag = "(al_opt[])"
-                            esz = "al_opt"
-                        }
-                        else if contains_str(user_types, t0) {
-                            etag = "(struct " + t0 + "[])"
-                            esz = "struct " + t0
-                        }
-                        else if t0 == "String" {
-                            // Vec<String> 字面量：char*[] + 指针大小（字面量静态存储）
-                            etag = "(char*[])"
-                            esz = "char*"
-                        }
-                        else if t0 == "f64" {
-                            etag = "(double[])"
-                            esz = "double"
-                        }
-                        else if t0 == "bool" {
-                            etag = "(int[])"
-                            esz = "int"
-                        }
-                    }
-                    None {}
-                }
-                match items[0] {
-                    EStr(_) {
-                        // 字符串字面量元素 → char*[]（字面量静态存储）
-                        etag = "(char*[])"
-                        esz = "char*"
-                    }
-                    EStruct(t0, _) {
-                        etag = "(struct " + t0 + "[])"
-                        esz = "struct " + t0
-                    }
-                    ECall(cf0, _) {
-                        // 变体构造元素(裸变体名) → 所属枚举 struct[];Some/Ok/None → al_opt[]
-                        match cf0 {
-                            EIdent(cfn0) {
-                                if cfn0 == "Some" || cfn0 == "Ok" || cfn0 == "None" {
-                                    etag = "(al_opt[])"
-                                    esz = "al_opt"
-                                } else {
-                                var oi0 = 0
-                                for en0 in enames {
-                                    for pp0 in str_split(elists[oi0], ",") {
-                                        if pp0 == cfn0 {
-                                            etag = "(struct " + en0 + "[])"
-                                            esz = "struct " + en0
-                                        }
-                                    }
-                                    oi0 += 1
-                                }
-                                }
-                            }
-                            _ {}
-                        }
-                    }
-                    _ {}
-                }
-            }
-            var parts: Vec<String> = []
-            // 任一元素是变体构造(右值结构体) → 语句表达式逐元素 push(数组初始化器不接受右值结构体)
-            var has_ctor = false
-            for it in items {
-                match it {
-                    ECall(cf1, _) {
-                        match cf1 {
-                            EIdent(cfn1) {
-                                // 大写开头 = 变体构造(右值结构体)
-                                if cfn1.len() > 0 {
-                                    let c0 = cfn1[0]
-                                    if c0 >= "A" && c0 <= "Z" { has_ctor = true }
-                                }
-                            }
-                            _ {}
-                        }
-                    }
-                    _ {}
-                }
-            }
-            if has_ctor {
-                var st = "({ al_vec __v = { 0, sizeof(" + esz + "), NULL }; "
-                var ei = 0
-                for it in items {
-                    let ec = c_expr(it, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
-                    st = st + "{ " + esz + " _e" + f"{ei}" + " = " + ec + "; al_push(&__v, sizeof(_e" + f"{ei}" + "), &_e" + f"{ei}" + "); } "
-                    ei += 1
-                }
-                st = st + "__v; })"
-                return st
-            }
-            for it in items {
-                parts.push(c_expr(it, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes))
-            }
-            return "((al_vec){ " + f"{items.len()}" + ", sizeof(" + esz + "), " + etag + "{ " + join(parts, ", ") + " } })"
+            return evec_c(items, true, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
         }
         EStruct(ty, fields) {
             var parts: Vec<String> = []
@@ -4074,7 +4098,17 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
                     _ {}
                 }
                 let ct = c_type(ty2, user_types)
-                var ic = c_expr(init, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                var ic = ""
+                match init {
+                    EVec(ev_items) {
+                        // 全局 vec 字面量: 语句表达式不能进静态初始化器 → 复合字面量
+                        // (文件作用域静态存储, 无悬空; 与函数内堆物化路径分流)
+                        ic = evec_c(ev_items, false, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                    }
+                    _ {
+                        ic = c_expr(init, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                    }
+                }
                 if ct == "char*" {
                     match init {
                         EStr(_) {

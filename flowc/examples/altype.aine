@@ -1511,6 +1511,19 @@ fn global_lit_type(init: Expr) -> Option<String> {
         EStr(_) { return Some("String") }
         EInt(_) { return Some("i32") }
         EFloat(_) { return Some("f64") }
+        EVec(items) {
+            // 首元素细推元素类型(空/未知 → infer); 供全局声明(al_vec)与
+            // print 索引分派(%s/%d)两处消费
+            if items.len() > 0 {
+                match items[0] {
+                    EStr(_) { return Some("Vec<String>") }
+                    EFloat(_) { return Some("Vec<f64>") }
+                    EInt(_) { return Some("Vec<i32>") }
+                    _ {}
+                }
+            }
+            return Some("Vec<infer>")
+        }
         EIdent(n) {
             if n == "true" || n == "false" {
                 return Some("bool")
