@@ -675,14 +675,21 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
                 if m2 == "len" { f1 = "%zu" }
             }
             EIndex(ib, ii) {
-                // Vec 元素实参按元素类型分派(cli_args 为 char*; 元素查不到时默认数值,
-                // 防 int 落 %s 段错误 — 未注解全局 Vec 实测踩过)
+                // 切片 → String(%s); Vec 元素实参按元素类型分派(cli_args 为 char*;
+                // 元素查不到时默认数值, 防 int 落 %s 段错误 — 未注解全局 Vec 实测踩过)
+                var is_range = false
+                match ii {
+                    ERange(_, _) { is_range = true }
+                    _ {}
+                }
                 var is_cli = false
                 match ib {
                     EIdent(cn) { if cn == "cli_args" { is_cli = true } }
                     _ {}
                 }
-                if is_cli {
+                if is_range {
+                    f1 = "%s"
+                } else if is_cli {
                     f1 = "%s"
                 } else {
                     let bt = base_type(ib, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
@@ -1727,6 +1734,8 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
         }
         EField(b, name) {
             // String 的 .len 字段 → strlen（Vec 才是真字段 .len）
+            // 与 .len() 方法形态一致(D15 过渡态字节形态; 此前字段形态发 al_chars_len
+            // 字符数 → s.len ≠ s.len(), CJK 下两拼写分叉)
             if name == "len" {
                 let bt = base_type(b, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
                 // None/"infer"(推断失败占位) 按字符串处理(对 char* 正确;
@@ -1734,7 +1743,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 match bt {
                     Some(btv) {
                         if btv == "String" || btv == "infer" {
-                            return "al_chars_len(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
+                            return "strlen(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
                         }
                     }
                     None {
@@ -1791,7 +1800,10 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     if is_vec {
                         return "al_slice(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ", " + c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ", " + c_expr(hi, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
                     }
-                    return "al_substr_ch(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ", " + c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ", " + c_expr(hi, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
+                    // D15 过渡态: C 路径统一字节形态(len/indexing/for-in 均 strlen+字节),
+                    // 切片此前发 al_substr_ch(字符位) — 字节下标喂字符偏移 = 混用垃圾。
+                    // 完整字符语义迁移 = M6-TCK 索引类型表(登记在案)
+                    return "al_substr(" + c_expr(b, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ", " + c_expr(a, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ", " + c_expr(hi, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
                 }
                 _ {}
             }
@@ -4046,7 +4058,9 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
     out = out + "static char* al_num(long v) { char* r = (char*)malloc(32); snprintf(r, 32, \"%ld\", v); return r; }\n"
     out = out + "static char* al_fnum(double v) { char* r = (char*)malloc(32); if (v == (long long)v && v >= -1e15 && v <= 1e15) { snprintf(r, 32, \"%.1f\", v); } else { snprintf(r, 32, \"%g\", v); } return r; }\n"
     out = out + "static char* al_bool(int b) { return b ? \"true\" : \"false\"; }\n"
-    out = out + "static char* al_trim(char* s) { char* r = (char*)malloc(strlen(s) + 1); strcpy(r, s); char* st = r; while (*st == ' ' || *st == '\\t' || *st == '\\r' || *st == '\\n') st++; char* en = st + strlen(st); while (en > st && (en[-1] == ' ' || en[-1] == '\\t' || en[-1] == '\\r' || en[-1] == '\\n')) en--; *en = 0; if (st != r) memmove(r, st, strlen(st) + 1); return r; }\n"
+    // trim: ASCII 空白 + U+3000(E3 80 80 全角空格) + U+00A0(C2 A0) — 对齐解释器
+    // Rust str::trim() 的 Unicode White_Space(中文文档高频, awen fw_is_ideo_space 同款)
+    out = out + "static char* al_trim(char* s) { char* r = (char*)malloc(strlen(s) + 1); strcpy(r, s); char* st = r; while (*st == ' ' || *st == '\\t' || *st == '\\r' || *st == '\\n') st++; char* en = st + strlen(st); while (en > st) { if (en[-1] == ' ' || en[-1] == '\\t' || en[-1] == '\\r' || en[-1] == '\\n') { en--; continue; } if (en - st >= 3 && (unsigned char)en[-3] == 0xE3 && (unsigned char)en[-2] == 0x80 && (unsigned char)en[-1] == 0x80) { en -= 3; continue; } if (en - st >= 2 && (unsigned char)en[-2] == 0xC2 && (unsigned char)en[-1] == 0xA0) { en -= 2; continue; } break; } while (*st == ' ' || *st == '\\t' || *st == '\\r' || *st == '\\n') st++; while (st < en && (en - st >= 3 && (unsigned char)st[0] == 0xE3 && (unsigned char)st[1] == 0x80 && (unsigned char)st[2] == 0x80)) st += 3; while (st < en && (en - st >= 2 && (unsigned char)st[0] == 0xC2 && (unsigned char)st[1] == 0xA0)) st += 2; *en = 0; if (st != r) memmove(r, st, strlen(st) + 1); return r; }\n"
     out = out + "static al_vec al_split(char* s, char* sep) { al_vec r = { 0, sizeof(char*), NULL }; size_t sl = strlen(sep); if (sl == 0) { for (size_t i = 0; i < strlen(s); i++) { char* p = (char*)malloc(2); p[0] = s[i]; p[1] = 0; al_push(&r, sizeof(char*), &p); } return r; } else { char* cur = s; while (1) { char* hit = strstr(cur, sep); if (!hit) { al_push(&r, sizeof(char*), &(char*){ cur }); break; } size_t n = (size_t)(hit - cur); char* p = (char*)malloc(n + 1); memcpy(p, cur, n); p[n] = 0; al_push(&r, sizeof(char*), &p); cur = hit + sl; } return r; } }\n"
     out = out + "static char* al_replace(char* s, char* from, char* to) { size_t fl = strlen(from), tl = strlen(to), sl = strlen(s); if (fl == 0) return s; size_t cnt = 0; char* q = s; while ((q = strstr(q, from)) != NULL) { cnt++; q += fl; } char* r = (char*)malloc(sl + cnt * (tl - fl) + 1); char* o = r; char* p = s; while (1) { char* hit = strstr(p, from); if (!hit) { strcpy(o, p); break; } size_t pre = (size_t)(hit - p); memcpy(o, p, pre); o += pre; memcpy(o, to, tl); o += tl; p = hit + fl; } return r; }\n"
     out = out + "static al_vec al_slice(al_vec v, size_t a, size_t b) {\n"
@@ -4105,16 +4119,28 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
     let enames = collect_enum_ty_names(program)
     let elists = collect_enum_variant_lists(program)
     // 用户类型定义
+    for s in program {
+        match s {
+            SStruct(n, f) { out = out + c_stmt(s, "", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, "", vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false) + "\n" }
+            SEnum(n, v) { out = out + c_stmt(s, "", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, "", vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false) + "\n" }
+            _ {}
+        }
+    }
 
-    // 全局变量(S1c): 类型定义后、函数前发射 C 文件作用域变量
-    // String 字面量初值不能进静态初始化(非常量) 也不能留 .rdata 指针(strcat_own realloc 崩):
-    // 声明置 NULL, 真实值延迟到 constructor 里 al_strdup_lit
+    // 全局变量(S1c): 类型定义后(此前在前 → 不完整类型)、函数前发射。
+    // 静态可行(纯常量: 数值/字符串字面量/常量 Vec) → 复合字面量直发;
+    // 其余(struct 字面量/Some/Ok/变体构造/含构造的 Vec/函数调用)一律延迟到
+    // constructor —— 语句表达式宏与函数调用都不能进静态初始化器, 且 String
+    // 字面量不能留 .rdata 指针(strcat_own realloc 崩, 用 al_strdup_lit)
     var gstr_names: Vec<String> = []
     var gstr_vals: Vec<String> = []
+    var gdef_names: Vec<String> = []
+    var gdef_vals: Vec<String> = []
     for s in program {
         match s {
             SGlobalVar(name, ty, init) {
-                // 未注解全局不能默认 int: 字面量初值推断(String/i32/f64/bool), 否则维持旧行为
+                // 未注解全局不能默认 int: 字面量初值推断(String/i32/f64/bool/
+                // Vec/struct/Option/Map), 否则维持旧行为
                 var ty2 = ty
                 match ty {
                     None {
@@ -4122,52 +4148,114 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
                             Some(gt) { ty2 = Some(gt) }
                             None {}
                         }
+                        // 函数调用初值: 按返回类型(表在发射器侧可用)
+                        match init {
+                            ECall(EIdent(gfn), _) {
+                                match ty2 {
+                                    None {
+                                        let fr3 = fn_return(gfn, fnames, freturns)
+                                        match fr3 {
+                                            Some(rt3) { ty2 = Some(rt3) }
+                                            None {}
+                                        }
+                                    }
+                                    _ {}
+                                }
+                            }
+                            _ {}
+                        }
+                        // 裸变体初值: 所属枚举
+                        match init {
+                            EIdent(vn4) {
+                                match variant_owner(vn4, vnames, vowners) {
+                                    Some(o4) { ty2 = Some(o4) }
+                                    None {}
+                                }
+                            }
+                            _ {}
+                        }
                     }
                     _ {}
                 }
                 let ct = c_type(ty2, user_types)
-                var ic = ""
+                // 静态可行性分类
+                var defer_it = false
                 match init {
-                    EVec(ev_items) {
-                        // 全局 vec 字面量: 语句表达式不能进静态初始化器 → 复合字面量
-                        // (文件作用域静态存储, 无悬空; 与函数内堆物化路径分流)
-                        ic = evec_c(ev_items, false, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                    EStr(_) {
+                        if ct == "char*" { defer_it = true }
                     }
-                    _ {
-                        ic = c_expr(init, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
-                    }
-                }
-                if ct == "char*" {
-                    match init {
-                        EStr(_) {
-                            gstr_names.push(name)
-                            gstr_vals.push(ic)
-                            out = out + ct + " " + name + " = NULL;\n"
-                            continue
+                    EStruct(_, _) { defer_it = true }
+                    ECall(_, _) { defer_it = true }
+                    EVec(gitems) {
+                        // 任一元素非常量(构造调用/struct 字面量/裸变体) → 延迟
+                        for gi2 in gitems {
+                            match gi2 {
+                                ECall(_, _) { defer_it = true }
+                                EStruct(_, _) { defer_it = true }
+                                EIdent(gv2) {
+                                    match variant_owner(gv2, vnames, vowners) {
+                                        Some(_) { defer_it = true }
+                                        None {}
+                                    }
+                                }
+                                _ {}
+                            }
                         }
-                        _ {}
                     }
+                    EIdent(vn5) {
+                        match variant_owner(vn5, vnames, vowners) {
+                            Some(_) { defer_it = true }
+                            None {}
+                        }
+                        if vn5 == "None" { defer_it = true }
+                    }
+                    _ {}
                 }
-                out = out + ct + " " + name + " = " + ic + ";\n"
+                if defer_it {
+                    if ct == "char*" {
+                        match init {
+                            EStr(_) {
+                                gstr_names.push(name)
+                                gstr_vals.push(c_expr(init, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes))
+                                out = out + ct + " " + name + " = NULL;\n"
+                                continue
+                            }
+                            _ {}
+                        }
+                    }
+                    gdef_names.push(name)
+                    gdef_vals.push(c_expr(init, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes))
+                    out = out + ct + " " + name + " = {0};\n"
+                } else {
+                    var ic = ""
+                    match init {
+                        EVec(ev_items) {
+                            // 常量 Vec: 复合字面量静态直发(文件作用域静态存储)
+                            ic = evec_c(ev_items, false, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        }
+                        _ {
+                            ic = c_expr(init, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        }
+                    }
+                    out = out + ct + " " + name + " = " + ic + ";\n"
+                }
             }
             _ {}
         }
     }
-    if gstr_names.len() > 0 {
-        out = out + "__attribute__((constructor)) static void al_global_str_init(void) {\n"
+    if gstr_names.len() > 0 || gdef_names.len() > 0 {
+        out = out + "__attribute__((constructor)) static void al_global_init(void) {\n"
         var gi = 0
         for gsn in gstr_names {
             out = out + "  " + gsn + " = al_strdup_lit(" + gstr_vals[gi] + ");\n"
             gi += 1
         }
-        out = out + "}\n"
-    }
-    for s in program {
-        match s {
-            SStruct(n, f) { out = out + c_stmt(s, "", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, "", vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false) + "\n" }
-            SEnum(n, v) { out = out + c_stmt(s, "", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, "", vfnames, vftypes, snames, sfnames, sftypes, fn_names_all, fn_var_infos, fptypes, enames, elists, false) + "\n" }
-            _ {}
+        var gj = 0
+        for gdn in gdef_names {
+            out = out + "  " + gdn + " = " + gdef_vals[gj] + ";\n"
+            gj += 1
         }
+        out = out + "}\n"
     }
 
     // 函数前向声明（互递归）

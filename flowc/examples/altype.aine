@@ -1549,10 +1549,23 @@ fn global_lit_type(init: Expr) -> Option<String> {
             }
             return Some("Vec<infer>")
         }
+        EStruct(t0, _) { return Some(t0) }
+        ECall(cf, _) {
+            match cf {
+                EIdent(fn0) {
+                    if fn0 == "Some" || fn0 == "Ok" || fn0 == "Err" { return Some("Option<infer>") }
+                }
+                EField(EIdent(bn0), m0) {
+                    if bn0 == "Map" && m0 == "new" { return Some("Map") }
+                }
+                _ {}
+            }
+        }
         EIdent(n) {
             if n == "true" || n == "false" {
                 return Some("bool")
             }
+            if n == "None" { return Some("Option<infer>") }
         }
         _ {}
     }

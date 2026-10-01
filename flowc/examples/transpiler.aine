@@ -331,10 +331,8 @@ fn main() -> Result<(), String> {
     let p4 = parse_program(tokenize(src4))?
     let c4 = c_program(p4, collect_user_types(p4), collect_variant_names(p4), collect_variant_owners(p4), collect_fn_names(p4), collect_fn_returns(p4), collect_var_names(p4), collect_var_types(p4), collect_fn_ptypes(p4), collect_enum_ty_names(p4), collect_enum_variant_lists(p4))
     if !c4.contains("(x > 0) ? 1 : 2") { return Err("case4 if-expr") }
-    var p4a = c4.contains("al_substr")
-    var p4b = c4.contains("char* g(")
-    print("PROBE4 sub=" + f"{p4a}" + " g=" + f"{p4b}")
-    if !c4.contains("al_substr_ch(s, i, (i + 2))") { return Err("case4 slice") }
+    // D15 过渡态: 切片统一字节形态 al_substr(此前 al_substr_ch 字符位与字节下标混用)
+    if !c4.contains("al_substr(s, i, (i + 2))") { return Err("case4 slice") }
     print("case4 if-slice OK")
     // case 5: array iteration
     let src5 = "fn sum(v: Vec<i32>) -> i32 {\n    var total = 0\n    for x in v {\n        total += x\n    }\n    return total\n}"
@@ -357,7 +355,7 @@ fn main() -> Result<(), String> {
     let p8 = parse_program(tokenize(src8))?
     let c8 = c_program(p8, collect_user_types(p8), collect_variant_names(p8), collect_variant_owners(p8), collect_fn_names(p8), collect_fn_returns(p8), collect_var_names(p8), collect_var_types(p8), collect_fn_ptypes(p8), collect_enum_ty_names(p8), collect_enum_variant_lists(p8))
     if !c8.contains("strcmp(two, \"==\") == 0") { return Err("case8 strcmp") }
-    if !c8.contains("al_substr_ch(src, i, (i + 2))") { return Err("case8 slice") }
+    if !c8.contains("al_substr(src, i, (i + 2))") { return Err("case8 slice") }
     print("case8 lexer-readop OK")
 
     // case 9: tokenize (struct + while + slice + strcmp + push)
