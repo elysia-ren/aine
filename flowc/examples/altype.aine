@@ -222,7 +222,19 @@ fn some_member(e: Expr, user_types: Vec<String>, varnames: Vec<String>, vartypes
         // 嵌套枚举构造（EMatch/EClosure 等）→ 用户枚举载荷 t_<T>
         EMatch(ms2, ma2) { return "t_Stmt" }
         EClosure(ps2, b2) { return "t_Expr" }
-        EIdent(n) { return payload_member(var_type(n, varnames, vartypes), user_types) }
+        EIdent(n) {
+            let vt = var_type(n, varnames, vartypes)
+            match vt {
+                Some(_) { return payload_member(vt, user_types) }
+                None {
+                    // 裸变体实参(如 Some(MkText))→ 所属枚举 → t_<T> 堆复制槽
+                    match variant_owner(n, vnames2, vowners2) {
+                        Some(o) { return payload_member(Some(o), user_types) }
+                        None { return "p" }
+                    }
+                }
+            }
+        }
         EField(base2, fname2) {
             match base2 {
                 EIdent(bn2) {
@@ -764,11 +776,13 @@ fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Ve
                                     }
                                     EField(ib, mname2) {
                                         if mname2 == "get" {
-                                            // m.get(k) → Option<V>
+                                            // m.get(k) → Option<V>(Map 专属; Vec.get 与解释器
+                                            // 一致返回裸元素, 不推断 Option)
                                             let mbt = base_type(ib, names, types, all_fnames, all_freturns, snames, sfnames, sftypes)
                                             match mbt {
                                                 Some(mt) {
                                                     if mt.starts_with("Map<") { okt = "Option<" + second_type_arg(mt) + ">" }
+                                                    else if mt.starts_with("Vec<") { okt = first_type_arg(mt) }
                                                 }
                                                 None {}
                                             }
@@ -924,7 +938,14 @@ fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Ve
                                     let vt2 = var_type(n2, names, types)
                                     match vt2 {
                                         Some(t2) { types.push(t2) }
-                                        None { types.push("infer") }
+                                        None {
+                                            // 裸变体标识符(如 let k = MkText)→ 所属枚举类型
+                                            // (此前推 infer → Some(k) 退 Option<infer> → == 分派丢 al_eq)
+                                            match variant_owner(n2, evnames, eowners) {
+                                                Some(o2) { types.push(o2) }
+                                                None { types.push("infer") }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1130,6 +1151,41 @@ fn block_tail_expr(stmts: Vec<Stmt>) -> Option<Expr> {
 fn arg_elem_size(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>) -> String {
     match e {
         EStruct(ty, fields) { return "sizeof(struct " + ty + ")" }
+        ECall(cf, cargs) {
+            match cf {
+                EIdent(cfn) {
+                    // Some/Ok/None → al_opt 载荷;用户变体构造 → 枚举 struct
+                    if cfn == "Some" || cfn == "Ok" || cfn == "None" { return "sizeof(al_opt)" }
+                    match variant_owner(cfn, vnames, vowners) {
+                        Some(o) { return "sizeof(struct " + o + ")" }
+                        None {}
+                    }
+                }
+                _ {}
+            }
+            return "sizeof(int)"
+        }
+        EIdent(n2) {
+            // 标识符实参 → 按变量类型;裸变体 → 枚举 struct
+            let bt = var_type(n2, varnames, vartypes)
+            match bt {
+                Some(t2) {
+                    if t2 == "String" { return "sizeof(char*)" }
+                    if t2 == "i32" { return "sizeof(int)" }
+                    if t2 == "f64" { return "sizeof(double)" }
+                    if t2.starts_with("Vec<") { return "sizeof(al_vec)" }
+                    if t2.starts_with("Option<") || t2.starts_with("Result<") { return "sizeof(al_opt)" }
+                    if contains_str(user_types, t2) { return "sizeof(struct " + t2 + ")" }
+                    return "sizeof(int)"
+                }
+                None {
+                    match variant_owner(n2, vnames, vowners) {
+                        Some(o) { return "sizeof(struct " + o + ")" }
+                        None { return "sizeof(int)" }
+                    }
+                }
+            }
+        }
         EField(b2, fname2) {
             // r.stmt 等字段实参 → 按字段类型
             let bt = base_type(b2, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
@@ -1141,26 +1197,12 @@ fn arg_elem_size(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners:
                             if ftv == "String" { return "sizeof(char*)" }
                             if ftv == "i32" { return "sizeof(int)" }
                             if ftv == "f64" { return "sizeof(double)" }
+                            if ftv.starts_with("Option<") || ftv.starts_with("Result<") { return "sizeof(al_opt)" }
                             if contains_str(user_types, ftv) { return "sizeof(struct " + ftv + ")" }
                             return "sizeof(int)"
                         }
                         None { return "sizeof(int)" }
                     }
-                }
-                None { return "sizeof(int)" }
-            }
-        }
-        EIdent(n2) {
-            // 标识符实参 → 按变量类型
-            let bt = var_type(n2, varnames, vartypes)
-            match bt {
-                Some(t2) {
-                    if t2 == "String" { return "sizeof(char*)" }
-                    if t2 == "i32" { return "sizeof(int)" }
-                    if t2 == "f64" { return "sizeof(double)" }
-                    if t2.starts_with("Vec<") { return "sizeof(al_vec)" }
-                    if contains_str(user_types, t2) { return "sizeof(struct " + t2 + ")" }
-                    return "sizeof(int)"
                 }
                 None { return "sizeof(int)" }
             }
@@ -1344,6 +1386,19 @@ fn base_type(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<
                     return fn_return(fname, fnames, freturns)
                 }
                 EField(ib, mname) {
+                    // get 分派先于 method_ret: Map.get → Option<V>(Map 专属);
+                    // Vec.get → 裸元素类型(与解释器一致, 不包 Option)
+                    if mname == "get" {
+                        let gb = base_type(ib, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                        match gb {
+                            Some(gt) {
+                                if gt.starts_with("Map<") { return Some("Option<" + second_type_arg(gt) + ">") }
+                                if gt.starts_with("Vec<") { return Some(first_type_arg(gt)) }
+                            }
+                            None {}
+                        }
+                        return None
+                    }
                     // 方法调用 → method_ret(仅具体类型; 裸 Vec/Option/infer 不作数)
                     let mr = method_ret(mname, args.len())
                     if mr == "infer" || mr == "()" || mr == "" || mr == "Vec" || mr == "Option" || mr == "Map" {

@@ -199,7 +199,7 @@ fn opt_payload_inner(ty: Option<String>) -> String {
 }
 
 // Some(x)/Ok(x) 构造调用实参的 Aine 类型名(字面量推断 + 变量表); 非此形态返回 ""
-fn ctor_arg_inner(e: Expr, enames: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>) -> String {
+fn ctor_arg_inner(e: Expr, enames: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, vnames: Vec<String>, vowners: Vec<String>) -> String {
     match e {
         ECall(cf, cargs) {
             match cf {
@@ -209,10 +209,38 @@ fn ctor_arg_inner(e: Expr, enames: Vec<String>, varnames: Vec<String>, vartypes:
                             EStr(s) { return "String" }
                             EInt(n) { return "i32" }
                             EFloat(f) { return "f64" }
+                            ECall(cf3, ca3) {
+                                // 嵌套变体构造 Some(MkExplicit(...)) → 所属枚举
+                                match cf3 {
+                                    EIdent(cn3) {
+                                        match variant_owner(cn3, vnames, vowners) {
+                                            Some(o3) { return o3 }
+                                            None {}
+                                        }
+                                    }
+                                    _ {}
+                                }
+                                let nested = ECall(cf3, ca3)
+                                match base_type(nested, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes) {
+                                    Some(at3) { return at3 }
+                                    None {}
+                                }
+                            }
                             _ {
                                 match base_type(cargs[0], varnames, vartypes, fnames, freturns, snames, sfnames, sftypes) {
                                     Some(at) { return at }
-                                    None {}
+                                    None {
+                                        // 裸变体标识符 Some(MkText) → 所属枚举
+                                        match cargs[0] {
+                                            EIdent(an) {
+                                                match variant_owner(an, vnames, vowners) {
+                                                    Some(o4) { return o4 }
+                                                    None {}
+                                                }
+                                            }
+                                            _ {}
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -230,21 +258,23 @@ fn ctor_arg_inner(e: Expr, enames: Vec<String>, varnames: Vec<String>, vartypes:
 // f-string 插值片段：数值 → al_num/al_fnum；字符串 → 原样
 fn fstr_piece(val: String, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, enames: Vec<String>, elists: Vec<String>, user_types: Vec<String>, vnames2: Vec<String>, vowners2: Vec<String>, fptypes: Vec<String>, vfnames: Vec<String>, vftypes: Vec<String>) -> String {
     // AST 路径（B5-M33）：整段可解析 → 走完整 c_expr（方法链/嵌套调用/索引/字段全支持）
+    // 插值在发射期才解析, 不经 ckw_fix_program — 这里补一道 C 关键字转义(如 f"{n.inline}")
     let toks = tokenize(val)
     let pr = parse_expr(toks, 0, 0)
     match pr {
         Ok(r) {
             if r.next < toks.len() && toks[r.next].kind == TEof {
-                let c = c_expr(r.value, user_types, vnames2, vowners2, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                let fx = ckw_fix_expr(r.value)
+                let c = c_expr(fx, user_types, vnames2, vowners2, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                 // bool 插值 → al_bool（expr_ctype 的 bool 映射为 int，需按 Aine 类型判别）
-                let bt2 = base_type(r.value, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                let bt2 = base_type(fx, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
                 match bt2 {
                     Some(btv) {
                         if btv == "bool" { return "al_bool(" + c + ")" }
                     }
                     None {}
                 }
-                let ct = expr_ctype(r.value, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, user_types)
+                let ct = expr_ctype(fx, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, user_types)
                 if ct == "int" { return "al_num(" + c + ")" }
                 if ct == "double" { return "al_fnum(" + c + ")" }
                 if ct == "char" { return "al_char_to_str(" + c + ")" }
@@ -801,26 +831,8 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     return "(((" + lc2 + ").tag) " + c_op(op) + " ((" + rc2 + ").tag))"
                 }
                 if op == "==" || op == "!=" {
-                    // 诊断: Option 比较若未走 al_eq 分派, 报告两侧解析状态
-                    var r_some = false
-                    match r {
-                        ECall(rcf2, _) {
-                            match rcf2 {
-                                EIdent(rn2) { if rn2 == "Some" || rn2 == "Ok" { r_some = true } }
-                                _ {}
-                            }
-                        }
-                        _ {}
-                    }
-                    if r_some {
-                        let lb3 = base_type(l, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
-                        let rb3 = base_type(r, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
-                        print("[aine-diag] raw== opt pair: l_bt=", f"{lb3}", " r_bt=", f"{rb3}")
-                    }
-                }
-                // 枚举值 vs 变体构造调用(Owner_Variant(...) 形态, 操作数类型表不可用时的分派):
-                // a_kind == MarkerKind_MkExplicit(u.cmd) → al_eq_MarkerKind(a_kind, ctor_call)
-                if op == "==" || op == "!=" {
+                    // 枚举值 vs 变体构造调用(Owner_Variant(...) 形态, 操作数类型表不可用时的分派):
+                    // a_kind == MarkerKind_MkExplicit(u.cmd) → al_eq_MarkerKind(a_kind, ctor_call)
                     var ctor_owner = ""
                     var other_is_val = false
                     match l {
@@ -893,41 +905,6 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     }
                     _ {}
                 }
-                if op == "==" {
-                    match l {
-                        EIdent(ln5) {
-                            let vt5 = var_type(ln5, varnames, vartypes)
-                            print("[diag7] l=", ln5, " vt=", f"{vt5}")
-                        }
-                        _ {}
-                    }
-                    match r {
-                        ECall(rcf5, _) {
-                            match rcf5 {
-                                EIdent(rn5) {
-                                    if rn5 == "Some" {
-                                        print("[diag7] r=Some arg=", f"{r}")
-                                        match r {
-                                            ECall(_, ra5) {
-                                                if ra5.len() > 0 {
-                                                    match ra5[0] {
-                                                        EIdent(an5) {
-                                                            print("[diag7] Some-arg=", an5, " vt=", f"{var_type(an5, varnames, vartypes)}")
-                                                        }
-                                                        _ {}
-                                                    }
-                                                }
-                                            }
-                                            _ {}
-                                        }
-                                    }
-                                }
-                                _ {}
-                            }
-                        }
-                        _ {}
-                    }
-                }
                 let l_is_enum = match l_bt {
                     Some(lt) {
                         if (l_opt_form || r_opt_form) && (lt.starts_with("Option<") || lt.starts_with("Result<")) {
@@ -986,10 +963,10 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 var l_payload = l_payload0
                 var r_payload = r_payload0
                 if l_payload == "" {
-                    l_payload = ctor_arg_inner(l, enames, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                    l_payload = ctor_arg_inner(l, enames, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, vnames, vowners)
                 }
                 if r_payload == "" {
-                    r_payload = ctor_arg_inner(r, enames, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                    r_payload = ctor_arg_inner(r, enames, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, vnames, vowners)
                 }
                 if l_payload.starts_with("Option<") || l_payload.starts_with("Result<") {
                     l_payload = first_type_arg(l_payload)
@@ -1000,7 +977,8 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 if l_payload == "" && r_payload != "" {
                     match l_bt {
                         Some(lt2) {
-                            if lt2.starts_with("Option<") || lt2.starts_with("Result<") || lt2 == "infer" {
+                            // 裸 "Option"/C 形态 "al_opt"(Vec.get 旧推断/表污染残留)与 infer 同样补齐
+                            if lt2.starts_with("Option<") || lt2.starts_with("Result<") || lt2 == "infer" || lt2 == "Option" || lt2 == "al_opt" {
                                 l_payload = r_payload
                             }
                         }
@@ -1010,13 +988,16 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 if r_payload == "" && l_payload != "" {
                     match r_bt {
                         Some(rt2) {
-                            if rt2.starts_with("Option<") || rt2.starts_with("Result<") || rt2 == "infer" {
+                            if rt2.starts_with("Option<") || rt2.starts_with("Result<") || rt2 == "infer" || rt2 == "Option" || rt2 == "al_opt" {
                                 r_payload = l_payload
                             }
                         }
                         None { r_payload = l_payload }
                     }
                 }
+                // infer 载荷不作数: infer==infer 会错发 data.i(应交 ctor_arg_inner 的具体类型)
+                if l_payload == "infer" { l_payload = "" }
+                if r_payload == "infer" { r_payload = "" }
                 if l_payload != "" && r_payload != "" && l_payload == r_payload {
                     let lc4 = c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                     let rc4 = c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
@@ -1485,7 +1466,8 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         let mc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                         let kc = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                         let mbt = base_type(base, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
-                        // G1: Vec.get → 下标访问（发 *(T*)al_vec_get(&base, idx)）
+                        // G1: Vec.get → 下标访问（发 *(T*)al_vec_get(&base, idx)）— 与解释器
+                        // "裸元素 + 越界 Nil" 语义一致, 不包 al_opt (Map.get 才是 Option 语义)
                         match mbt {
                             Some(mt) {
                                 if mt.starts_with("Vec<") {
@@ -1628,7 +1610,12 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 let et0 = base_type(items[0], varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
                 match et0 {
                     Some(t0) {
-                        if contains_str(user_types, t0) {
+                        if t0.starts_with("Option<") || t0.starts_with("Result<") {
+                            // Option/Result 元素 → al_opt[] (tag+union, 非 int)
+                            etag = "(al_opt[])"
+                            esz = "al_opt"
+                        }
+                        else if contains_str(user_types, t0) {
                             etag = "(struct " + t0 + "[])"
                             esz = "struct " + t0
                         }
@@ -1640,6 +1627,10 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         else if t0 == "f64" {
                             etag = "(double[])"
                             esz = "double"
+                        }
+                        else if t0 == "bool" {
+                            etag = "(int[])"
+                            esz = "int"
                         }
                     }
                     None {}
@@ -1655,9 +1646,13 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         esz = "struct " + t0
                     }
                     ECall(cf0, _) {
-                        // 变体构造元素(裸变体名) → 所属枚举 struct[]
+                        // 变体构造元素(裸变体名) → 所属枚举 struct[];Some/Ok/None → al_opt[]
                         match cf0 {
                             EIdent(cfn0) {
+                                if cfn0 == "Some" || cfn0 == "Ok" || cfn0 == "None" {
+                                    etag = "(al_opt[])"
+                                    esz = "al_opt"
+                                } else {
                                 var oi0 = 0
                                 for en0 in enames {
                                     for pp0 in str_split(elists[oi0], ",") {
@@ -1667,6 +1662,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                                         }
                                     }
                                     oi0 += 1
+                                }
                                 }
                             }
                             _ {}
