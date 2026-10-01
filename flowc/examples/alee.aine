@@ -3648,6 +3648,7 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
     out = out + "char* al_strdup_lit(char* s) { size_t n = strlen(s) + 1; char* r = (char*)malloc(n); memcpy(r, s, n); return r; }\n"
     out = out + "static int al_vec_eq(al_vec x, al_vec y) { if (x.len != y.len || x.elem_size != y.elem_size) { return 0; } if (x.len == 0) { return 1; } return memcmp(x.data, y.data, x.len * x.elem_size) == 0; }\n"
     out = out + "static int al_eq_i32(int a, int b) { return a == b; }\n"
+    out = out + "static int al_eq_String(char* a, char* b) { return strcmp(a, b) == 0; }\n"
     out = out + "char* al_strcat_own(char* a, char* b) { size_t la = strlen(a), lb = strlen(b); size_t cap = la + lb + 1; if (cap < la * 2) { cap = la * 2; } char* r = (char*)realloc(a, cap); if (!r) { r = (char*)malloc(cap); memcpy(r, a, la); } memcpy(r + la, b, lb + 1); return r; }\n"
     out = out + "al_vec al_vec_clone(al_vec v) { al_vec r = { v.len, v.elem_size, NULL }; if (v.len > 0 && v.data) { r.data = malloc(v.len * v.elem_size); memcpy(r.data, v.data, v.len * v.elem_size); } return r; }\n"
     out = out + "al_vec al_zero_vec() { return (al_vec){ 0, 0, NULL }; }\n"

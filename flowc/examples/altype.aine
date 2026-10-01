@@ -1246,19 +1246,19 @@ fn expr_is_string(e: Expr, other: Expr, varnames: Vec<String>, vartypes: Vec<Str
     match e {
         EStr(s) { return true }
         // s[i] String 单索引 → D15 字符语义: 产单字符 String(比较走 strcmp)
+        // xs[i] Vec<String> 元素 → String(此前漏判 → == 发指针比较恒 false)
         EIndex(b2, idx2) {
             match idx2 {
                 ERange(_, _) { return true }
                 _ {
-                    match b2 {
-                        EIdent(bn2) {
-                            let vt2 = var_type(bn2, varnames, vartypes)
-                            match vt2 {
-                                Some(t2) { return t2 == "String" }
-                                None { return false }
-                            }
+                    let bt = base_type(b2, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                    match bt {
+                        Some(t2) {
+                            if t2 == "String" { return true }
+                            if t2.starts_with("Vec<") { return first_type_arg(t2) == "String" }
+                            return false
                         }
-                        _ { return false }
+                        None { return false }
                     }
                 }
             }
