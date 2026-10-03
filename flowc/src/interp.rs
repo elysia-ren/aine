@@ -972,6 +972,7 @@ impl Interp {
                         let idx = int_of(&iv);
                         let cur = env
                             .get(&name)
+                            .or_else(|| self.globals.get(&name).cloned())
                             .ok_or_else(|| RtError::msg(format!("未定义的变量 '{}'", name)))?;
                         match cur {
                             Value::Vec(items) => {
@@ -993,7 +994,11 @@ impl Interp {
                                     }
                                 }
                                 let newv = Value::Vec(std::sync::Arc::new(new_items));
-                                env.assign(&name, newv.clone());
+                                if !env.assign(&name, newv.clone()) {
+                                    if self.globals.contains_key(&name) {
+                                        self.globals.insert(name.clone(), newv.clone());
+                                    }
+                                }
                                 return Ok(v);
                             }
                             Value::Map(entries) => {
@@ -1023,7 +1028,11 @@ impl Interp {
                                     None => new_entries.push((key, val)),
                                 }
                                 let newv = Value::Map(new_entries);
-                                env.assign(&name, newv.clone());
+                                if !env.assign(&name, newv.clone()) {
+                                    if self.globals.contains_key(&name) {
+                                        self.globals.insert(name.clone(), newv.clone());
+                                    }
+                                }
                                 return Ok(v);
                             }
                             Value::Str(_) => {
@@ -1087,21 +1096,35 @@ impl Interp {
                                 )))
                             }
                         };
-                        env.assign(&name, newv.clone());
+                        if !env.assign(&name, newv.clone()) {
+                            if self.globals.contains_key(&name) {
+                                self.globals.insert(name.clone(), newv.clone());
+                            }
+                        }
                         return Ok(v);
                     }
                     _ => return Err(RtError::msg("赋值目标必须是变量")),
                 };
-                let current = env.get(&name);
+                let current = env.get(&name).or_else(|| self.globals.get(&name).cloned());
                 match op {
                     crate::ast::AssignOp::Assign => {
-                        env.assign(&name, v.clone());
+                        // 全局写回: env 不含该名(函数内赋 @global)时落 self.globals
+                        // (此前静默丢弃 —— awen page_flow placed 全空的数据丢失根因)
+                        if !env.assign(&name, v.clone()) {
+                            if self.globals.contains_key(&name) {
+                                self.globals.insert(name.clone(), v.clone());
+                            }
+                        }
                         Ok(v)
                     }
                     _ => {
                         let cur = current.unwrap_or(Value::Int(0));
                         let result = self.arith(op, &cur, &v)?;
-                        env.assign(&name, result.clone());
+                        if !env.assign(&name, result.clone()) {
+                            if self.globals.contains_key(&name) {
+                                self.globals.insert(name.clone(), result.clone());
+                            }
+                        }
                         Ok(result)
                     }
                 }
