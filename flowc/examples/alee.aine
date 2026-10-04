@@ -2657,13 +2657,24 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
             let init_c = c_expr(init, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
             // 遮蔽检测：同名已存在（参数/更早局部）→ 先用临时变量捕获初始值
             // （C 中 int i = i; 自引用未初始化，需先算外层值）
+            // 自引用形态(var x = x, shadow_count==1, 右值即同名)也必须走临时:
+            // C 遮蔽规则下初始化器里的 x 读的是新声明自己(未初始化)而非参数,
+            // 解释器语义是读外层 —— awen lex_command_line 的 var diags = diags
+            // 曾因此把栈垃圾当 diags 一路污染(ASCII 时栈槽恰 0 → 隐性漂移)
+            var self_ref = false
+            match init {
+                EIdent(in_self) {
+                    if in_self == name { self_ref = true }
+                }
+                _ {}
+            }
             var shadow_count = 0
             for vn in varnames {
                 if vn == name {
                     shadow_count = shadow_count + 1
                 }
             }
-            if shadow_count >= 2 {
+            if shadow_count >= 2 || (self_ref && shadow_count >= 1) {
                 return pad + ct + " __s_" + name + " = " + init_c + ";\n" + pad + ct + " " + name + " = __s_" + name + "; // " + kv + name
             }
             return pad + ct + " " + name + " = " + init_c + "; // " + kv + name
