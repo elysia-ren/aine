@@ -87,7 +87,7 @@ fn payload_member(ty: Option<String>, user_types: Vec<String>) -> String {
 // 表达式 → C 类型（闭包体返回类型推断用）
 fn expr_ctype(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, user_types: Vec<String>) -> String {
     match e {
-        EInt(n) { return "int" }
+        EInt(n) { return "long long" }
         EFloat(n) { return "double" }
         EStr(s) { return "char*" }
         EIdent(n) {
@@ -661,7 +661,7 @@ fn fn_type_id(ty: String) -> String {
 fn c_type(ty: Option<String>, user_types: Vec<String>) -> String {
     match ty {
         Some(t) {
-            if t == "i32" { return "int" }
+            if t == "i32" { return "long long" }
             if t == "i64" { return "long long" }
             if t == "f64" { return "double" }
             if t == "bool" { return "int" }
@@ -719,6 +719,16 @@ fn c_param_decl(ty: String, name: String, user_types: Vec<String>) -> String {
         return ret_c + " (*" + name + ")(" + join(cargs, ", ") + ")"
     }
     return c_type(Some(ty), user_types) + " " + name
+}
+
+
+// FFI(extern)参数声明: i32 保持 C int(ABI 兼容), 其余同 c_param_decl
+// (Aine 内部整数已在 64 位域统一, 但 extern 边界必须匹配 C 调用约定)
+fn c_param_decl_ffi(ty: String, name: String, user_types: Vec<String>) -> String {
+    if ty == "i32" {
+        return "int " + name
+    }
+    return c_param_decl(ty, name, user_types)
 }
 
 
@@ -1200,7 +1210,7 @@ fn arg_elem_size(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners:
             match bt {
                 Some(t2) {
                     if t2 == "String" { return "sizeof(char*)" }
-                    if t2 == "i32" { return "sizeof(int)" }
+                    if t2 == "i32" { return "sizeof(long long)" }
                     if t2 == "f64" { return "sizeof(double)" }
                     if t2.starts_with("Vec<") { return "sizeof(al_vec)" }
                     if t2.starts_with("Option<") || t2.starts_with("Result<") { return "sizeof(al_opt)" }

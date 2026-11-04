@@ -295,7 +295,7 @@ fn fstr_piece(val: String, varnames: Vec<String>, vartypes: Vec<String>, fnames:
                     None {}
                 }
                 let ct = expr_ctype(fx, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, user_types)
-                if ct == "int" { return "al_num(" + c + ")" }
+                if ct == "long long" { return "al_num(" + c + ")" }
                 if ct == "double" { return "al_fnum(" + c + ")" }
                 if ct == "char" { return "al_char_to_str(" + c + ")" }
                 return c
@@ -659,7 +659,8 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
         var part = pc
         // 先按表达式类型提示选格式（覆盖 EBin/EIndex 等组合形态）
         match a {
-            EInt(n) { f1 = "%d" }
+            EInt(n) { f1 = "%s"
+            part = "al_num(" + pc + ")" }
             EFloat(n) {
                 f1 = "%s"
                 part = "al_fnum(" + pc + ")"
@@ -670,7 +671,8 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
                     EIdent(fname) {
                         let fr = fn_return(fname, fnames, freturns)
                         match fr {
-                            Some("i32") { f1 = "%d" }
+                            Some("i32") { f1 = "%s"
+                            part = "al_num(" + pc + ")" }
                             Some("f64") {
                                 f1 = "%s"
                                 part = "al_fnum(" + pc + ")"
@@ -681,7 +683,8 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
                     }
                     EField(_, mname) {
                         let mr = method_ret(mname, a2.len())
-                        if mr == "i32" { f1 = "%d" }
+                        if mr == "i32" { f1 = "%s"
+                            part = "al_num(" + pc + ")" }
                         else if mr == "f64" {
                             f1 = "%s"
                             part = "al_fnum(" + pc + ")"
@@ -739,7 +742,8 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
             EIdent(nm) {
                 let vt = var_type(nm, varnames, vartypes)
                 match vt {
-                    Some("i32") { f1 = "%d" }
+                    Some("i32") { f1 = "%s"
+                    part = "al_num(" + pc + ")" }
                     Some("f64") {
                         f1 = "%s"
                         part = "al_fnum(" + pc + ")"
@@ -749,6 +753,9 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
                         // 表查询失败/类型不明的标识符: expr_ctype 兜底(防 int 实参落 %s)
                         if f1 == "%s" {
                             let ect = expr_ctype(a, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, user_types)
+                            if ect == "long long" { f1 = "%s"
+                            part = "al_num(" + pc + ")"
+                            }
                             if ect == "int" { f1 = "%d" }
                             else if ect == "double" {
                                 f1 = "%s"
@@ -764,7 +771,11 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
         // G2.0 类型提示切片：非空 hint 覆盖形状兜底（%zu 长度形态除外）
         let hint = expr_num_hint(a, varnames, vartypes, fnames, freturns)
         if f1 != "%zu" {
-            if hint == "i32" || hint == "char" || hint == "bool" {
+            if hint == "i32" || hint == "i64" {
+                f1 = "%s"
+                part = "al_num(" + pc + ")"
+            }
+            if hint == "char" || hint == "bool" {
                 f1 = "%d"
             }
             if hint == "f64" {
@@ -810,6 +821,10 @@ fn evec_c(items: Vec<Expr>, heap: bool, user_types: Vec<String>, vnames: Vec<Str
             else if t0 == "f64" {
                 etag = "(double[])"
                 esz = "double"
+            }
+            else if t0 == "i32" {
+                etag = "(long long[])"
+                esz = "long long"
             }
             else if t0 == "bool" {
                 etag = "(int[])"
@@ -1844,7 +1859,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     }
                     if t.starts_with("Vec<") {
                         let et = first_type_arg(t)
-                        var ect = "int"
+                        var ect = "long long"
                         if et == "String" { ect = "char*" }
                         else if et == "f64" { ect = "double" }
                         else if contains_str(user_types, et) { ect = "struct " + et }
@@ -2415,7 +2430,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                         }
                         EStr(s2) { ct = "char*" }
                         EVec(items) { ct = "al_vec" }
-                        EInt(n) { ct = "int" }
+                        EInt(n) { ct = "long long" }
                         EFloat(n) { ct = "double" }
                         EMatch(mscrut0, marms0) {
                             // match 表达式结果: 逐臂取块尾表达式类型(扁平实现)
@@ -2726,6 +2741,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                         if et == "String" { ect = "char*" }
                         else if et == "f64" { ect = "double" }
                         else if et == "bool" { ect = "int" }
+                        else if et == "i32" { ect = "long long" }
                         else if et.starts_with("Vec<") { ect = "al_vec" }
                         else if contains_str(user_types, et) { ect = "struct " + et }
                         elem = ect
@@ -3669,10 +3685,10 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
     out = out + "int append_file(char* path, char* content) { FILE* f = fopen(path, \"ab\"); if (!f) return 0; size_t n = fwrite(content, 1, strlen(content), f); fclose(f); return 1; }\n"
     out = out + "int file_exists(char* path) { FILE* f = fopen(path, \"rb\"); if (f) { fclose(f); return 1; } return 0; }\n"
     out = out + "long al_map_find(al_map* m, const char* k) { for (size_t i = 0; i < m->keys.len; i++) { char* kk = ((char**)m->keys.data)[i]; if (strcmp(kk, k) == 0) return (long)i; } return -1; }\n"
-    out = out + "void al_map_set_i(al_map* m, const char* k, int v) { long i = al_map_find(m, k); if (i >= 0) { ((long*)m->vals.data)[i] = v; return; } al_push(&m->keys, sizeof(char*), (void*)&k); al_push(&m->vals, sizeof(long), (void*)&v); }\n"
+    out = out + "void al_map_set_i(al_map* m, const char* k, long long v) { long i = al_map_find(m, k); if (i >= 0) { ((long long*)m->vals.data)[i] = v; return; } al_push(&m->keys, sizeof(char*), (void*)&k); al_push(&m->vals, sizeof(long long), (void*)&v); }\n"
     out = out + "void al_map_set_f(al_map* m, const char* k, double v) { long i = al_map_find(m, k); if (i >= 0) { ((double*)m->vals.data)[i] = v; return; } al_push(&m->keys, sizeof(char*), (void*)&k); al_push(&m->vals, sizeof(double), (void*)&v); }\n"
     out = out + "void al_map_set_s(al_map* m, const char* k, char* v) { long i = al_map_find(m, k); if (i >= 0) { ((char**)m->vals.data)[i] = al_strdup_lit(v); return; } al_push(&m->keys, sizeof(char*), (void*)&k); al_push(&m->vals, sizeof(char*), (void*)&v); }\n"
-    out = out + "int al_map_get_i(al_map m, const char* k) { long i = al_map_find(&m, k); if (i < 0) { fprintf(stderr, \"Map 中不存在键: %s\\n\", k); abort(); } return ((long*)m.vals.data)[i]; }\n"
+    out = out + "long long al_map_get_i(al_map m, const char* k) { long i = al_map_find(&m, k); if (i < 0) { fprintf(stderr, \"Map 中不存在键: %s\\n\", k); abort(); } return ((long long*)m.vals.data)[i]; }\n"
     out = out + "double al_map_get_f(al_map m, const char* k) { long i = al_map_find(&m, k); if (i < 0) { fprintf(stderr, \"Map 中不存在键: %s\\n\", k); abort(); } return ((double*)m.vals.data)[i]; }\n"
     out = out + "char* al_map_get_s(al_map m, const char* k) { long i = al_map_find(&m, k); if (i < 0) { fprintf(stderr, \"Map 中不存在键: %s\\n\", k); abort(); } return ((char**)m.vals.data)[i]; }\n"
     out = out + "void al_assert(int cond, char* msg) { if (!cond) { fprintf(stderr, \"断言失败: %s\\n\", msg); abort(); } }\n"
@@ -4053,7 +4069,7 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
     out = out + "  return r;\n"
     out = out + "}\n"
     out = out + "static char* al_char_to_str(char c) { char* r = (char*)malloc(2); r[0] = c; r[1] = 0; return r; }\n"
-    out = out + "static char* al_num(long v) { char* r = (char*)malloc(32); snprintf(r, 32, \"%ld\", v); return r; }\n"
+    out = out + "static char* al_num(long long v) { char* r = (char*)malloc(32); snprintf(r, 32, \"%lld\", v); return r; }\n"
     out = out + "static char* al_fnum(double v) { char* r = (char*)malloc(32); if (v == (long long)v && v >= -1e15 && v <= 1e15) { snprintf(r, 32, \"%.1f\", v); } else { snprintf(r, 32, \"%g\", v); } return r; }\n"
     out = out + "static char* al_bool(int b) { return b ? \"true\" : \"false\"; }\n"
     // trim: ASCII 空白 + U+3000(E3 80 80 全角空格) + U+00A0(C2 A0) — 对齐解释器
@@ -4261,10 +4277,20 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
         match s {
             SDef(fname, params, ret, body_s) {
                 var ps: Vec<String> = []
-                for p in params { ps.push(c_param_decl(p.ty, p.name, user_types)) }
+                // extern(空体)保持 C ABI(i32=int); Aine 内部函数统一 64 位整数域
+                var is_extern_fn = body_s.len() == 0
+                for p in params {
+                    if is_extern_fn {
+                        ps.push(c_param_decl_ffi(p.ty, p.name, user_types))
+                    } else {
+                        ps.push(c_param_decl(p.ty, p.name, user_types))
+                    }
+                }
                 var ct = "void"
                 match ret {
-                    Some(rr) { ct = c_type(Some(rr), user_types) }
+                    Some(rr) {
+                        if is_extern_fn && rr == "i32" { ct = "int" } else { ct = c_type(Some(rr), user_types) }
+                    }
                     None {
                         if fname == "main" { ct = "int" } else { ct = "void" }
                     }

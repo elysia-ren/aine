@@ -474,9 +474,10 @@ impl Interp {
             env.define(&p.name, v);
         }
         let mut defers: Vec<Expr> = Vec::new();
-        match self.exec_block(&mut env, &f.body, &mut defers) {
+        // D13: defer 在所有退出路径(正常/early return/panic 冒泡/? 传播)按 LIFO 执行。
+        // 此前 Err 分支直接返回, defers 被丢弃(df.aine 实测违反 D13)。
+        let result = match self.exec_block(&mut env, &f.body, &mut defers) {
             Ok((cf, tail_val)) => {
-                self.run_defers(&mut env, &mut defers)?;
                 match cf {
                     ControlFlow::Return(v) => Ok(v),
                     _ => Ok(tail_val),
@@ -487,7 +488,10 @@ impl Interp {
             // return executed inside a nested expression block
             Err(RtError::Return(v)) => Ok(v),
             Err(e) => Err(e),
-        }
+        };
+        // defer 自身出错 = abort 语义(D13): 立即以 defer 的错误终止, 剩余 defer 跳过
+        self.run_defers(&mut env, &mut defers)?;
+        result
     }
 
     /// UI 运行时：执行组件的 render 块，控件调用求值为缩进树（终端渲染）。
