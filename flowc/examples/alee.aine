@@ -690,6 +690,28 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
                             part = "al_fnum(" + pc + ")"
                         }
                         else if mr == "bool" { f1 = "%d" }
+                        else if mr == "Option" {
+                            // Option 打印: Some(载荷)/None — 载荷槽按 map 值类型
+                            var mem = "i"
+                            if a2.len() == 1 {
+                                match c2 {
+                                    EField(ib, _) {
+                                        let mbt = base_type(ib, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                                        match mbt {
+                                            Some(mt) {
+                                                if mt.starts_with("Map<") { mem = payload_member(Some(second_type_arg(mt)), user_types) }
+                                            }
+                                            None {}
+                                        }
+                                    }
+                                    _ {}
+                                }
+                            }
+                            if mem == "i" {
+                                f1 = "%s"
+                                part = "al_opt_str_i(" + pc + ")"
+                            }
+                        }
                     }
                     _ {}
                 }
@@ -897,6 +919,46 @@ fn evec_c(items: Vec<Expr>, heap: bool, user_types: Vec<String>, vnames: Vec<Str
     }
     st = st + "__v; })"
     return st
+}
+
+
+
+// init 子树是否引用给定名(遮蔽自引用检测)。
+// 保守策略(§3.2 安全默认): 未知/罕见节点一律按"含名"处理 → 走临时捕获, 宁多勿漏。
+fn contains_ident(e: Expr, name: String) -> bool {
+    match e {
+        EIdent(n) { return n == name }
+        EBin(_, l, r) { return contains_ident(l, name) || contains_ident(r, name) }
+        EUnary(_, x) { return contains_ident(x, name) }
+        ECall(cf, cargs) {
+            if contains_ident(cf, name) { return true }
+            for a in cargs {
+                if contains_ident(a, name) { return true }
+            }
+            return false
+        }
+        EField(b, _) { return contains_ident(b, name) }
+        EIndex(b, ix) { return contains_ident(b, name) || contains_ident(ix, name) }
+        ERange(a, b2) { return contains_ident(a, name) || contains_ident(b2, name) }
+        EVec(items) {
+            for it in items {
+                if contains_ident(it, name) { return true }
+            }
+            return false
+        }
+        EStruct(_, fs) {
+            for f in fs {
+                if contains_ident(f.value, name) { return true }
+            }
+            return false
+        }
+        ETry(x) { return contains_ident(x, name) }
+        EStr(_) { return false }
+        EInt(_) { return false }
+        EFloat(_) { return false }
+        EUnit { return false }
+        _ { return true }
+    }
 }
 
 
@@ -1441,14 +1503,26 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                             }
                             _ {}
                         }
-                        // push 表达式语义(Aine: push 返回 Vec 本身) → 语句表达式:
-                        // clone-再-push: C 值语义下 base 的 data 指针可能被多处共享
-                        // (struct 拷贝/let 别名), 原地 realloc 会使其他持有者悬挂
+                        // push 语义(解释器对齐): 返回新 Vec 且**写回接收者变量**
+                        // (语句形态 parts.push(x) 依赖此写回; 不写回 = 数据丢失,
+                        //  与 @global 写回同族)。可写 base = EIdent / EField-of-EIdent。
                         let base_c = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
-                        if push_pre != "" {
-                            return "({ al_vec _b = al_vec_clone(" + base_c + "); " + push_pre + " al_push(&_b, " + es + ", " + addr + "); _b; })"
+                        var write_back = ""
+                        match base {
+                            EIdent(vb) { write_back = base_c }
+                            EField(EIdent(fb), ff) { write_back = base_c }
+                            _ {}
                         }
-                        return "({ al_vec _b = al_vec_clone(" + base_c + "); al_push(&_b, " + es + ", " + addr + "); _b; })"
+                        var core = "al_vec _b = al_vec_clone(" + base_c + "); "
+                        if push_pre != "" {
+                            core = core + push_pre + " al_push(&_b, " + es + ", " + addr + "); _b;"
+                        } else {
+                            core = core + "al_push(&_b, " + es + ", " + addr + "); _b;"
+                        }
+                        if write_back != "" {
+                            return "({ " + write_back + " = ({ " + core + " }); " + write_back + "; })"
+                        }
+                        return "({ " + core + " })"
                     }
                     if mname == "to_i32" && args.len() == 0 {
                         return "atoi(" + c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
@@ -1646,9 +1720,9 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                         }
                         if vct.starts_with("struct ") || vct == "al_vec" || vct == "al_map" || vct == "al_opt" {
                             // 复合值（struct/Vec/Map/Option）：复合字面量 {v} 会误初始化首成员 → 用临时变量
-                            return "({ int __f = 0; for (size_t _i = 0; _i < " + mc + ".keys.len; _i++) { if (strcmp(((char**)" + mc + ".keys.data)[_i], " + kc + ") == 0) { ((" + vct + "*)" + mc + ".vals.data)[_i] = (" + vc + "); __f = 1; break; } if (!__f) { al_push(&" + mc + ".keys, sizeof(char*), &(char*){ " + kc + " }); " + vct + " __tmp = (" + vc + "); al_push(&" + mc + ".vals, sizeof(" + vct + "), &__tmp); } 0; })"
+                            return "({ int __f = 0; for (size_t _i = 0; _i < " + mc + ".keys.len; _i++) { if (strcmp(((char**)" + mc + ".keys.data)[_i], " + kc + ") == 0) { ((" + vct + "*)" + mc + ".vals.data)[_i] = (" + vc + "); __f = 1; break; } } if (!__f) { al_push(&" + mc + ".keys, sizeof(char*), &(char*){ " + kc + " }); " + vct + " __tmp = (" + vc + "); al_push(&" + mc + ".vals, sizeof(" + vct + "), &__tmp); } 0; })"
                         }
-                        return "({ int __f = 0; for (size_t _i = 0; _i < " + mc + ".keys.len; _i++) { if (strcmp(((char**)" + mc + ".keys.data)[_i], " + kc + ") == 0) { ((" + vct + "*)" + mc + ".vals.data)[_i] = (" + vc + "); __f = 1; break; } if (!__f) { al_push(&" + mc + ".keys, sizeof(char*), &(char*){ " + kc + " }); al_push(&" + mc + ".vals, sizeof(" + vct + "), &(" + vct + "){ " + vc + " }); } 0; })"
+                        return "({ int __f = 0; for (size_t _i = 0; _i < " + mc + ".keys.len; _i++) { if (strcmp(((char**)" + mc + ".keys.data)[_i], " + kc + ") == 0) { ((" + vct + "*)" + mc + ".vals.data)[_i] = (" + vc + "); __f = 1; break; } } if (!__f) { al_push(&" + mc + ".keys, sizeof(char*), &(char*){ " + kc + " }); al_push(&" + mc + ".vals, sizeof(" + vct + "), &(" + vct + "){ " + vc + " }); } 0; })"
                     }
                     if mname == "get" && args.len() == 1 {
                         let mc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
@@ -1695,7 +1769,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     if mname == "contains" && args.len() == 1 {
                         let mc = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                         let kc = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
-                        return "({ int __f = 0; for (size_t _i = 0; _i < " + mc + ".keys.len; _i++) { if (strcmp(((char**)" + mc + ".keys.data)[_i], " + kc + ") == 0) { __f = 1; break; } __f; })"
+                        return "({ int __f = 0; for (size_t _i = 0; _i < " + mc + ".keys.len; _i++) { if (strcmp(((char**)" + mc + ".keys.data)[_i], " + kc + ") == 0) { __f = 1; break; } } __f; })"
                     }
                     if mname == "keys" && args.len() == 0 {
                         return c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ".keys"
@@ -2676,13 +2750,9 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
             // C 遮蔽规则下初始化器里的 x 读的是新声明自己(未初始化)而非参数,
             // 解释器语义是读外层 —— awen lex_command_line 的 var diags = diags
             // 曾因此把栈垃圾当 diags 一路污染(ASCII 时栈槽恰 0 → 隐性漂移)
-            var self_ref = false
-            match init {
-                EIdent(in_self) {
-                    if in_self == name { self_ref = true }
-                }
-                _ {}
-            }
+            // 自引用检测扩展(awen parse_obj 的 var i = i + 1 案例):
+            // init 子树任意位置引用同名 → C 声明符作用域规则下读未初始化自身
+            var self_ref = contains_ident(init, name)
             var shadow_count = 0
             for vn in varnames {
                 if vn == name {
@@ -3691,6 +3761,7 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
     out = out + "long long al_map_get_i(al_map m, const char* k) { long i = al_map_find(&m, k); if (i < 0) { fprintf(stderr, \"Map 中不存在键: %s\\n\", k); abort(); } return ((long long*)m.vals.data)[i]; }\n"
     out = out + "double al_map_get_f(al_map m, const char* k) { long i = al_map_find(&m, k); if (i < 0) { fprintf(stderr, \"Map 中不存在键: %s\\n\", k); abort(); } return ((double*)m.vals.data)[i]; }\n"
     out = out + "char* al_map_get_s(al_map m, const char* k) { long i = al_map_find(&m, k); if (i < 0) { fprintf(stderr, \"Map 中不存在键: %s\\n\", k); abort(); } return ((char**)m.vals.data)[i]; }\n"
+    out = out + "static int al_map_eq(al_map x, al_map y) { if (x.keys.len != y.keys.len || x.vals.len != y.vals.len) { return 0; } for (size_t i = 0; i < x.keys.len; i++) { char* k = ((char**)x.keys.data)[i]; long j = al_map_find(&y, k); if (j < 0) { return 0; } if (x.vals.elem_size != y.vals.elem_size) { return 0; } if (x.vals.elem_size > 0 && memcmp((char*)x.vals.data + i * x.vals.elem_size, (char*)y.vals.data + j * y.vals.elem_size, x.vals.elem_size) != 0) { return 0; } } return 1; }\n"
     out = out + "void al_assert(int cond, char* msg) { if (!cond) { fprintf(stderr, \"断言失败: %s\\n\", msg); abort(); } }\n"
     out = out + "#include <time.h>\n"
     out = out + "long long now_ms(void) { struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts); return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000; }\n"
@@ -4089,11 +4160,12 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
     out = out + "  return r;\n"
     out = out + "}\n"
     // al_opt 先于用户类型：用户类型载荷为前向声明指针
-    var mems = "int i; double f; char* s; al_vec v; void* p;"
+    var mems = "long long i; double f; char* s; al_vec v; void* p;"
     for t in user_types {
         mems = mems + "struct " + t + "* t_" + t + ";"
     }
     out = out + "typedef struct { int tag; union { " + mems + " } data; } al_opt;\n"
+    out = out + "static char* al_opt_str_i(al_opt o) { if (!o.tag) { return \"None\"; } char* n = al_num(o.data.i); char* r = al_strcat(\"Some(\", n); return al_strcat(r, \")\"); }\n"
     out = out + "#define al_some_i(x) ((al_opt){ .tag = 1, .data.i = (x) })\n"
     out = out + "#define al_some_f(x) ((al_opt){ .tag = 1, .data.f = (x) })\n"
     out = out + "#define al_some_s(x) ((al_opt){ .tag = 1, .data.s = (x) })\n"

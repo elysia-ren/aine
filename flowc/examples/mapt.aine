@@ -1,0 +1,7 @@
+fn main() {
+    var m: Map<String, i32> = Map.new()
+    m.set("a", 1)
+    m.set("b", 2)
+    print(m.len())
+    print(m.get("b"))
+}
