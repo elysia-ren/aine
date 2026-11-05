@@ -3,48 +3,50 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Aine 语言规范 · S1.0</title>
+<title>Aine 语言规范 · S1.1</title>
 <style>
 :root{
-  --ink:#1c2430; --sub:#5a6a7e; --line:#dde4ec; --bg:#fbfcfe; --card:#ffffff;
-  --accent:#0f6b5c; --accent2:#7c5cd6; --code-bg:#f2f5f9; --ebnf-bg:#f6f2ea;
+  --ink:#1c2430; --sub:#5a6a7e; --line:#dde4ec; --bg:#fbfcfe; --card:#fff;
+  --accent:#0f6b5c; --accent2:#7c5cd6; --code-bg:#f4f6fa;
   --ok:#177e4d; --closed:#0e7490; --def:#2458b3; --intent:#a05a00; --uninv:#6b7280; --prop:#7c3aed;
-  --warn:#b3261e;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth}
 body{font-family:"Source Han Sans SC","Noto Sans SC","Microsoft YaHei",-apple-system,sans-serif;
-  color:var(--ink);background:var(--bg);line-height:1.75;font-size:15.5px}
-.layout{display:flex;max-width:1280px;margin:0 auto}
-nav#toc{width:270px;flex:none;position:sticky;top:0;height:100vh;overflow-y:auto;
-  padding:28px 18px 60px;border-right:1px solid var(--line);background:#fff}
-nav#toc h1{font-size:19px;letter-spacing:.5px;margin-bottom:2px}
-nav#toc .ver{color:var(--sub);font-size:12px;margin-bottom:18px}
-nav#toc a{display:block;color:var(--sub);text-decoration:none;font-size:13.5px;
-  padding:4px 10px;border-left:2px solid transparent;border-radius:0 6px 6px 0}
+  color:var(--ink);background:var(--bg);line-height:1.8;font-size:15.5px}
+.layout{display:flex;max-width:1320px;margin:0 auto}
+nav#toc{width:285px;flex:none;position:sticky;top:0;height:100vh;overflow-y:auto;
+  padding:26px 16px 60px;border-right:1px solid var(--line);background:#fff}
+nav#toc h1{font-size:19px;margin-bottom:2px}
+nav#toc .ver{color:var(--sub);font-size:12px;margin-bottom:16px}
+nav#toc a{display:block;color:var(--sub);text-decoration:none;font-size:13px;
+  padding:4px 10px;border-left:2px solid transparent;border-radius:0 6px 6px 0;line-height:1.5}
 nav#toc a:hover{color:var(--accent);background:#f0f7f5}
-nav#toc a.l2{padding-left:24px;font-size:12.5px}
-nav#toc .grp{margin-top:14px;font-size:11px;letter-spacing:2px;color:#9aa7b6;text-transform:uppercase}
-main{flex:1;min-width:0;padding:48px 56px 120px;max-width:860px}
-h1.doc{font-size:34px;line-height:1.25;margin-bottom:6px}
-.subtitle{color:var(--sub);margin-bottom:28px;font-size:15px}
-h2{font-size:24px;margin:56px 0 18px;padding-top:18px;border-top:2px solid var(--line)}
-h2 .no{color:var(--accent);margin-right:10px;font-variant-numeric:tabular-nums}
-h3{font-size:18.5px;margin:34px 0 12px}
-h4{font-size:16px;margin:24px 0 8px;color:#33415a}
+nav#toc a.l2{padding-left:22px;font-size:12.5px}
+nav#toc .grp{margin-top:13px;font-size:11px;letter-spacing:2px;color:#9aa7b6}
+main{flex:1;min-width:0;padding:44px 54px 120px;max-width:880px}
+h1.doc{font-size:33px;line-height:1.25;margin-bottom:6px}
+.subtitle{color:var(--sub);margin-bottom:26px;font-size:15px}
+h2{font-size:25px;margin:54px 0 16px;padding-top:16px;border-top:2px solid var(--line)}
+h2 .part{display:block;font-size:12px;letter-spacing:3px;color:var(--accent);margin-bottom:4px}
+h3{font-size:19px;margin:32px 0 10px}
+h4{font-size:16px;margin:20px 0 6px;color:#33415a}
 p{margin:10px 0}
 .lead{font-size:16.5px;color:#33415a}
 strong{color:#0f2b24}
-blockquote{border-left:3px solid var(--accent);background:#eef6f3;margin:14px 0;
-  padding:10px 18px;border-radius:0 8px 8px 0;color:#1d4a3f}
-blockquote.freeze{border-color:#8a5a00;background:#fdf6e7;color:#5c4300}
-code{font-family:"Cascadia Code",Consolas,"JetBrains Mono",monospace;font-size:.88em;
+code{font-family:Consolas,"Cascadia Code",monospace;font-size:.88em;
   background:var(--code-bg);padding:1px 6px;border-radius:5px;color:#0b3a52}
 pre{background:var(--code-bg);border:1px solid var(--line);border-radius:10px;
-  padding:14px 18px;overflow-x:auto;margin:12px 0;line-height:1.55}
-pre code{background:none;padding:0}
-pre.ebnf{background:var(--ebnf-bg);border-color:#e6dcc4}
-pre.ebnf code{color:#4a3b1f}
+  padding:13px 17px;overflow-x:auto;margin:12px 0;line-height:1.6}
+pre code{background:none;padding:0;color:var(--ink)}
+pre .k{color:#a626a4}.pre .t{color:#0b7285}
+.k{color:#a626a4}.t{color:#0b7285}.fn{color:#0b6bcb}.s{color:#0e7a4d}.n{color:#b3591f}.c{color:#8a94a3}
+pre.out{background:#20242b;border-color:#20242b}
+pre.out code{color:#c8d3e0}
+pre.out::before{content:"输出";display:block;font-size:11px;color:#7a8699;
+  letter-spacing:2px;margin-bottom:6px}
+pre.run::before{content:"终端";display:block;font-size:11px;color:#7a8699;
+  letter-spacing:2px;margin-bottom:6px}
 table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
 th{background:#eef2f7;text-align:left}
 th,td{border:1px solid var(--line);padding:7px 12px;vertical-align:top}
@@ -57,460 +59,583 @@ tr:nth-child(even) td{background:#fafbfd}
 .b-intent{background:#fdf0dd;color:var(--intent);border:1px solid #f2ddb8}
 .b-uninvolved{background:#eceef1;color:var(--uninv);border:1px solid #d8dce2}
 .b-proposal{background:#f1e9fd;color:var(--prop);border:1px solid #ddc9f5}
-.b-frozen{background:#fdf6e7;color:#8a5a00;border:1px solid #f0e0b8}
 .rule{background:var(--card);border:1px solid var(--line);border-radius:12px;
-  padding:18px 22px;margin:16px 0;box-shadow:0 1px 3px rgba(20,40,60,.04)}
-.rule .rid{font-weight:700;color:var(--accent);font-size:13px;letter-spacing:1px}
+  padding:16px 20px;margin:16px 0}
+.rule .rid{font-weight:700;color:var(--accent);font-size:12.5px;letter-spacing:1px}
 .rule .rid .tag{color:#fff;background:var(--accent);border-radius:6px;padding:1px 8px;
-  font-size:11px;margin-right:8px;letter-spacing:0}
+  font-size:11px;margin-right:8px}
 .rule .rid .tag.op{background:#4a6fa5}.rule .rid .tag.exc{background:#b3591f}
 .rule .rid .tag.gov{background:#7c5cd6}.rule .rid .tag.meta{background:#333}
-.rule h4{margin:6px 0 8px;font-size:16.5px}
-.rule dl{display:grid;grid-template-columns:86px 1fr;gap:3px 12px;font-size:14px;margin:8px 0}
+.rule h4{margin:6px 0 6px}
+.rule dl{display:grid;grid-template-columns:80px 1fr;gap:2px 12px;font-size:14px;margin:6px 0}
 .rule dt{color:var(--sub);font-weight:600}
 .rule dd{margin:0}
 .maturity{font-size:12.5px;color:var(--sub);border-top:1px dashed var(--line);
-  padding-top:8px;margin-top:10px}
-.maturity .ev{color:var(--sub)}
-.callout{border-radius:10px;padding:12px 18px;margin:14px 0;font-size:14.5px}
+  padding-top:7px;margin-top:8px}
+.callout{border-radius:10px;padding:11px 17px;margin:13px 0;font-size:14.5px}
 .callout.warn{background:#fdf0ee;border:1px solid #f2cdc8;color:#7a2e26}
 .callout.note{background:#eef4fb;border:1px solid #cfdff2;color:#24466b}
-.kw{color:#a626a4}.ty{color:#0b7285}.num{color:#c1840a}.str{color:#0e7a4d}
-.toc-here{display:none}
-footer{margin-top:80px;padding-top:24px;border-top:1px solid var(--line);
+.callout.good{background:#e9f6ef;border:1px solid #c4e5d2;color:#1d5c3d}
+footer{margin-top:80px;padding-top:22px;border-top:1px solid var(--line);
   color:var(--sub);font-size:13px}
 @media print{nav#toc{display:none}main{max-width:100%;padding:0}}
-@media (max-width:900px){nav#toc{display:none}main{padding:24px 20px 80px}}
+@media (max-width:900px){nav#toc{display:none}main{padding:22px 18px 80px}}
 </style>
 </head>
 <body>
 <div class="layout">
 <nav id="toc">
-<h1>Aine</h1><div class="ver">语言规范 S1.0 · 审计版</div>
-<div class="grp">总纲</div>
-<a href="#preface">0 本规范的地位与读法</a>
-<a href="#principles">1 语言定位与设计原则</a>
-<a href="#meta">2 元规则与规则类型</a>
-<div class="grp">核心语义</div>
-<a href="#lex">3 词法文法</a>
-<a href="#syntax">4 语法文法</a>
-<a href="#types">5 类型系统</a>
-<a href="#values">6 值语义与内存模型</a>
-<a href="#fns">7 函数与闭包</a>
-<a href="#errors">8 错误处理与资源</a>
-<a href="#containers">9 容器与标准方法</a>
-<a href="#strings">10 字符串与字符</a>
-<a href="#modules">11 模块与标准库</a>
-<div class="grp">设计冻结·实现占位</div>
-<a href="#conc">12 并发</a>
-<a href="#ui">13 UI 与状态</a>
-<a href="#ffi">14 FFI</a>
-<div class="grp">实现</div>
-<a href="#impl">15 实现与验证</a>
-<a href="#evolution">16 语言演进</a>
+<h1>Aine</h1><div class="ver">语言规范 S1.1 · 教程+参考</div>
+<div class="grp">第一部分 · 入门教程</div>
+<a href="#t1">1 你好,Aine</a>
+<a href="#t2">2 变量与类型</a>
+<a href="#t3">3 控制流</a>
+<a href="#t4">4 函数</a>
+<a href="#t5">5 集合:Vec 与 Map</a>
+<a href="#t6">6 结构体与枚举</a>
+<a href="#t7">7 字符串</a>
+<a href="#t8">8 错误处理</a>
+<a href="#t9">9 闭包与 defer</a>
+<a href="#t10">10 模块与多文件</a>
+<div class="grp">第二部分 · 语言参考</div>
+<a href="#r1">11 词法文法</a>
+<a href="#r2">12 语法文法与优先级</a>
+<a href="#r3">13 类型系统规则</a>
+<a href="#r4">14 容器方法语义表</a>
+<a href="#r5">15 打印格式</a>
+<div class="grp">第三部分 · 语义规范</div>
+<a href="#s1">16 值语义与内存模型</a>
+<a href="#s2">17 错误语义与 panic 词表</a>
+<a href="#s3">18 元规则</a>
+<a href="#s4">19 设计冻结·实现占位</a>
+<a href="#s5">20 实现与差分验证</a>
 <div class="grp">附录</div>
-<a href="#app-a">A 成熟度总表</a>
-<a href="#app-b">B 设计决策登记摘要</a>
-<a href="#app-c">诊断错误码</a>
-<a href="#app-d">关键字与内建全局</a>
+<a href="#a1">A 关键字表</a>
+<a href="#a2">B 内建函数表</a>
+<a href="#a3">C 诊断错误码</a>
+<a href="#a4">D 成熟度总表</a>
+<a href="#a5">E 运行指南</a>
 </nav>
 <main>
 <h1 class="doc">Aine 语言规范</h1>
-<div class="subtitle">版本 S1.0(审计版)· 2026-11-06 · 取代 V5.8 作为正文的组织形态;V5.8 冻结决策经由《设计决策登记簿》持续有效</div>
+<div class="subtitle">版本 S1.1 · 三部分:入门教程(学会写)· 语言参考(查得准)· 语义规范(查得深)· 2026-11-06</div>
 
-<h2 id="preface"><span class="no">0</span>本规范的地位与读法</h2>
-<p class="lead">本规范是 Aine 语言的正式正文。它以 2026-11 语言设计审计的结论为事实基础:每一条规则都有<b>类型标签、管辖域、成熟度与证据指针</b>;凡实现尚未覆盖的设计,一律以徽章如实标注,不作修饰。</p>
-<p>本规范取代《Aine 语言完整设计方案定稿版》(V5.8)作为正文的组织形态。V5.8 的冻结决策不因重写而失效——它们已按原意融入各章,并经《设计决策登记簿》(D1–D15)逐条可追溯。审计产物(成熟度总表、问题与风险清单、验证基准)见 <code>docs/audit/</code>。</p>
-<h3>成熟度徽章</h3>
-<p>每条规则右缘标注其证据成熟度,六档:</p>
-<table>
-<tr><th>徽章</th><th>含义</th></tr>
-<tr><td><span class="badge b-verified">已验证</span></td><td>双实现对拍(宿主解释器 × C 后端)字节级一致,有常驻回归语料</td></tr>
-<tr><td><span class="badge b-closed">已闭合</span></td><td>定义、边界、失败路径与交互均已明确;单实现覆盖或有登记限制</td></tr>
-<tr><td><span class="badge b-defined">已定义</span></td><td>规则已明确写出;实现或边界尚未完全覆盖</td></tr>
-<tr><td><span class="badge b-intent">只有意图</span></td><td>设计目标存在,语法可能已占位,但语义未定义、未实现。<b>能写出不代表能用</b></td></tr>
-<tr><td><span class="badge b-uninvolved">未涉及</span></td><td>本规范有意不涉及(均为有意识决定,非遗漏)</td></tr>
-<tr><td><span class="badge b-proposal">定稿提案</span></td><td>语义优化轮(SD 系列)新定稿,已实现或已登记,待正式批准迁入正册</td></tr>
-</table>
-<div class="callout note">读法约定:规则编号 <code>A-3</code>(域字母+序号);类型标签 <span class="badge b-defined" style="margin:0">定义</span>/<span class="badge b-closed" style="margin:0">操作</span>/<span class="badge b-intent" style="margin:0">例外</span>/<span class="badge b-proposal" style="margin:0">管辖</span>/<span class="badge b-verified" style="margin:0">元规则</span>——对应规则在体系中的职能,而非实现状态。</div>
+<h2 id="t1"><span class="part">第一部分 · 入门教程</span>1 你好,Aine</h2>
+<p class="lead">Aine 是一门静态类型的值语义语言:语法接近你所熟悉的现代语言,但<b>一切赋值都是副本、一切变更都产生新值</b>,没有悬垂指针、没有数据竞争、没有手动内存管理。源码先编译为 C,再编译为原生可执行文件。</p>
+<h3>1.1 第一个程序</h3>
+<p>新建文本文件 <code>hello.aine</code>:</p>
+<pre><code><span class="k">fn</span> <span class="fn">main</span>() {
+    <span class="fn">print</span>(<span class="s">"你好,Aine"</span>)
+}</code></pre>
+<p>运行它:</p>
+<pre class="run"><code>aine run hello.aine</code></pre>
+<pre class="out"><code>你好,Aine</code></pre>
+<p>编译为独立的原生可执行文件(不依赖任何运行时安装):</p>
+<pre class="run"><code>aine build hello.aine
+hello.exe          <span class="c">← 直接双击/执行</span></code></pre>
+<h3>1.2 一眼看懂语法骨架</h3>
+<ul>
+<li>函数用 <code>fn</code> 定义,程序从 <code>main</code> 开始;</li>
+<li><code>print(…)</code> 是内建打印,多个值用空格分隔;</li>
+<li>语句以换行结束,不需要分号;</li>
+<li>块用花括号,块尾的值就是这个块的值。</li>
+</ul>
+<pre><code><span class="k">fn</span> <span class="fn">main</span>() {
+    <span class="k">let</span> name = <span class="s">"Aine"</span>
+    <span class="fn">print</span>(<span class="s">"你好,"</span> + name)          <span class="c">// 字符串用 + 拼接</span>
+    <span class="fn">print</span>(<span class="s">f"1+1={1 + 1}"</span>)           <span class="c">// f-string 插值</span>
+}</code></pre>
+<pre class="out"><code>你好,Aine
+1+1=2</code></pre>
+<div class="callout good">f-string 里直接写表达式:<code>f"结果: {a + b}"</code>,数值会自动格式化,不需要手动转换。</div>
 
-<h2 id="principles"><span class="no">1</span>语言定位与设计原则</h2>
-<p>Aine 是面向原生应用开发的独立语言:采用现代静态语法,但<b>由编译器承担所有权复杂度</b>;语言面向应用语义,独立性由语义层(值语义 / Compiler View / 语义摘要 / Task·UI Domain)证明,不依赖表面语法与任何先辈语言的差异。</p>
-<h3>1.1 五条核心原则(冻结)</h3>
+<h2 id="t2"><span class="part">第一部分 · 入门教程</span>2 变量与类型</h2>
+<h3>2.1 let 与 var</h3>
+<p><code>let</code> 声明不可变绑定,<code>var</code> 声明可变绑定。类型通常自动推断,也可以显式标注:</p>
+<pre><code><span class="k">let</span> x = 10               <span class="c">// 推断为 i32,不可变</span>
+<span class="k">var</span> y = 20               <span class="c">// 可变</span>
+y = y + 5
+<span class="k">let</span> big: <span class="t">i64</span> = 123456789012   <span class="c">// 显式标注类型</span>
+<span class="k">let</span> ratio: <span class="t">f64</span> = 0.5</code></pre>
+<div class="callout note">重新赋值只能针对 <code>var</code> 绑定:<code>x = 99</code> 在上面的例子里是类型错误(T3010)。</div>
+<h3>2.2 基本类型</h3>
 <table>
-<tr><th>#</th><th>原则</th><th>严格含义</th></tr>
-<tr><td>§3.1</td><td><b>显式边界,隐藏内部复杂度</b></td><td>普通开发者只面对拥有值;编译器内部表示(str_view、Region、Escape)不出现在用户源码、文档与诊断中</td></tr>
-<tr><td>§3.2</td><td><b>安全默认</b></td><td>默认行为取安全一侧;放开需要显式动作(move / &mut / unsafe)</td></tr>
-<tr><td>§3.3</td><td><b>复杂性藏在编译器,而不是运行时</b></td><td>分析、消除、摘要发生在编译期;运行时不背分析税</td></tr>
-<tr><td>§3.4</td><td><b>确定性优先</b></td><td>同一源码在任何实现、任何精度、任何优化等级下行为一致(元规则 M-6 的原则来源)</td></tr>
-<tr><td>§3.5</td><td><b>新语法必须有高频收益</b></td><td>低频构造走库与既有机制;每次显式化升格都登记其强制标注的代价</td></tr>
+<tr><th>类型</th><th>例子</th><th>说明</th></tr>
+<tr><td><code>i32</code> / <code>i64</code></td><td><code>-42</code> / <code>123456789012</code></td><td>有符号整数;所有整数运算在 64 位域进行,声明宽度在显式转换与 FFI 边界生效</td></tr>
+<tr><td><code>u8</code>–<code>u64</code> / <code>usize</code></td><td><code>let b: u8 = 7</code></td><td>无符号整数(同一 64 位算术域)</td></tr>
+<tr><td><code>f64</code> / <code>f32</code></td><td><code>2.5</code></td><td>浮点(字面量默认 f64)</td></tr>
+<tr><td><code>bool</code></td><td><code>true</code> / <code>false</code></td><td>打印为 <code>true</code> / <code>false</code></td></tr>
+<tr><td><code>String</code></td><td><code>"文本"</code></td><td>拥有语义的 UTF-8 字符串,按<b>字符</b>索引(见第 7 章)</td></tr>
+<tr><td><code>char</code></td><td><code>s[0]</code> 的结果</td><td>恰好一个字符的 String(与单字符 String 可互赋)</td></tr>
 </table>
-<h3>1.2 三层内存模型(冻结)</h3>
-<blockquote>语义拥有优先,编译器借用优化,显式借用高级化。</blockquote>
-<table>
-<tr><th>层</th><th>谁面对</th><th>内容</th></tr>
-<tr><td>用户语义层</td><td>所有开发者</td><td>String / Vec&lt;T&gt; / 命名类型 —— 永远是拥有语义</td></tr>
-<tr><td>编译器实现层</td><td>仅编译器</td><td>Owned / Borrowed / Compiler View / Copied / Materialized —— 自由选择,不可观察</td></tr>
-<tr><td>高级控制层</td><td>高级开发者</td><td>&T / &mut T / move / unsafe —— 显式写出才存在</td></tr>
-</table>
+<div class="callout note">数值字面量会适配标注类型:<code>let i: i64 = 123456789012</code> 合法。不同整数类型之间<b>不隐式转换</b>,需要 <code>to_i32()</code> / <code>to_f64()</code> 等显式方法。</div>
+<h3>2.3 一切赋值都是副本</h3>
+<pre><code><span class="k">let</span> a = [<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>]
+<span class="k">let</span> b = a              <span class="c">// b 是独立副本</span>
+b = b.push(<span class="n">4</span>)          <span class="c">// push 追加元素,返回新 Vec</span>
+<span class="fn">print</span>(a.len())          <span class="c">// 3 —— a 不受影响</span>
+<span class="fn">print</span>(b.len())          <span class="c">// 4</span></code></pre>
+<div class="callout good">这就是 Aine 的安全地基:没有别名、没有悬垂引用、没有数据竞争。代价是显式的克隆成本——编译器的优化体系(设计冻结中)负责把它降下来。</div>
 
-<h2 id="meta"><span class="no">2</span>元规则与规则类型</h2>
-<p>本规范的全部规则按职能分为五类(波你尼体系衍生的类型学):<b>定义规则</b>(赋予技术含义)、<b>操作规则</b>(描述行为的主干)、<b>例外规则</b>(显式收窄某条操作规则)、<b>管辖规则</b>(声明覆盖一组规则的域,其延伸范围即作用域)、<b>元规则</b>(规定其余规则如何解释)。<b>一条规则的含义不只来自它的措辞,还来自它与系统中其他规则的关系</b>——因此每条规则的编号与管辖域在本规范中始终显式。</p>
-<h3>2.1 冲突消解元规则(paribhāṣā)</h3>
-<p>当两条规则对同一情形都给出指令时,按以下元规则裁决,按序适用:</p>
-<table>
-<tr><th>#</th><th>元规则</th><th>内容</th></tr>
-<tr><td>M-1</td><td><b>具体优先于一般</b></td><td>特殊规则在其环境真包含于一般规则环境时,自动凌驾于一般规则(Elsewhere Condition;可递归收窄)</td></tr>
-<tr><td>M-2</td><td><b>显式优先于隐式</b></td><td>用户显式写出的指令压过编译器推导的默认策略</td></tr>
-<tr><td>M-3</td><td><b>安全默认优先于便利</b></td><td>§3.2 在冲突场景的具象化</td></tr>
-<tr><td>M-4</td><td><b>后定稿优先于先定稿</b></td><td>同一对象被两次定稿时,以较新的登记为准;登记簿必须记录该裁决</td></tr>
-<tr><td>M-5</td><td><b>宿主解释器为参考实现</b></td><td>双实现分歧时,以 Rust 宿主解释器的行为为语义基准;C 后端须对齐</td></tr>
-<tr><td>M-6</td><td><b>优化失败不是语义错误</b></td><td>任何分析精度、优化成败、缓存状态的组合,均不得改变程序的可观察行为</td></tr>
-</table>
-<div class="callout note">元规则 M-4 的首个判例:§25(捕获推导 Borrow→Copy→Move)与 D14(捕获即快照)冲突,裁决 D14 胜,§25 相应段落已按此修订(见 §7.4)。</div>
+<h2 id="t3"><span class="part">第一部分 · 入门教程</span>3 控制流</h2>
+<h3>3.1 if / else 是表达式</h3>
+<pre><code><span class="k">let</span> n = <span class="n">7</span>
+<span class="k">if</span> n > <span class="n">3</span> {
+    <span class="fn">print</span>(<span class="s">"大"</span>)
+} <span class="k">else</span> {
+    <span class="fn">print</span>(<span class="s">"小"</span>)
+}
 
-<h2 id="lex"><span class="no">3</span>词法文法</h2>
-<h3>3.1 源文件与空白</h3>
-<p>源文件为 UTF-8 文本。空白字符为空格、制表符、回车与换行;<b>换行是软语句终结符</b>(见 §4.5 消歧规则)。</p>
-<h3>3.2 注释</h3>
-<pre><code>LineComment  ::= '//' { 除换行外任意字符 }
-BlockComment ::= '/*' { CommentBody } '*/'      (* 可嵌套 *)</code></pre>
-<h3>3.3 标识符与关键字</h3>
-<pre><code>Ident ::= (Letter | '_') { Letter | Digit | '_' }</code></pre>
-<p>保留关键字:</p>
-<p><code>fn let var const if else for in while return break continue match struct enum trait impl where export module import move unsafe extern try catch ui render go defer true false</code></p>
-<h3>3.4 字面量</h3>
-<pre><code>IntLiteral    ::= DecInt | '0x' HexDigit {…} | '0b' ('0'|'1') {…} | '0o' '0'..'7' {…}
-FloatLiteral  ::= Digit { Digit | '_' } '.' Digit {…} [ Exponent ] | Digit {…} Exponent
+<span class="c">// if 是表达式:两个分支的块尾值就是它的值</span>
+<span class="k">let</span> level = <span class="k">if</span> n > <span class="n">5</span> { <span class="s">"高"</span> } <span class="k">else</span> { <span class="s">"低"</span> }
+<span class="fn">print</span>(level)            <span class="c">// 高</span></code></pre>
+<h3>3.2 while 与 for-in</h3>
+<pre><code><span class="k">var</span> i = <span class="n">0</span>
+<span class="k">while</span> i &lt; <span class="n">3</span> {
+    <span class="fn">print</span>(i)
+    i = i + <span class="n">1</span>
+}
+
+<span class="k">for</span> i <span class="k">in</span> <span class="n">0</span>..<span class="n">3</span> {        <span class="c">// 区间 0,1,2(不含 3)</span>
+    <span class="fn">print</span>(i)
+}
+
+<span class="k">for</span> ch <span class="k">in</span> <span class="s">"中文"</span> {      <span class="c">// 字符串按字符迭代</span>
+    <span class="fn">print</span>(ch)            <span class="c">// 中 / 文</span>
+}</code></pre>
+<div class="callout note">for-in 对 <code>Vec&lt;T&gt;</code> 逐元素、对 String 逐字符、对区间逐整数。循环变量在每次迭代产生,循环体内对它的修改不影响下一轮。</div>
+<h3>3.3 break 与 continue</h3>
+<pre><code><span class="k">for</span> i <span class="k">in</span> <span class="n">0</span>..<span class="n">10</span> {
+    <span class="k">if</span> i == <span class="n">3</span> {
+        <span class="k">continue</span>          <span class="c">// 跳过本轮</span>
+    }
+    <span class="k">if</span> i &gt; <span class="n">5</span> {
+        <span class="k">break</span>             <span class="c">// 退出循环</span>
+    }
+    <span class="fn">print</span>(i)              <span class="c">// 0 1 2 4 5</span>
+}</code></pre>
+<h3>3.4 match:模式匹配</h3>
+<pre><code><span class="k">enum</span> <span class="t">Shape</span> {
+    <span class="t">Circle</span>(<span class="t">f64</span>)
+    <span class="t">Rect</span>(<span class="t">f64</span>, <span class="t">f64</span>)
+}
+
+<span class="k">fn</span> <span class="fn">area</span>(s: <span class="t">Shape</span>) -&gt; <span class="t">f64</span> {
+    <span class="k">match</span> s {
+        <span class="t">Circle</span>(r) =&gt; <span class="n">3.14</span> * r * r
+        <span class="t">Rect</span>(w, h) =&gt; w * h
+    }
+}</code></pre>
+<p>match 也匹配 <code>Option</code> 与字面量:</p>
+<pre><code><span class="k">match</span> m.get(<span class="s">"k"</span>) {
+    <span class="t">Some</span>(v) =&gt; <span class="fn">print</span>(v)
+    <span class="t">None</span> =&gt; <span class="fn">print</span>(<span class="s">"没有"</span>)
+}</code></pre>
+<div class="callout note">match 各臂类型必须一致;`_` 是兜底臂。枚举变体的载荷按位置绑定到臂参数。</div>
+
+<h2 id="t4"><span class="part">第一部分 · 入门教程</span>4 函数</h2>
+<h3>4.1 定义与调用</h3>
+<pre><code><span class="k">fn</span> <span class="fn">add</span>(a: <span class="t">i32</span>, b: <span class="t">i32</span>) -&gt; <span class="t">i32</span> {
+    <span class="k">return</span> a + b          <span class="c">// 也可以直接写 a + b(块尾值)</span>
+}
+
+<span class="k">fn</span> <span class="fn">greet</span>(name: <span class="t">String</span>) {
+    <span class="fn">print</span>(<span class="s">f"你好,{name}"</span>)
+}</code></pre>
+<h3>4.2 递归</h3>
+<pre><code><span class="k">fn</span> <span class="fn">fib</span>(n: <span class="t">i32</span>) -&gt; <span class="t">i32</span> {
+    <span class="k">if</span> n &lt; <span class="n">2</span> {
+        <span class="k">return</span> n
+    }
+    <span class="k">return</span> fib(n - <span class="n">1</span>) + fib(n - <span class="n">2</span>)
+}</code></pre>
+<h3>4.3 参数模式(进阶)</h3>
+<table>
+<tr><th>写法</th><th>语义</th></tr>
+<tr><td><code>fn show(u: User)</code></td><td>按值传入(独立副本)——普通代码只用这个</td></tr>
+<tr><td><code>fn store(move u: User)</code></td><td>声明"我接管这个值"(第一版为文档性标注)</td></tr>
+<tr><td><code>fn inspect(u: &amp;User)</code></td><td>高级借用视图(低频;禁返回、禁存储)</td></tr>
+</table>
+<h3>4.4 函数类型(统一,无 trait 三分法)</h3>
+<pre><code><span class="k">fn</span> <span class="fn">apply</span>(f: <span class="t">fn</span>(<span class="t">i32</span>, <span class="t">i32</span>) -&gt; <span class="t">i32</span>) -&gt; <span class="t">i32</span> {
+    <span class="k">return</span> f(<span class="n">3</span>, <span class="n">4</span>)
+}
+
+<span class="k">fn</span> <span class="fn">main</span>() {
+    <span class="fn">print</span>(apply(add))       <span class="c">// 7 —— 具名函数直接传</span>
+}</code></pre>
+
+<h2 id="t5"><span class="part">第一部分 · 入门教程</span>5 集合:Vec 与 Map</h2>
+<h3>5.1 Vec&lt;T&gt; 动态数组</h3>
+<pre><code><span class="k">var</span> v = [<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>]          <span class="c">// 推断 Vec&lt;i32&gt;</span>
+v = v.push(<span class="n">4</span>)              <span class="c">// 追加(产生新版本,须接住)</span>
+<span class="fn">print</span>(v.len())              <span class="c">// 4</span>
+<span class="fn">print</span>(v[<span class="n">0</span>])                 <span class="c">// 1 —— 下标访问</span>
+v[<span class="n">0</span>] = <span class="n">10</span>                  <span class="c">// 索引赋值</span>
+
+<span class="fn">print</span>(v.contains(<span class="n">2</span>))       <span class="c">// true</span>
+v = v.remove(<span class="n">0</span>)            <span class="c">// 删除下标 0</span>
+<span class="k">for</span> x <span class="k">in</span> v {               <span class="c">// 逐元素迭代</span>
+    <span class="fn">print</span>(x)
+}</code></pre>
+<table>
+<tr><th>方法</th><th>说明</th></tr>
+<tr><td><code>push(x)</code> / <code>pop()</code></td><td>追加 / 弹出尾部</td></tr>
+<tr><td><code>insert(i, x)</code> / <code>remove(i)</code></td><td>插入 / 删除指定位置</td></tr>
+<tr><td><code>set(i, x)</code> / <code>get(i)</code></td><td>替换 / 读取(越界 panic / None)</td></tr>
+<tr><td><code>concat(other)</code></td><td>拼接为新 Vec</td></tr>
+<tr><td><code>len() / contains(x) / sort() / clear()</code></td><td>长度 / 包含 / 排序 / 清空</td></tr>
+</table>
+<div class="callout warn">Aine 的变更方法返回<b>新值</b>。语句形态 <code>v.push(4)</code>(不接住返回值)在解释器里会写回变量,但<b>推荐始终写 <code>v = v.push(4)</code></b>——这是 C 后端与未来并发语义下的确定写法。</div>
+<h3>5.2 Map&lt;K, V&gt; 有序映射</h3>
+<pre><code><span class="k">var</span> m: <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">i32</span>&gt; = <span class="t">Map</span>.new()
+m.set(<span class="s">"苹果"</span>, <span class="n">3</span>)
+m.set(<span class="s">"香蕉"</span>, <span class="n">5</span>)
+
+<span class="fn">print</span>(m.get(<span class="s">"苹果"</span>))       <span class="c">// Some(3)</span>
+<span class="fn">print</span>(m.get(<span class="s">"梨"</span>))         <span class="c">// None</span>
+<span class="fn">print</span>(m.contains(<span class="s">"香蕉"</span>))  <span class="c">// true</span>
+<span class="fn">print</span>(m.len())              <span class="c">// 2</span>
+
+<span class="k">for</span> k <span class="k">in</span> m.keys() {        <span class="c">// 键迭代(插入序)</span>
+    <span class="fn">print</span>(k)
+}
+<span class="k">for</span> v <span class="k">in</span> m.values() {      <span class="c">// 值迭代</span>
+    <span class="fn">print</span>(v)
+}</code></pre>
+<h3>5.3 嵌套容器</h3>
+<pre><code><span class="k">var</span> grid: <span class="t">Vec</span>&lt;<span class="t">Vec</span>&lt;<span class="t">i32</span>&gt;&gt; = []
+<span class="k">var</span> stock: <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Vec</span>&lt;<span class="t">i32</span>&gt;&gt; = <span class="t">Map</span>.new()</code></pre>
+
+<h2 id="t6"><span class="part">第一部分 · 入门教程</span>6 结构体与枚举</h2>
+<h3>6.1 struct:命名字段</h3>
+<pre><code><span class="k">struct</span> <span class="t">User</span> {
+    name: <span class="t">String</span>
+    age: <span class="t">i32</span>
+}
+
+<span class="k">fn</span> <span class="fn">main</span>() {
+    <span class="k">var</span> u = <span class="t">User</span> { name: <span class="s">"张三"</span>, age: <span class="n">25</span> }
+    <span class="fn">print</span>(u.name)          <span class="c">// 张三</span>
+    u.age = u.age + <span class="n">1</span>      <span class="c">// 字段赋值(需 var)</span>
+    <span class="fn">print</span>(u.age)           <span class="c">// 26</span>
+}</code></pre>
+<h3>6.2 enum:带载荷的变体</h3>
+<pre><code><span class="k">enum</span> <span class="t">Event</span> {
+    <span class="t">Click</span>(<span class="t">String</span>)
+    <span class="t">Move</span>(<span class="t">i32</span>, <span class="t">i32</span>)
+    <span class="t">Quit</span>
+}
+
+<span class="k">fn</span> <span class="fn">handle</span>(e: <span class="t">Event</span>) {
+    <span class="k">match</span> e {
+        <span class="t">Click</span>(target) =&gt; <span class="fn">print</span>(<span class="s">f"点击 {target}"</span>)
+        <span class="t">Move</span>(x, y) =&gt; <span class="fn">print</span>(<span class="s">f"移动 {x},{y}"</span>)
+        <span class="t">Quit</span> =&gt; <span class="fn">print</span>(<span class="s">"退出"</span>)
+    }
+}</code></pre>
+<div class="callout note">枚举变体的载荷按位置绑定到臂参数。match 必须覆盖所有变体(或以 `_` 兜底)。</div>
+
+<h2 id="t7"><span class="part">第一部分 · 入门教程</span>7 字符串</h2>
+<h3>7.1 码点模型</h3>
+<p>Aine 字符串按 <b>Unicode 码点</b>计量:<code>len()</code> 是字符数、<code>s[i]</code> 是第 i 个字符、切片按字符位。你永远不需要关心 UTF-8 字节。</p>
+<pre><code><span class="k">let</span> s = <span class="s">"中a文b"</span>
+<span class="fn">print</span>(s.len())          <span class="c">// 4(不是 8 个字节)</span>
+<span class="fn">print</span>(s[<span class="n">0</span>])             <span class="c">// 中</span>
+<span class="fn">print</span>(s[<span class="n">1</span>..<span class="n">3</span>])          <span class="c">// a文</span>
+<span class="fn">print</span>(s[<span class="n">0</span>] == <span class="s">"中"</span>)     <span class="c">// true</span></code></pre>
+<h3>7.2 常用方法</h3>
+<table>
+<tr><th>方法</th><th>例子</th><th>结果</th></tr>
+<tr><td><code>trim()</code></td><td><code>"  hi  ".trim()</code></td><td><code>"hi"</code>(含全角空格)</td></tr>
+<tr><td><code>split(sep)</code></td><td><code>"a,b".split(",")</code></td><td>Vec&lt;String&gt;</td></tr>
+<tr><td><code>contains(s)</code></td><td><code>"hello".contains("ell")</code></td><td>true</td></tr>
+<tr><td><code>starts_with(s)</code> / <code>ends_with(s)</code></td><td><code>"ab".starts_with("a")</code></td><td>true</td></tr>
+<tr><td><code>replace(a, b)</code></td><td><code>"aa".replace("a", "b")</code></td><td><code>"bb"</code></td></tr>
+<tr><td><code>to_i32()</code> / <code>to_f64()</code></td><td><code>"42".to_i32()</code></td><td>42</td></tr>
+</table>
+<h3>7.3 拼接与格式化</h3>
+<pre><code><span class="k">let</span> name = <span class="s">"Aine"</span>
+<span class="k">let</span> version = <span class="n">1.5</span>
+<span class="fn">print</span>(<span class="s">f"{name} v{version}"</span>)          <span class="c">// Aine v1.5</span>
+<span class="fn">print</span>(<span class="s">f"{name.len()} 个字符"</span>)        <span class="c">// 4 个字符</span></code></pre>
+<div class="callout note">f-string 对任意表达式求值:数值、bool 自动格式化;字符串原样嵌入。拼接也可以用 <code>+</code>(两侧同为字符串)。</div>
+
+<h2 id="t8"><span class="part">第一部分 · 入门教程</span>8 错误处理</h2>
+<h3>8.1 Option:有或没有</h3>
+<pre><code><span class="k">let</span> m: <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">i32</span>&gt; = <span class="t">Map</span>.new()
+<span class="k">let</span> hit = m.get(<span class="s">"k"</span>)       <span class="c">// Option&lt;i32&gt;</span>
+<span class="k">match</span> hit {
+    <span class="t">Some</span>(v) =&gt; <span class="fn">print</span>(v)
+    <span class="t">None</span> =&gt; <span class="fn">print</span>(<span class="s">"没有"</span>)
+}
+<span class="fn">print</span>(hit)                  <span class="c">// 直接打印: Some(…) / None</span></code></pre>
+<h3>8.2 Result 与 ?</h3>
+<pre><code><span class="k">fn</span> <span class="fn">load</span>(path: <span class="t">String</span>) -&gt; <span class="t">Result</span>&lt;<span class="t">String</span>, <span class="t">String</span>&gt; {
+    <span class="k">let</span> text = read_file(path)
+    <span class="k">if</span> text.contains(<span class="s">"[read_file error"</span>) {
+        <span class="k">return</span> <span class="t">Err</span>(<span class="s">"读取失败"</span>)
+    }
+    <span class="k">return</span> <span class="t">Ok</span>(text)
+}
+
+<span class="k">fn</span> <span class="fn">main</span>() {
+    <span class="k">let</span> text = load(<span class="s">"a.txt"</span>)?   <span class="c">// 失败则 main 返回 Err</span>
+    <span class="fn">print</span>(text)
+}</code></pre>
+<div class="callout note">`?` 要求操作数类型与所在函数的错误通道一致(Option 函数内用 Result 的 `?` 是类型错误)。</div>
+<h3>8.3 defer:退出时必执行</h3>
+<pre><code><span class="k">fn</span> <span class="fn">work</span>() {
+    <span class="k">defer</span> <span class="fn">print</span>(<span class="s">"收尾"</span>)     <span class="c">// 所有退出路径都会执行,LIFO</span>
+    <span class="fn">print</span>(<span class="s">"工作中"</span>)
+}
+<span class="c">// 输出: 工作中 → 收尾</span></code></pre>
+<h3>8.4 panic:程序缺陷,不可捕获</h3>
+<p>以下情形产生确定性 panic(终止程序,消息含函数栈):索引越界、Map 键不存在、<code>assert</code> 失败、类型不匹配、栈超限、defer 内出错、除零。<b>业务失败永远用 Result,不用 panic。</b></p>
+
+<h2 id="t9"><span class="part">第一部分 · 入门教程</span>9 闭包与 defer</h2>
+<h3>9.1 闭包</h3>
+<pre><code><span class="k">let</span> base = <span class="n">10</span>
+<span class="k">let</span> add_base = |x| x + base     <span class="c">// 捕获 base 的快照</span>
+<span class="fn">print</span>(add_base(<span class="n">5</span>))               <span class="c">// 15</span>
+
+<span class="k">let</span> add = |a: <span class="t">i32</span>, b: <span class="t">i32</span>| a + b <span class="c">// 独立闭包(参数带类型)</span>
+<span class="fn">print</span>(add(<span class="n">1</span>, <span class="n">2</span>))                 <span class="c">// 3</span></code></pre>
+<div class="callout note">捕获发生在<b>创建时</b>(快照语义):之后修改外部变量不影响已创建的闭包。闭包与具名函数是同一类型 <code>fn(A) -&gt; R</code>,可以互相传递。</div>
+
+<h2 id="t10"><span class="part">第一部分 · 入门教程</span>10 模块与多文件</h2>
+<p>用 <code>module</code> 把源码按文件组织,入口文件声明后即可使用其中的一切:</p>
+<pre><code><span class="c">// —— 文件 stdlib/json.aine ——</span>
+<span class="k">fn</span> <span class="fn">stringify</span>(j: <span class="t">Json</span>) -&gt; <span class="t">String</span> { … }
+
+<span class="c">// —— 文件 main.aine ——</span>
+<span class="k">module</span> json;
+
+<span class="k">fn</span> <span class="fn">main</span>() {
+    <span class="fn">print</span>(json.stringify(value))
+}</code></pre>
+<p>标准库(<code>stdlib/</code>)提供 json 等模块,按搜索路径自动解析。</p>
+
+<h2 id="r1"><span class="part">第二部分 · 语言参考</span>11 词法文法</h2>
+<h3>11.1 空白与注释</h3>
+<p>空白 = 空格/制表/回车/换行;换行是软语句终结符。注释:<code>//</code> 行注释;<code>/* … */</code> 块注释(可嵌套)。</p>
+<h3>11.2 字面量</h3>
+<pre><code>IntLiteral    ::= DecInt | '0x' HexDigit {…} | '0b' Bit {…} | '0o' Oct {…}
+FloatLiteral  ::= Digit {…} '.' Digit {…} [Exponent] | Digit {…} Exponent
 StrLiteral    ::= '"' { StrChar | Escape } '"'
 FmtStrLiteral ::= 'f' '"' { StrChar | Escape } '"'
-Escape        ::= '\' ('n' | 't' | 'r' | '0' | '\' | '"' | '\'' | 'x' HexDigit HexDigit)</code></pre>
-<p>词法错误码:F1001 未闭合字符串、F1002 未闭合块注释、F1003 非法字符、F1004 非法/溢出数字。</p>
-<h3>3.5 运算符与装饰器</h3>
-<pre><code>Punct ::= '(' ')' '{' '}' '[' ']' ',' ';' ':' '::' '.' '..' '->' '=>' '@' '?'
-        | '+' '-' '*' '/' '%' '=' '==' '!=' '<' '<=' '>' '>=' '&&' '||' '&' '|' '^' '~' '<<' '>>'
-        | '+=' '-=' '*=' '/=' '%='
-Decorator ::= '@' Ident          (* @state / @global —— 项级语法,非属性 *)</code></pre>
+Escape        ::= '\' ('n' | 't' | 'r' | '0' | '\' | '"' | ''' | 'x' HexDigit HexDigit)</code></pre>
+<h3>11.3 运算符</h3>
+<p>算术 <code>+ - * / %</code>;比较 <code>== != &lt; &lt;= &gt; &gt;=</code>;逻辑 <code>&amp;&amp; || !</code>;位 <code>&amp; | ^ ~ &lt;&lt; &gt;&gt;</code>;复合赋值 <code>+= -= *= /= %=</code>;区间 <code>..</code>;Try <code>?</code>;解引用 <code>* &amp;</code>(高级)。</p>
 
-<h2 id="syntax"><span class="no">4</span>语法文法</h2>
-<h3>4.1 程序</h3>
-<pre><code>Program ::= { Item }
-Item    ::= FnDef | StructDef | EnumDef | ImplDef | ModuleDef | ImportDef
-          | GlobalVarDef | StateDef | UiDef</code></pre>
-<p>内建全局(无需声明):<code>print</code> <code>read_file</code> <code>write_file</code> <code>append_file</code> <code>file_exists</code> <code>now</code> <code>assert(cond[, msg])</code> <code>cli_args</code>。</p>
-<h3>4.2 类型</h3>
-<pre><code>Type      ::= PathType | RefType | TupleType | FnType
-PathType  ::= Ident [ '::' Ident ] [ '&lt;' Type { ',' Type } '&gt;' ]
-RefType   ::= '&' [ 'mut' ] Type
-TupleType ::= '(' { Type ',' } ')'
-FnType    ::= 'fn' '(' [ Type { ',' Type } ] ')' [ '->' Type ]</code></pre>
-<p>内建类型:<code>i32</code> <code>i64</code> <code>u8</code>–<code>u64</code> <code>usize</code> <code>f32</code> <span class="badge b-defined">已定义</span> <code>f64</code> <code>bool</code> <code>char</code> <span class="badge b-closed">已闭合</span> <code>String</code> <code>Vec&lt;T&gt;</code> <code>Map&lt;K,V&gt;</code> <code>Option&lt;T&gt;</code> <code>Result&lt;T,E&gt;</code>。</p>
-<div class="rule">
-<div class="rid"><span class="tag">定义</span>SD-1 · 整数算术域</div>
-<h4>整数算术在 64 位有符号域执行</h4>
-<dl>
-<dt>行为</dt><dd><code>+ - * / %</code> 一律以 64 位有符号语义求值;<code>i32</code> 声明的存储宽度仅在<b>显式窄化</b>(<code>to_i32()</code>、FFI 边界)时生效,窄化按二补数环绕定义(C23 modular)</dd>
-<dt>失败</dt><dd>窄化不报错(环绕确定);除零为 panic(见 §8.4 词表)</dd>
-<dt>交互</dt><dd>容器存储宽度:声明 <code>Vec&lt;i32&gt;</code> 等的元素槽宽 64 位(实现对齐宿主值模型)</dd>
-<dt>不变量</dt><dd>宿主与 C 后端的整数算术结果逐位一致(双路实证:ovf 用例)</dd>
-</dl>
-<div class="maturity">成熟度 <span class="badge b-verified">已验证</span> · 来源:语义优化轮 · 税额:容器元素槽宽 2×(v1 接受)</div>
-</div>
-<h3>4.3 语句</h3>
-<pre><code>Block      ::= '{' { Stmt } [ Expr ] '}'
-Stmt       ::= LetStmt | ReturnStmt | IfStmt | WhileStmt | ForStmt
-             | BreakStmt | ContinueStmt | DeferStmt | TryCatchStmt | ExprStmt
-LetStmt    ::= ( 'let' | 'var' ) Pattern [ ':' Type ] [ '=' Expr ]
-ReturnStmt ::= 'return' [ Expr ]
-DeferStmt  ::= 'defer' Expr</code></pre>
-<p><code>let</code> = 不可变绑定,<code>var</code> = 可变绑定。块末表达式为块尾值。</p>
-<h3>4.4 模式与 match</h3>
-<pre><code>MatchExpr ::= 'match' Expr '{' { Pattern '=>' Expr } '}'
-Pattern   ::= Ident | '_' | IntLiteral | FloatLiteral | StrLiteral | 'true' | 'false' | Path</code></pre>
-<div class="callout note">G1.0 边界:结构体/元组/数组/绑定模式为后续扩展(候选)。当前 match 的表面形态与主流语言一致,模式能力弱于 Rust——有意收窄,见 §16 演进表。</div>
-<h3>4.5 表达式优先级(从低到高)</h3>
-<pre><code>AssignExpr  ::= RangeExpr ( AssignOp AssignExpr )?        (* 右结合 *)
-RangeExpr   ::= OrExpr [ '..' [ OrExpr ] ] | '..' OrExpr
-OrExpr      ::= AndExpr { '||' AndExpr }
-AndExpr     ::= EqualityExpr { '&&' EqualityExpr }
-EqualityExpr ::= RelExpr { ('==' | '!=') RelExpr }
-RelExpr     ::= BitOrExpr { ('&lt;' | '&lt;=' | '&gt;' | '&gt;=') BitOrExpr }
-BitOrExpr   ::= BitAndExpr { '|' BitAndExpr }
-BitAndExpr  ::= BitXorExpr { '&amp;' BitAndExpr }
-BitXorExpr  ::= ShiftExpr { '^' ShiftExpr }
-ShiftExpr   ::= AddExpr { ('&lt;&lt;' | '&gt;&gt;') AddExpr }
-AddExpr     ::= MulExpr { ('+' | '-') MulExpr }
-MulExpr     ::= UnaryExpr { ('*' | '/' | '%') UnaryExpr }
-UnaryExpr   ::= ('-' | '!' | '&amp;' | '*') UnaryExpr | PostfixExpr
-PostfixExpr ::= Primary { '(' Args ')' | '.' Ident | '[' Expr ']' | '?' }</code></pre>
-<h3>4.6 消歧与软终结规则</h3>
+<h2 id="r2"><span class="part">第二部分 · 语言参考</span>12 语法文法与优先级</h2>
+<h3>12.1 优先级(从低到高)</h3>
+<table>
+<tr><th>级别</th><th>运算符</th><th>结合</th></tr>
+<tr><td>赋值</td><td><code>= += -= *= /= %=</code></td><td>右</td></tr>
+<tr><td>区间</td><td><code>..</code></td><td>—</td></tr>
+<tr><td>或</td><td><code>||</code></td><td>左</td></tr>
+<tr><td>且</td><td><code>&amp;&amp;</code></td><td>左</td></tr>
+<tr><td>相等</td><td><code>== !=</code></td><td>左</td></tr>
+<tr><td>关系</td><td><code>&lt; &lt;= &gt; &gt;=</code></td><td>左</td></tr>
+<tr><td>位或/位与/位异或</td><td><code>| &amp; ^</code></td><td>左</td></tr>
+<tr><td>移位</td><td><code>&lt;&lt; &gt;&gt;</code></td><td>左</td></tr>
+<tr><td>加减</td><td><code>+ -</code></td><td>左</td></tr>
+<tr><td>乘除模</td><td><code>* / %</code></td><td>左</td></tr>
+<tr><td>一元</td><td><code>- ! &amp; *</code></td><td>右</td></tr>
+<tr><td>后缀</td><td>调用 <code>()</code> 字段 <code>.x</code> 索引 <code>[i]</code> Try <code>?</code> 尾部块</td><td>左</td></tr>
+</table>
+<h3>12.2 原子表达式</h3>
+<pre><code>Primary ::= IntLiteral | FloatLiteral | StrLiteral | FmtStrLiteral | 'true' | 'false'
+          | Ident | Path | '(' Expr ')' | '(' Expr { ',' Expr } ')'      (* 元组 *)
+          | '[' { Expr ',' } ']' | Block | StructLit | Closure
+          | IfExpr | MatchExpr | GoExpr | UiOpExpr | '..' Expr
+StructLit ::= Ident '{' Ident ':' Expr { ',' Ident ':' Expr } '}'
+Closure   ::= '|' [ Param { ',' Param } ] '|' Expr | '||' Expr</code></pre>
+<h3>12.3 消歧与软终结(解析器约束)</h3>
 <ul>
-<li>语句默认以换行终结;块内语句无需分号。<code>return</code> 后换行视为空 return(同行取表达式的改进已列演进表);</li>
-<li>泛型闭括号 <code>&gt;&gt;</code> 由解析层拆分,用户按字面书写 <code>Vec&lt;Vec&lt;T&gt;&gt;</code>;</li>
-<li>f-string 插值 <code>{expr}</code> 在求值阶段解析,不经二次词法(发射期禁止重新解析,演进决议 A6)。</li>
+<li>换行终结语句;块内无需分号;<code>return</code> 后换行视为空 return;</li>
+<li>泛型闭括号 <code>&gt;&gt;</code> 由解析层拆分;</li>
+<li>f-string 插值在求值阶段解析,不在发射期二次解析。</li>
 </ul>
 
-<h2 id="types"><span class="no">5</span>类型系统</h2>
-<h3>5.1 类型集合</h3>
+<h2 id="r3"><span class="part">第二部分 · 语言参考</span>13 类型系统规则</h2>
+<h3>13.1 类型集合</h3>
 <table>
-<tr><th>类</th><th>类型</th><th>说明</th></tr>
-<tr><td>标量</td><td><code>i32</code> <code>i64</code> <code>u8</code>–<code>u64</code> <code>usize</code> <code>f32</code> <code>f64</code> <code>bool</code> <code>char</code></td><td>整数算术域见 SD-1;<code>char</code> 见 SD-4</td></tr>
-<tr><td>文本</td><td><code>String</code></td><td>永远表示拥有语义;字面量 <code>"…"</code> 与 <code>f"…"</code> 均为 String</td></tr>
-<tr><td>容器</td><td><code>Vec&lt;T&gt;</code> <code>Map&lt;K,V&gt;</code></td><td>Map 有序(插入序遍历),键恒为 String</td></tr>
-<tr><td>误差</td><td><code>Option&lt;T&gt;</code> <code>Result&lt;T,E&gt;</code></td><td>有/无;成败</td></tr>
-<tr><td>复合</td><td><code>(A, B)</code> 元组;命名类型</td><td>struct / enum / ui 组件</td></tr>
-<tr><td>高级</td><td><code>&amp;T</code> <code>&amp;mut T</code></td><td>仅参数与局部;禁止返回与存储(D5)</td></tr>
-<tr><td>回退</td><td><code>Unknown</code> <code>Error</code></td><td>渐进类型:不确定→Unknown;检查失败→Error 污染抑制</td></tr>
+<tr><th>组</th><th>类型</th></tr>
+<tr><td>整数</td><td><code>i32</code> <code>i64</code> <code>u8</code> <code>u16</code> <code>u32</code> <code>u64</code> <code>usize</code></td></tr>
+<tr><td>浮点</td><td><code>f32</code>(双精度别名)<code>f64</code></td></tr>
+<tr><td>其他标量</td><td><code>bool</code> <code>char</code>(≡ 单字符 String)</td></tr>
+<tr><td>文本</td><td><code>String</code>(拥有)/ <code>&amp;str</code>(高级借用)</td></tr>
+<tr><td>容器</td><td><code>Vec&lt;T&gt;</code> <code>Map&lt;K, V&gt;</code>(K 恒 String,插入序)</td></tr>
+<tr><td>误差</td><td><code>Option&lt;T&gt;</code> <code>Result&lt;T, E&gt;</code></td></tr>
+<tr><td>复合</td><td>元组 <code>(A, B)</code> / 命名类型 / <code>fn(A) -&gt; R</code></td></tr>
+<tr><td>高级</td><td><code>&amp;T</code> <code>&amp;mut T</code>(禁返回、禁存储)</td></tr>
+<tr><td>回退</td><td><code>Unknown</code>(渐进不确定)/ <code>Error</code>(检查失败污染)</td></tr>
 </table>
-<div class="rule">
-<div class="rid"><span class="tag">定义</span>SD-4 · char ≡ 单字符 String</div>
-<h4>char 是恰好一个 Unicode 码点的 String</h4>
-<dl>
-<dt>行为</dt><dd><code>s[i]</code> 的结果类型即 char;char 与单字符 String 可无条件互赋;C 表示统一 <code>al_char_at</code>(堆分配单字符)</dd>
-<dt>不变量</dt><dd>D15 单一计量单位:不存在"字节字符"与"码点字符"两种 char</dd>
-</dl>
-<div class="maturity">成熟度 <span class="badge b-verified">已验证</span> · 来源:语义优化轮 · 双路实测一致</div>
-</div>
-<h3>5.2 字面量默认类型</h3>
-<table>
-<tr><th>字面量</th><th>类型</th></tr>
-<tr><td><code>123</code> <code>0x1F</code></td><td>i32 —— 但可适配数值标注(见 5.4);存储与算术域为 64 位(SD-1)</td></tr>
-<tr><td><code>1.5</code></td><td>f64</td></tr>
-<tr><td><code>"…"</code> / <code>f"…"</code></td><td>String</td></tr>
-<tr><td><code>true</code> / <code>false</code></td><td>bool(W23 修正:true/false 为 EIdent,先于裸变体兜底判为 bool)</td></tr>
-<tr><td><code>[]</code></td><td>Vec&lt;Unknown&gt;</td></tr>
-</table>
-<h3>5.3 表达式类型规则</h3>
+<h3>13.2 类型规则表</h3>
 <table>
 <tr><th>构造</th><th>规则</th><th>错误码</th></tr>
-<tr><td>算术 <code>a + b</code> 等</td><td>两侧同为数值;Unknown 回退</td><td>T3002</td></tr>
-<tr><td><code>a &lt; b</code> 等</td><td>两侧同为数值</td><td>T3002</td></tr>
-<tr><td><code>&amp;&amp;</code> / <code>||</code></td><td>两侧同为 bool</td><td>T3002</td></tr>
-<tr><td><code>if cond</code> / <code>while cond</code></td><td>cond 为 bool(Unknown 允许)</td><td>T3003</td></tr>
-<tr><td><code>let x: T = e</code></td><td>e 可赋给 T;数值字面量适配数值标注(SD-1)</td><td>T3001</td></tr>
-<tr><td><code>x = e</code></td><td>目标非 mut → T3010;类型不匹配 → T3005</td><td>T3010/T3005</td></tr>
-<tr><td><code>f(args)</code></td><td>参数个数与类型;签名宽松匹配(D14)</td><td>T3008</td></tr>
-<tr><td><code>S { f: e }</code></td><td>字段存在/类型</td><td>T3006/T3007</td></tr>
-<tr><td><code>e?</code></td><td>Option(T)→T;Result(T,E)→T;Unknown→Unknown;<b>交叉传播为类型错误</b>(SD-3)</td><td>—</td></tr>
+<tr><td>算术/比较</td><td>两侧同数值</td><td>T3002</td></tr>
+<tr><td>逻辑</td><td>两侧同 bool</td><td>T3002</td></tr>
+<tr><td>cond</td><td>bool(Unknown 允许)</td><td>T3003</td></tr>
+<tr><td><code>let x: T = e</code></td><td>e 可赋给 T;数值字面量适配数值标注;整数字面量超 i32 范围取 i64 域</td><td>T3001</td></tr>
+<tr><td><code>x = e</code></td><td>非 mut → T3010;不匹配 → T3005</td><td>T3010/T3005</td></tr>
+<tr><td><code>f(args)</code></td><td>签名宽松匹配(参数个数/类型)</td><td>T3008</td></tr>
+<tr><td><code>S { f: e }</code></td><td>字段存在(T3006)/类型(T3007)</td><td>T3006/7</td></tr>
+<tr><td><code>e?</code></td><td>Option(T)→T;Result(T,E)→T;交叉通道 = 类型错误(SD-3)</td><td>—</td></tr>
 </table>
-<h3>5.4 赋值兼容</h3>
-<p><code>A</code> 可赋给 <code>B</code> 当且仅当:其一为 Unknown/Error;或 A == B;或结构递归相等。<b>不允许隐式数值转换</b>(<code>i32→i64</code> 需显式 <code>to_i64()</code> 等;整数字面量适配标注除外,见 5.2)。</p>
-<div class="rule">
-<div class="rid"><span class="tag">定义</span>SD-3 · Try 交叉通道</div>
-<h4>`?` 要求操作数类型与所在函数的错误通道一致</h4>
-<dl>
-<dt>行为</dt><dd>返回 <code>Result&lt;T,E&gt;</code> 的函数内对 Option 使用 `?` = 类型错误(T3005);反之亦然。不做自动映射</dd>
-<dt>理由</dt><dd>自动映射制造幽灵错误值(Err(Option::None));通道分离是显式边界原则的具象化</dd>
-</dl>
-<div class="maturity">成熟度 <span class="badge b-proposal">定稿提案</span>(待批) · 宿主行为已按此对齐;typeck 检查待实现</div>
-</div>
-<h3>5.5 泛型</h3>
-<p>内建泛型容器 <code>Vec&lt;T&gt;</code> / <code>Map&lt;K,V&gt;</code> 双实现支持;<b>用户自定义泛型为 Phase 2 显式不支持</b>(有意识决定):D1 视图化第一版硬限制非泛型;trait 约束 <code>T: Trait</code> 同批评估。</p>
+<h3>13.3 赋值兼容</h3>
+<p>Unknown/Error 回退;或相等;或结构递归相等。<b>不允许隐式数值转换</b>(整数字面量适配标注除外)。用户自定义泛型为 Phase 2(显式不支持);内建 Vec/Map 泛型容器支持嵌套。</p>
 
-<h2 id="values"><span class="no">6</span>值语义与内存模型</h2>
-<div class="rule">
-<div class="rid"><span class="tag gov">管辖</span>A-0 · 三层内存模型</div>
-<h4>用户语义层只面对拥有值</h4>
-<dl>
-<dt>定义</dt><dd>赋值、实参传递、容器存储产生值的独立副本;不存在用户可见的别名</dd>
-<dt>行为</dt><dd>变更操作(push/insert/set)产生新版本:clone-then-mutate——所有旧持有者的观察不变</dd>
-<dt>不变量</dt><dd>编译器实现层的选择(View/Owned/Materialized)永不改变用户层可观察语义(元规则 M-6)</dd>
-<dt>失败</dt><dd>无失败路径;例外入口仅 move/@global/extern 三处,逐条见 §7/§13/§14</dd>
-</dl>
-<div class="maturity">成熟度 <span class="badge b-verified">已验证</span> · 证据:cons.aine 双路字节一致</div>
-</div>
-<h3>6.1 字符串的拥有语义</h3>
-<p><code>String</code> 永远表示拥有语义。<code>str</code> 退位:仅作为 <code>&amp;str</code> 的 pointee(高级借用视图);<code>str_view</code> 为编译器内部类型,用户源码、文档、诊断一律不得出现(违者编译错误)。</p>
-<h3>6.2 Compiler View 与 Materialization <span class="badge b-intent">只有意图</span></h3>
-<p>按值参数满足全部视图化条件(只读、未逃逸、可追踪、非泛型)时,编译器以零成本视图实现该参数;无法证明时回退 Materialize(拥有值),按三档成本诊断:Cheap(&lt;64KB 静默)/Material(64KB–1MB 非阻塞提示)/Large(&gt;1MB 强制提示)。§10"禁止隐式大型 Clone"禁的是<b>静默</b>复制——用户语义要求的复制(如 push 的新版本)豁免禁令,但必须进入诊断阈值体系。</p>
-<div class="callout warn">本节为 V5.8 核心工程承诺,实现未启动;在实现之前,"零额外分配"是优化目标,不是语言保证(M-6:任何精度下行为一致)。</div>
-<h3>6.3 所有权状态机</h3>
-<p>编译器内部维护 Ownership/Borrow/Escape/Region/Drop/Capture。值语义下状态机退化为平凡安全:复制产生新值、变更产生新版本、无原地失效。<b>例外入口三处</b>:move 参数(文档性标注,SD-6)、@global(并发可达,见 §13)、extern 边界(§14)——逐条显式枚举,不隐式增加。</p>
-
-<h2 id="fns"><span class="no">7</span>函数与闭包</h2>
-<h3>7.1 参数三模式</h3>
+<h2 id="r4"><span class="part">第二部分 · 语言参考</span>14 容器方法语义表</h2>
+<h3>14.1 Vec&lt;T&gt;</h3>
 <table>
-<tr><th>模式</th><th>语法</th><th>语义</th><th>成熟度</th></tr>
-<tr><td>普通按值</td><td><code>fn show(user: User)</code></td><td>独立副本;编译器可按 D1 条件视图化</td><td><span class="badge b-verified">已验证</span></td></tr>
-<tr><td>显式转移</td><td><code>fn store(move user: User)</code></td><td><b>文档性标注</b>(SD-6):值语义下与普通参数可观察等效;失效检查随所有权状态机(Phase 2)</td><td><span class="badge b-proposal">定稿提案</span></td></tr>
-<tr><td>高级借用</td><td><code>fn inspect(user: &amp;User)</code></td><td>D5 五条:按值→&amp;T 隐式 reborrow 允许;按值→&amp;mut 禁止;禁返回 &amp;T;禁存储;临时视图生命周期=本次调用</td><td><span class="badge b-defined">已定义</span></td></tr>
+<tr><th>方法</th><th>签名</th><th>语义</th><th>失败</th></tr>
+<tr><td>push</td><td><code>(x: T) → Vec&lt;T&gt;</code></td><td>尾部追加,产生新版本,写回接收者</td><td>—</td></tr>
+<tr><td>pop</td><td><code>() → T</code></td><td>弹出尾部;空时 Nil</td><td>—</td></tr>
+<tr><td>insert</td><td><code>(i: i32, x: T) → Vec&lt;T&gt;</code></td><td>插入(越界钳制),写回接收者</td><td>—</td></tr>
+<tr><td>remove</td><td><code>(i: i32) → Vec&lt;T&gt;</code></td><td>删除,写回接收者</td><td>越界 panic</td></tr>
+<tr><td>set</td><td><code>(i: i32, x: T) → Vec&lt;T&gt;</code></td><td>替换</td><td>越界 panic</td></tr>
+<tr><td>get</td><td><code>(i: i32) → T</code></td><td>读取;越界返回 Nil</td><td>—</td></tr>
+<tr><td>concat</td><td><code>(other: Vec&lt;T&gt;) → Vec&lt;T&gt;</code></td><td>拼接新 Vec,不改接收者</td><td>—</td></tr>
+<tr><td>len / contains / sort / clear / index-assign</td><td>—</td><td>常规</td><td>—</td></tr>
 </table>
-<h3>7.2 生命周期</h3>
-<p>用户可见语法<b>不提供生命周期参数</b>。编译器内部完整维护借用与逃逸信息;任何借用/视图的生命周期由编译器推导。</p>
-<h3>7.3 统一函数类型(D14)</h3>
-<p><code>fn(A, B) -&gt; R</code> 一个类型覆盖具名函数、非捕获闭包、捕获闭包;签名宽松匹配;无 trait 三分法。</p>
-<div class="rule">
-<div class="rid"><span class="tag">定义</span>D14 · 捕获即快照</div>
-<h4>闭包创建时对捕获变量取值快照</h4>
-<dl>
-<dt>行为</dt><dd>快照随闭包值复制而独立复制;修改捕获快照只影响本实例(需 mut 绑定)</dd>
-<dt>不变量</dt><dd>无共享可变状态 → FnMut 类问题在 Aine 中不存在</dd>
-<dt>边界</dt><dd>C 后端:非捕获闭包 = 函数指针;捕获闭包的一等传递为登记限制(源层等价写法:显式参数传入)</dd>
-</dl>
-<div class="maturity">成熟度 <span class="badge b-verified">已验证</span>(宿主)/ <span class="badge b-closed">已闭合</span>(C 侧限制已登记) · 证据:conf_closures</div>
-</div>
-<h3>7.4 捕获语义裁决 <span class="badge b-proposal">定稿提案</span></h3>
-<p>元规则 M-4 首例:闭包捕获语义以 <b>D14 捕获即快照</b>为准;V5.8 §25 的"Borrow 优先推导"段落废止。`move name` 在快照语义下为显式快照触发标注(与 SD-6 同批定稿)。</p>
-
-<h2 id="errors"><span class="no">8</span>错误处理与资源</h2>
-<h3>8.1 三分法</h3>
+<h3>14.2 Map&lt;K, V&gt;</h3>
 <table>
-<tr><th>通道</th><th>含义</th><th>恢复</th></tr>
-<tr><td><code>Option&lt;T&gt;</code></td><td>有 / 无</td><td>match 或 `?`</td></tr>
-<tr><td><code>Result&lt;T,E&gt;</code></td><td>成功 / 失败(业务失败优先)</td><td>match 或 `?`</td></tr>
-<tr><td>panic</td><td>程序缺陷(词表见 8.4),不可被普通 catch</td><td>无(终止);FFI/平台异常经 try/catch(D9)</td></tr>
+<tr><th>方法</th><th>签名</th><th>语义</th><th>失败</th></tr>
+<tr><td>set</td><td><code>(k: String, v: V)</code></td><td>替换或追加(追加在循环外判定,无重复键)</td><td>—</td></tr>
+<tr><td>get</td><td><code>(k: String) → Option&lt;V&gt;</code></td><td>查值</td><td>—</td></tr>
+<tr><td>contains</td><td><code>(k: String) → bool</code></td><td>键存在</td><td>—</td></tr>
+<tr><td>remove</td><td><code>(k: String)</code></td><td>删除键值</td><td>—</td></tr>
+<tr><td>keys / values</td><td><code>() → Vec&lt;…&gt;</code></td><td>插入序</td><td>—</td></tr>
+<tr><td>len</td><td><code>() → i32</code></td><td>条目数</td><td>—</td></tr>
 </table>
-<h3>8.2 Try 传播</h3>
-<p><code>e?</code> 成功解包,失败向所在函数的返回值传播。交叉通道为类型错误(SD-3)。<code>Task&lt;Result&lt;T,E&gt;&gt;?</code> 的统一 wait→extract→propagate 语义随 Task 实现(§12)。</p>
-<h3>8.3 defer(D13 + SD-2)</h3>
-<div class="rule">
-<div class="rid"><span class="tag">定义</span>D13 · defer 全退出路径</div>
-<h4>defer 在所有退出路径按 LIFO 执行</h4>
-<dl>
-<dt>范围</dt><dd>正常返回、early return、panic 冒泡、`?` 传播、可捕获异常</dd>
-<dt>失败</dt><dd>defer 体内再出错 = <b>abort 语义</b>(立即以该错误终止,剩余 defer 跳过)</dd>
-<dt>不变量</dt><dd>panic 被捕获后,已执行的 defer 不回滚</dd>
-</dl>
-<div class="maturity">成熟度 <span class="badge b-verified">已验证</span>(宿主,df.aine/dfn.aine)/ C 路径语法未实现(W6)</div>
-</div>
-<h3>8.4 panic 构造词表(SD-5,封闭)</h3>
-<p>以下运行时错误为 <b>panic 类</b>,不可被普通 <code>catch</code> 捕获(D9),全部 abort 语义:</p>
-<ol>
-<li>索引/切片越界;2. Map 键不存在;3. <code>assert</code> 失败;4. 运行时类型不匹配;5. 调用栈超限;6. defer 体内出错;7. 整数除零。</li>
-</ol>
-<h3>8.5 try/catch 边界(D9)</h3>
-<p><code>try/catch</code> 仅用于 FFI exception、平台 exception 与 <code>#[catchable]</code> 标注的函数;普通 panic 的 catch 为编译期拒绝;<code>#[catchable]</code> 仅限 unsafe/FFI 边界模块。</p>
-
-<h2 id="containers"><span class="no">9</span>容器与标准方法</h2>
-<h3>9.1 Vec&lt;T&gt;</h3>
+<h3>14.3 String</h3>
 <table>
-<tr><th>方法</th><th>语义</th><th>接收者写回</th></tr>
-<tr><td><code>push(x)</code></td><td>追加元素,产生新版本(旧持有者观察不变)</td><td>✓ 写回(EIdent / 字段访问基座)</td></tr>
-<tr><td><code>insert(i, x)</code></td><td>插入;越界取钳制</td><td>✓ 写回</td></tr>
-<tr><td><code>remove(i)</code></td><td>删除;越界为 panic</td><td>✓ 写回</td></tr>
-<tr><td><code>set(i, x)</code></td><td>替换;i 越界为 panic</td><td>✓(原地;单持有者观察等效)</td></tr>
-<tr><td><code>concat(other)</code></td><td>拼接为<b>新</b> Vec,不改接收者</td><td>纯表达式</td></tr>
-<tr><td><code>pop / clear / sort / len / get / contains</code></td><td>与解释器方法表一致</td><td>按语义</td></tr>
+<tr><th>方法/操作</th><th>语义</th></tr>
+<tr><td><code>len()</code> / <code>s[i]</code> / <code>s[a..b]</code></td><td>字符数 / 第 i 字符(char)/ 字符切片</td></tr>
+<tr><td><code>trim()</code></td><td>去 Unicode 空白(含全角空格)</td></tr>
+<tr><td><code>split(sep)</code> / <code>replace(a,b)</code></td><td>切分 / 替换</td></tr>
+<tr><td><code>contains / starts_with / ends_with</code></td><td>包含判断</td></tr>
+<tr><td><code>to_i32() / to_f64()</code></td><td>显式数值转换</td></tr>
+<tr><td><code>codepoint_at(i)</code></td><td>第 i 个字符的码点(越界 -1)</td></tr>
+<tr><td><code>+ 拼接</code> / f-string</td><td>连接;插值自动格式化</td></tr>
 </table>
-<h3>9.2 Map&lt;K,V&gt;(K 恒为 String,有序)</h3>
+
+<h2 id="r5"><span class="part">第二部分 · 语言参考</span>15 打印格式</h2>
 <table>
-<tr><th>方法</th><th>语义</th></tr>
-<tr><td><code>set(k, v)</code></td><td>键存在则替换,否则追加;**追加在循环外判定**(不产生重复键)</td></tr>
-<tr><td><code>get(k)</code></td><td>Option&lt;V&gt;;V 不存在 → None</td></tr>
-<tr><td><code>contains / remove / keys / values / len</code></td><td>与解释器方法表一致</td></tr>
-</table>
-<h3>9.3 打印语义</h3>
-<table>
-<tr><th>值</th><th>打印形态</th></tr>
-<tr><td>bool</td><td><code>true</code> / <code>false</code>(al_bool)</td></tr>
-<tr><td>整数(任意声明宽度)</td><td>十进制 64 位域值(al_num)</td></tr>
-<tr><td>浮点</td><td>al_fnum(整值带 .0 尾)</td></tr>
-<tr><td>Option / Result</td><td><code>Some(内部值)</code> / <code>None</code>(al_opt_str_i)</td></tr>
-<tr><td>String / char</td><td>字符内容本身</td></tr>
+<tr><th>值</th><th>打印</th></tr>
+<tr><td>bool</td><td><code>true</code> / <code>false</code></td></tr>
+<tr><td>整数(任意宽度)</td><td>十进制(64 位域值)</td></tr>
+<tr><td>浮点</td><td>整数尾带 .0;否则最短表示</td></tr>
+<tr><td>Option / Result</td><td><code>Some(内部)</code> / <code>None</code> / <code>Ok(v)</code> / <code>Err(e)</code></td></tr>
+<tr><td>String / char</td><td>内容本身(无引号)</td></tr>
+<tr><td>Vec / Map / struct</td><td>各元素按同规则递归</td></tr>
 </table>
 
-<h2 id="strings"><span class="no">10</span>字符串与字符(D15)</h2>
-<div class="rule">
-<div class="rid"><span class="tag gov">管辖</span>D15 · 字符索引模型</div>
-<h4>字符串计量单位唯一:Unicode 码点</h4>
-<dl>
-<dt>行为</dt><dd><code>len()</code> 为字符数;<code>s[i]</code> 为第 i 个字符(产单字符 String,SD-4);切片 <code>s[a..b]</code> 按字符位;for-in 逐字符产出单字符 String</dd>
-<dt>成本</dt><dd>索引为 O(i)——确定性成本,写入文档</dd>
-<dt>不变量</dt><dd>UTF-8 仅为内部表示,不进用户心智;ASCII 存量代码零破坏</dd>
-</dl>
-<div class="maturity">成熟度 <span class="badge b-verified">已验证</span> · 双路字节一致(66c1ef4 起;D15"已知分歧"条款就此关闭)</div>
-</div>
-<p>转义:<code>\n \t \r \0 \\ \" \' \xHH</code>。f-string 插值 <code>{expr}</code>:数值自动格式化,bool 经 al_bool,容器/结构体经各自显示规则。</p>
-
-<h2 id="modules"><span class="no">11</span>模块与标准库</h2>
-<p><code>module</code> 声明 + 搜索路径解析;<code>import</code>/<code>export</code> 控制面。双实现 flatten 展开(自举编译器自身由九模块组成,为最强用例)。循环引用与可见性细则待闭合(G 域登记)。</p>
-<p>标准库分简单 API 与高级 API(§62-63);stdlib 行为基准以宿主方法表为准,差分覆盖系统化进行中(阶段六)。</p>
-
-<h2 id="conc"><span class="no">12</span>并发 <span class="badge b-intent">设计冻结·实现占位</span></h2>
-<h3>12.1 三形态(§28-30)</h3>
-<table>
-<tr><th>形态</th><th>设计语义</th><th>现状</th></tr>
-<tr><td><code>let task = go { … }</code></td><td>创建并提交结构化 Task;父作用域必须等待/取消/处理</td><td rowspan="3">语法占位:双实现均为<b>同步块</b>;Task/Future 值不存在;<code>task?</code> 不可达</td></tr>
-<tr><td><code>go! { … }</code></td><td>detached 后台任务;独立处理错误;不持普通借用;不假设完成</td></tr>
-<tr><td><code>Future&lt;T&gt;</code></td><td>异步计算抽象</td></tr>
-</table>
-<h3>12.2 Task 边界与 Send/Sync(§31 + D4)</h3>
-<p>借用不得跨 Task 边界;传输数据必须 Owned / 安全 Copy / 满足 Send。Send/Sync 字段级自动推断,<code>#[not_send]</code> 逃生舱,FFI 类型统一 not_send,无 unsafe impl。</p>
-<h3>12.3 取消(§32)</h3>
-<p>标准异步 API 必须明确 cancellation、cancellation points、side effects、rollback;取消不自动撤销外部副作用。</p>
-<div class="callout warn"><b>实现前置链(审计裁定)</b>:Task 落地前必须先实现 D8 的 @global 写入规则(否则 @global 直接赋值的现状在并发下成为数据竞争入口);并发进入"已验证"档前必须先建<b>确定性交错模拟器</b>(单线程协作调度),否则占位实现与真实现之间不存在差分基准。</div>
-
-<h2 id="ui"><span class="no">13</span>UI 与状态 <span class="badge b-intent">设计冻结·实现占位</span></h2>
-<h3>13.1 @state(§33)</h3>
-<p><code>@state let mut user: User</code> 是 Runtime-managed State Storage:含 Component ID、State Slot、生命周期、观察关系、热重载信息。<b>不是普通变量</b>。</p>
-<h3>13.2 ui{} = UI Domain Operation(D3)</h3>
+<h2 id="s1"><span class="part">第三部分 · 语义规范</span>16 值语义与内存模型</h2>
+<h3>16.1 三层模型(冻结)</h3>
+<blockquote>语义拥有优先,编译器借用优化,显式借用高级化。</blockquote>
+<p>用户层只面对拥有值;编译器内部(View/Owned/Materialized)自由选择且不可观察;高级层(&amp;/move/unsafe)显式才存在。<b>例外入口仅三处</b>:move(文档性标注)、@global(并发可达)、extern 边界。</p>
+<h3>16.2 变更语义</h3>
 <ul>
-<li>ui{} 内对 @state 直读 State Storage(同域同步,无消息开销);</li>
-<li>允许:读取 Owned/Send payload、只读操作;禁止:嵌套 go{}、捕获普通外部借用、读取已 move 变量;</li>
-<li>事件回调 <code>(Event) -&gt; ()</code> 或 <code>-&gt; Result&lt;(), UiError&gt;</code>;`?` 传播到回调返回值,由 UI runtime 显示(不崩溃)。</li>
+<li>一切赋值与传参 = 独立副本;</li>
+<li>容器变更方法产生新版本(旧持有者观察不变),C 实现为 clone-then-mutate;</li>
+<li>push/insert/remove 写回接收者变量(与解释器一致);</li>
+<li>自引用初始化 <code>var x = x + 1</code> 读外层 x(C 侧经临时捕获保证)。</li>
 </ul>
-<h3>13.3 State 写入 = Consume / Store(§39)</h3>
-<p>State 写入不是赋值,是运行时两步操作。后台任务禁止直接借用 @state(§34 硬规则);跨域传输走 snapshot(§35)。</p>
-<h3>13.4 @global(§44 + D8)</h3>
-<p>全局 State Slot:仅存 Send 数据;生命周期 = 进程;热重载按类型保留。<b>写入只能经 UI Domain Operation 或受控消息</b>;后台任务不得直接写/借用。</p>
-<div class="callout warn"><b>实现现状(审计 P1-1,需定稿)</b>:当前双实现均为"模块顶层全局变量 + 任意函数直接赋值"(赋值与方法写回已修复生效)——这正是 D8 立法要堵的漏洞形态。Task 落地前必须实现 D8 写入规则,或显式修订 D8;禁止维持现状。</div>
+<h3>16.3 整数算术域(SD-1)</h3>
+<p>+ - * / % 在 64 位有符号域执行;声明宽度在显式窄化(to_i32 等/FFI)时按二补数环绕生效;extern 签名保持 C ABI。不变量:宿主与 C 后端整数结果逐位一致。</p>
+<h3>16.4 Materialization 与优化 <span class="badge b-intent">只有意图</span></h3>
+<p>视图化(D1 四条件)/物化三档诊断(64KB/1MB)/禁隐式大型 Clone(§10 禁"静默"复制)——实现未启动;"零额外分配"是优化目标,不是语言保证(M-6)。</p>
 
-<h2 id="ffi"><span class="no">14</span>FFI(§48-49)</h2>
-<pre><code>extern "C" {
-    fn strlen(s: CStr) -> usize
-}</code></pre>
-<p>安全 FFI 优先 CStr/CString/CArray/ABI-safe struct;裸指针 <code>*const T</code> / <code>*mut T</code> 只进入 unsafe 块。extern 函数签名保持 C ABI(整数参数按 C <code>int</code>/<code>long long</code> 精确宽度,SD-1 例外条款);FFI 类型统一按 not_send 参与并发检查(D4)。Python FFI(§49)与移动端(D11,1.1)随平台阶段启动。</p>
+<h2 id="s2"><span class="part">第三部分 · 语义规范</span>17 错误语义与 panic 词表</h2>
+<h3>17.1 panic 构造词表(封闭)</h3>
+<p>以下产生 panic(终止程序,消息含函数栈),不可被普通 catch(D9):</p>
+<ol>
+<li>索引/切片越界;2. Map 键不存在;3. assert 失败;4. 运行时类型不匹配;5. 调用栈超限(500);6. defer 体内出错(abort);7. 整数除零。</li>
+</ol>
+<h3>17.2 defer 全退出路径(D13/SD-2)</h3>
+<p>正常返回、early return、panic 冒泡、`?` 传播、可捕获异常——全部 LIFO 执行;defer 体内再出错 = abort(立即以该错误终止)。</p>
+<h3>17.3 try/catch 边界(D9)</h3>
+<p>仅 FFI exception、平台 exception、<code>#[catchable]</code> 函数可捕获;普通 panic 的 catch 为编译期拒绝;`#[catchable]` 仅限 unsafe/FFI 模块。<span class="badge b-defined">已定义</span>(宿主 TryCatch 实现;C 路径 AST 缺失,登记 W6)</p>
 
-<h2 id="impl"><span class="no">15</span>实现与验证</h2>
-<h3>15.1 双实现</h3>
+<h2 id="s3"><span class="part">第三部分 · 语义规范</span>18 元规则</h2>
+<table>
+<tr><th>#</th><th>元规则</th></tr>
+<tr><td>M-1</td><td>具体规则优先于一般规则(环境真包含判据,Elsewhere Condition)</td></tr>
+<tr><td>M-2</td><td>显式优先于隐式</td></tr>
+<tr><td>M-3</td><td>安全默认优先于便利</td></tr>
+<tr><td>M-4</td><td>后定稿优先于先定稿(首例判例:§25 捕获推导 × D14 快照,D14 胜)</td></tr>
+<tr><td>M-5</td><td>双实现分歧时,宿主解释器为参考实现</td></tr>
+<tr><td>M-6</td><td>优化失败不是语义错误:任何精度/优化/缓存组合下行为一致</td></tr>
+</table>
+<p>规则按职能五分类:<b>定义</b>(saṃjñā)/<b>操作</b>(vṛtti)/<b>例外</b>(niyama)/<b>管辖</b>(adhikāra)/<b>元规则</b>(paribhāṣā)。每条规则的含义来自它与体系中其他规则的关系——因此本规范每条规则都标注编号与管辖域。</p>
+
+<h2 id="s4"><span class="part">第三部分 · 语义规范</span>19 设计冻结·实现占位</h2>
+<p>以下域的<b>设计已冻结</b>(V5.8 + 登记簿),但<b>实现未覆盖</b>——语法可以写出,语义在两条实现路径上都不可用。这是 Lojban 式的诚实:句法合法 ≠ 语义可用。</p>
+<table>
+<tr><th>域</th><th>设计内容</th><th>实现现状</th></tr>
+<tr><td>并发 §28-32 + D4</td><td>Task/Future 结构化并发、Task 边界、Send/Sync 字段级推断、#[not_send]、取消语义</td><td>go{}/go!{} 为同步块占位;无 Task 值;无 Send 检查。前置链:D8 实现先于 Task;E 域验证先建确定性交错模拟器</td></tr>
+<tr><td>视图化/物化 §7-10 + D1/D2</td><td>Compiler View 零拷贝;Materialization 三档诊断;禁隐式大 Clone</td><td>未实现;当前零分配优化不可用</td></tr>
+<tr><td>VIR/Summary §12-21</td><td>跨函数/跨模块语义摘要、精度五级、缓存与失效、预算、Optimization Explain</td><td>未实现(约 800 行设计;D6 验收待差分基建)</td></tr>
+<tr><td>UI 运行时 §33-43 + D3</td><td>State Storage(五要素)、Consume/Store 写入、组件身份、热重载</td><td>ui{} 为过程式渲染占位;@state 退化为普通变量</td></tr>
+<tr><td>try/catch + defer 的 C 路径</td><td>D9/D13 已冻结</td><td>自举 AST 缺 SDefer/STryCatch 节点(19 变体外补)</td></tr>
+<tr><td>用户泛型 / trait 约束</td><td>Phase 2(T1.0 §7)</td><td>显式不支持(有意识决定);内建 Vec/Map 泛型容器支持</td></tr>
+</table>
+
+<h2 id="s5"><span class="part">第三部分 · 语义规范</span>20 实现与差分验证</h2>
+<h3>20.1 双实现</h3>
 <table>
 <tr><th>实现</th><th>角色</th><th>覆盖</th></tr>
-<tr><td>Rust 宿主解释器(参考实现)</td><td>语义基准;IDE/LSP/审计差分的其中一端</td><td>全语言(并发占位)</td></tr>
-<tr><td>自举 C 后端(第二实现)</td><td>Aine → C → zig cc → 原生 exe;生产交付路径</td><td>核心语义(缺 defer/catch 语法,W6)</td></tr>
+<tr><td>Rust 宿主解释器(参考实现,M-5)</td><td>语义基准;IDE/LSP;差分一端</td><td>全语言(并发/UI 占位)</td></tr>
+<tr><td>自举 C 后端(交付路径)</td><td>Aine → C → zig cc → 原生;差分另一端</td><td>核心语义(缺 defer/catch 语法节点)</td></tr>
 </table>
-<h3>15.2 差分验证(元规则 M-5 的执行机器)</h3>
-<p>同一语料喂宿主与 C 后端,stdout/退出码字节级 diff(诊断文案排除);分歧 = 审计发现。常驻语料:cons.aine(跨面 13 行)、mapt.aine(Map 语义)、kar/ovf/df(审计钉子)、conformance 七文件。C 输出按 CRLF 归一后比对。</p>
-<h3>15.3 架构不变量(M-6)</h3>
-<p>任何分析精度、优化成败、缓存状态组合下,同一源码产生行为一致的合法程序——差异仅允许在分配数/复制次数/代码大小。当前实现平凡满足;VIR/Summary(§12-21,约 800 行设计)落地时由差分全量背书。</p>
-
-<h2 id="evolution"><span class="no">16</span>语言演进</h2>
-<h3>16.1 语法演进(G2.0 决议)</h3>
-<table>
-<tr><th>#</th><th>变更</th><th>状态</th></tr>
-<tr><td>1</td><td>可变绑定 <code>let mut x</code> → <code>var x</code>(let = 不可变)</td><td>已实施 ✓</td></tr>
-<tr><td>2</td><td>属性统一 @ 形态</td><td>已实施 ✓</td></tr>
-<tr><td>3</td><td>模块三元组 export/import/module</td><td>已实施 ✓</td></tr>
-<tr><td>4</td><td>闭包 <code>x =&gt; x * 2</code>(与 match 臂联动)</td><td>迁移中</td></tr>
-<tr><td>5</td><td>match 臂块式 <code>Pat { body }</code></td><td>迁移中</td></tr>
-</table>
-<p>保留清单(明确不改):`?`、&T/&mut T、fn/struct/enum、变体无 case 前缀、Pratt 优先级 + 软换行。视觉身份证:go/go!/ui/render/@state/@global/import/export/var/块式 match/尾部块。</p>
-<h3>16.2 语义定稿补遗(S1.0 相对 V5.8 的语义增量)</h3>
+<h3>20.2 差分方法</h3>
+<p>同一语料双路运行,stdout/退出码字节级 diff(诊断文案排除;CRLF 归一)。常驻语料:cons.aine(13 行跨面)/ mapt.aine(Map)/ kar·ovf·df(审计钉子)/ conformance 七文件 / 自测 31 用例。</p>
+<h3>20.3 语义定稿记录(SD 系列)</h3>
 <table>
 <tr><th>#</th><th>定稿</th><th>状态</th></tr>
-<tr><td>SD-1</td><td>整数算术 64 位域;窄化显式环绕;extern 保持 C int ABI</td><td>已实现,双路验证</td></tr>
-<tr><td>SD-2</td><td>defer 全退出路径 LIFO;defer 内错 = abort</td><td>已实现(宿主)</td></tr>
-<tr><td>SD-3</td><td>Try 交叉通道 = 类型错误</td><td>定稿;typeck 待实现</td></tr>
-<tr><td>SD-4</td><td>char ≡ 单字符 String</td><td>已实现,双路一致</td></tr>
-<tr><td>SD-5</td><td>panic 构造词表(封闭七类)</td><td>定稿</td></tr>
-<tr><td>SD-6</td><td>move = 文档性标注(值语义下可观察等效)</td><td>定稿(有意识决定)</td></tr>
-<tr><td>SD-7</td><td>捕获 = 快照;§25 Borrow 优先级废止(M-4 首例裁决)</td><td>定稿;§25 修订待评审</td></tr>
+<tr><td>SD-1</td><td>整数算术 64 位域;窄化显式环绕;extern 保持 C int ABI</td><td><span class="badge b-verified">已验证</span></td></tr>
+<tr><td>SD-2</td><td>defer 全退出路径;defer 内错 = abort</td><td><span class="badge b-verified">已验证</span></td></tr>
+<tr><td>SD-3</td><td>Try 交叉通道 = 类型错误</td><td><span class="badge b-proposal">定稿提案</span>(typeck 待实现)</td></tr>
+<tr><td>SD-4</td><td>char ≡ 单字符 String</td><td><span class="badge b-verified">已验证</span></td></tr>
+<tr><td>SD-5</td><td>panic 词表封闭七类</td><td><span class="badge b-defined">已定义</span></td></tr>
+<tr><td>SD-6</td><td>move = 文档性标注(值语义下可观察等效)</td><td><span class="badge b-proposal">定稿提案</span></td></tr>
+<tr><td>SD-7</td><td>捕获 = 快照(§25 废止,M-4 裁决)</td><td><span class="badge b-proposal">定稿提案</span></td></tr>
 </table>
-<h3>16.3 需设计评审的遗留项(02 清单摘要)</h3>
-<ul>
-<li>P1-1 @global:D8 写入规则实现或修订(Task 前置);</li>
-<li>P1-3 defer/catch 的自举 AST 节点(19 变体外补 SDefer/STryCatch);</li>
-<li>P3-7 §25 修订落地;P3-1 Try 交叉 typeck 检查;P3-6 函数签名宽松匹配精确定义;</li>
-<li>D10.5 过渡决策(C/zig cc = 1.0 交付路线,LLVM 远期)。</li>
-</ul>
 
-<h2 id="app-a"><span class="no">附录 A</span>语义规则成熟度总表(压缩视图)</h2>
-<p>完整九字段卡片见 <code>docs/audit/01-语义规则总表.md</code>。本表按域汇总规则数与成熟度分布:</p>
+<h2 id="a1"><span class="part">附录</span>A 关键字表</h2>
+<p><code>fn let var const if else for in while return break continue match struct enum trait impl where export module import move unsafe extern try catch ui render go defer true false</code></p>
+
+<h2 id="a2"><span class="part">附录</span>B 内建函数表</h2>
+<table>
+<tr><th>名称</th><th>签名</th><th>说明</th></tr>
+<tr><td>print</td><td><code>(…值…)</code></td><td>打印(空格分隔,换行)</td></tr>
+<tr><td>read_file / write_file / append_file</td><td><code>(path[, content])</code></td><td>文件读写(失败含 [read_file error 前缀])</td></tr>
+<tr><td>file_exists</td><td><code>(path) → bool</code></td><td>存在性</td></tr>
+<tr><td>now</td><td><code>() → i64</code></td><td>Unix 时间戳(毫秒)</td></tr>
+<tr><td>assert</td><td><code>(cond[, msg])</code></td><td>断言,失败 = 确定性 panic(词表)</td></tr>
+<tr><td>cli_args</td><td><code>Vec&lt;String&gt;</code></td><td>命令行实参</td></tr>
+</table>
+
+<h2 id="a3"><span class="part">附录</span>C 诊断错误码</h2>
+<table>
+<tr><th>码</th><th>级别</th><th>含义</th></tr>
+<tr><td>F1001-F1004</td><td>错误</td><td>未闭合字符串/块注释、非法字符、数字溢出</td></tr>
+<tr><td>T3001-T3010</td><td>错误</td><td>let/数值/条件/mut/字段/签名/return 类型问题</td></tr>
+<tr><td>N3001</td><td>错误</td><td>未定义名称</td></tr>
+<tr><td>N3003</td><td>警告</td><td>未定义类型名(stdlib 类型表补全后转错误)</td></tr>
+</table>
+
+<h2 id="a4"><span class="part">附录</span>D 语义规则成熟度总表(压缩)</h2>
 <table>
 <tr><th>域</th><th>规则数</th><th>已验证</th><th>已闭合</th><th>已定义</th><th>只有意图</th></tr>
-<tr><td>A 值语义与内存</td><td>12</td><td>3</td><td>4</td><td>3</td><td>2(View/物化/来源分析)</td></tr>
-<tr><td>B 类型系统</td><td>12</td><td>2</td><td>4</td><td>5</td><td>1(溢出已随 SD-1 关闭)</td></tr>
+<tr><td>A 值语义与内存</td><td>12</td><td>3</td><td>4</td><td>3</td><td>2</td></tr>
+<tr><td>B 类型系统</td><td>12</td><td>2</td><td>4</td><td>5</td><td>1(已随 SD-1 关闭)</td></tr>
 <tr><td>C 函数与闭包</td><td>10</td><td>2</td><td>4</td><td>4</td><td>—</td></tr>
-<tr><td>D 错误与资源</td><td>9</td><td>1</td><td>3</td><td>3</td><td>2(Task?)</td></tr>
+<tr><td>D 错误与资源</td><td>9</td><td>1</td><td>3</td><td>3</td><td>2</td></tr>
 <tr><td>E 并发</td><td>5</td><td>—</td><td>—</td><td>1</td><td>4</td></tr>
 <tr><td>F UI 与状态</td><td>5</td><td>—</td><td>—</td><td>2</td><td>3</td></tr>
 <tr><td>G 模块与 stdlib</td><td>3</td><td>1</td><td>1</td><td>1</td><td>—</td></tr>
@@ -518,44 +643,22 @@ PostfixExpr ::= Primary { '(' Args ')' | '.' Ident | '[' Expr ']' | '?' }</code>
 <tr><td>I 平台工具链</td><td>3</td><td>—</td><td>2</td><td>1</td><td>—</td></tr>
 <tr><td>元规则</td><td>6</td><td>—</td><td>—</td><td>6</td><td>—</td></tr>
 </table>
-<p>发现账本:W1–W22;P0 实证 3 项已全部关闭(W12 溢出→SD-1;W22 defer→P0-2;双解析器分歧→文法资产待建);正向确认(有意识的正确决定)6 项。</p>
+<p>完整九字段卡片:docs/audit/01-语义规则总表.md。发现账本 W1–W22(审计关闭记录)、正面确认(有意识决定)6 项。</p>
 
-<h2 id="app-b"><span class="no">附录 B</span>设计决策登记摘要(D1-D15)</h2>
-<table>
-<tr><th>#</th><th>决策</th><th>要点</th></tr>
-<tr><td>D1</td><td>视图参数机制</td><td>按值参数满足四条件时编译器自动视图化;无新类型;非泛型第一版</td></tr>
-<tr><td>D2</td><td>View-eligible 返回</td><td>"零额外分配是目标不是保证";物化三档阈值 64KB/1MB</td></tr>
-<tr><td>D3</td><td>ui{} 规则集</td><td>直读 State;只读操作;禁嵌套 go;回调错误由 runtime 显示</td></tr>
-<tr><td>D4</td><td>Send/Sync 推断</td><td>字段级自动;#[not_send] 逃生舱;FFI 类型统一 not_send</td></tr>
-<tr><td>D5</td><td>&T 互操作</td><td>按值→&T 隐式允许;禁返回 &T;禁存储;1.0 不开放例外</td></tr>
-<tr><td>D6</td><td>精度降级不变量</td><td>精度只影响质量,绝不改变语义(= 元规则 M-6)</td></tr>
-<tr><td>D7</td><td>str_view 隐藏</td><td>用户源码/文档/诊断一律不得出现</td></tr>
-<tr><td>D8</td><td>@global 机制</td><td>全局 State Slot;写入经 UI Domain Operation(实现现状见 §13.4)</td></tr>
-<tr><td>D9</td><td>可捕获 panic</td><td>默认不可捕获;#[catchable] 仅限 unsafe/FFI 模块</td></tr>
-<tr><td>D10</td><td>Codegen 后端</td><td>承诺 LLVM;现状 C/zig cc(D10.5 过渡决策待记)</td></tr>
-<tr><td>D11</td><td>移动端 UI</td><td>1.0 桌面优先;移动 1.1 纯逻辑+最小桥</td></tr>
-<tr><td>D13</td><td>defer × panic</td><td>全路径 LIFO;defer 内错 = abort(SD-2 实现)</td></tr>
-<tr><td>D14</td><td>统一函数类型</td><td>fn(A,B)->R 同型;捕获即快照;无 trait 三分法</td></tr>
-<tr><td>D15</td><td>字符索引模型</td><td>按码点;O(i) 确定性成本;C 侧已统一(66c1ef4)</td></tr>
-</table>
-
-<h2 id="app-c"><span class="no">附录 C</span>诊断错误码</h2>
-<table>
-<tr><th>码</th><th>级别</th><th>含义</th></tr>
-<tr><td>F1001-F1004</td><td>错误</td><td>词法:未闭合字符串/块注释、非法字符、数字溢出</td></tr>
-<tr><td>T3001-T3010</td><td>错误</td><td>类型:let 不匹配/数值/条件/mut/字段/签名/return</td></tr>
-<tr><td>N3001</td><td>错误</td><td>未定义名称</td></tr>
-<tr><td>N3003</td><td>警告</td><td>未定义类型名(stdlib 类型表补全后强化为错误)</td></tr>
-</table>
-
-<h2 id="app-d"><span class="no">附录 D</span>保留关键字与内建全局</h2>
-<p>关键字:<code>fn let var const if else for in while return break continue match struct enum trait impl where export module import move unsafe extern try catch ui render go defer true false</code></p>
-<p>内建全局:<code>print</code> <code>read_file</code> <code>write_file</code> <code>append_file</code> <code>file_exists</code> <code>now</code> <code>assert(cond[, msg])</code>(失败 = 确定性 panic,消息含函数栈)<code>cli_args</code>。</p>
+<h2 id="a5"><span class="part">附录</span>E 运行指南</h2>
+<pre class="run"><code>aine run hello.aine [参数…]      <span class="c"># 解释执行(参数注入 cli_args)</span>
+aine build hello.aine            <span class="c"># 编译为原生 exe(Aine→C→zig cc)</span>
+aine check hello.aine            <span class="c"># 完整检查(词法+语法+名称解析)</span>
+aine lsp                         <span class="c"># 语言服务器(IDE 用)</span>
+aine fmt hello.aine              <span class="c"># 格式化</span>
+aine profile hello.aine          <span class="c"># 性能分析</span>
+aine debug hello.aine 行号…      <span class="c"># 断点执行</span></code></pre>
+<p>双实现说明:<code>aine run</code> 走宿主解释器(参考实现);<code>aine build</code> 走自举 C 后端。核心语义双路一致(cons.aine 语料背书);并发/UI 运行时两侧均为占位。</p>
 
 <footer>
-Aine 语言规范 S1.0 · 审计版 · 由语言设计审计(2026-11)产出<br>
-证据链:docs/audit/00-全景图 · 01-语义规则总表 · 02-问题与风险清单 · 03-验证基准 · 05-语义定稿补遗 · docs/research/自然语言结构比较研究<br>
-本规范的每一次修订须经《设计决策登记簿》的变更评审流程;行为声明以双实现差分验证为准。
+Aine 语言规范 S1.1 · 审计版 · 2026-11-06<br>
+语义依据:docs/audit/01-语义规则总表(九域 70 条)· docs/audit/05-语义定稿补遗(SD-1~SD-7)· 设计决策登记簿(D1-D15)· 差分语料 examples/cons.aine·mapt.aine<br>
+修订须经设计变更评审;行为声明以双实现差分验证为准(元规则 M-5/M-6)。
 </footer>
 </main>
 </div>
