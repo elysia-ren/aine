@@ -663,6 +663,9 @@ fn c_type(ty: Option<String>, user_types: Vec<String>) -> String {
         Some(t) {
             if t == "i32" { return "long long" }
             if t == "i64" { return "long long" }
+            // SD-1 64 位域: 无符号/usize 统一有符号 64 位算术; f32 别名双精度
+            if t == "u8" || t == "u16" || t == "u32" || t == "u64" || t == "usize" { return "long long" }
+            if t == "f32" { return "double" }
             if t == "f64" { return "double" }
             if t == "bool" { return "int" }
             if t == "char" { return "char" }
@@ -979,9 +982,14 @@ fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Ve
                                         None {
                                             // 裸变体标识符(如 let k = MkText)→ 所属枚举类型
                                             // (此前推 infer → Some(k) 退 Option<infer> → == 分派丢 al_eq)
-                                            match variant_owner(n2, evnames, eowners) {
-                                                Some(o2) { types.push(o2) }
-                                                None { types.push("infer") }
+                                            if n2 == "true" || n2 == "false" {
+                                                // bool 字面量在 AST 中为 EIdent — 先于裸变体兜底
+                                                types.push("bool")
+                                            } else {
+                                                match variant_owner(n2, evnames, eowners) {
+                                                    Some(o2) { types.push(o2) }
+                                                    None { types.push("infer") }
+                                                }
                                             }
                                         }
                                     }

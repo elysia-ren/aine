@@ -1,0 +1,31 @@
+fn main() {
+    let t = true
+    let f = false
+    print(t)
+    print(f)
+    let b: u8 = 7
+    print(b)
+    let n: usize = 9
+    print(n)
+    let g: f32 = 1.5
+    print(g)
+    let d: f64 = 2.5
+    print(d)
+    let i: i64 = 123456789012
+    print(i)
+    let c = "x"
+    print(c)
+    var v: Vec<i32> = [1, 2, 3]
+    v.set(0, 10)
+    print(v.get(0))
+    v.insert(1, 5)
+    print(v.len())
+    v.remove(0)
+    print(v.len())
+    let m: Map<String, i32> = Map.new()
+    m.set("k", 3)
+    print(m.get("k"))
+    let w = [1, 2]
+    let w2 = w.concat([3])
+    print(w2.len())
+}

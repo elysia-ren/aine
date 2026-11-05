@@ -689,17 +689,22 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
                             f1 = "%s"
                             part = "al_fnum(" + pc + ")"
                         }
-                        else if mr == "bool" { f1 = "%d" }
+                        else if mr == "bool" { f1 = "%s"
+                        part = "al_bool(" + pc + ")" }
                         else if mr == "Option" {
                             // Option 打印: Some(载荷)/None — 载荷槽按 map 值类型
                             var mem = "i"
+                            var is_map_get = false
                             if a2.len() == 1 {
                                 match c2 {
                                     EField(ib, _) {
                                         let mbt = base_type(ib, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
                                         match mbt {
                                             Some(mt) {
-                                                if mt.starts_with("Map<") { mem = payload_member(Some(second_type_arg(mt)), user_types) }
+                                                if mt.starts_with("Map<") {
+                                                    mem = payload_member(Some(second_type_arg(mt)), user_types)
+                                                    is_map_get = true
+                                                }
                                             }
                                             None {}
                                         }
@@ -707,9 +712,12 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
                                     _ {}
                                 }
                             }
-                            if mem == "i" {
+                            if mem == "i" && is_map_get {
                                 f1 = "%s"
                                 part = "al_opt_str_i(" + pc + ")"
+                            } else if mem == "i" {
+                                f1 = "%s"
+                                part = "al_num(" + pc + ")"
                             }
                         }
                     }
@@ -797,8 +805,12 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
                 f1 = "%s"
                 part = "al_num(" + pc + ")"
             }
-            if hint == "char" || hint == "bool" {
+            if hint == "char" {
                 f1 = "%d"
+            }
+            if hint == "bool" {
+                f1 = "%s"
+                part = "al_bool(" + pc + ")"
             }
             if hint == "f64" {
                 f1 = "%s"
@@ -856,6 +868,14 @@ fn evec_c(items: Vec<Expr>, heap: bool, user_types: Vec<String>, vnames: Vec<Str
         None {}
     }
     match items[0] {
+        EInt(_) {
+            etag = "(long long[])"
+            esz = "long long"
+        }
+        EFloat(_) {
+            etag = "(double[])"
+            esz = "double"
+        }
         EStr(_) {
             // 字符串字面量元素 → char*（字面量静态存储）
             etag = "(char*[])"
@@ -1407,7 +1427,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                                     known_vec = true
                                     let et = first_type_arg(t)
                                     if et == "String" { es = "sizeof(char*)" }
-                                    else if et == "i32" { es = "sizeof(int)" }
+                                    else if et == "i32" { es = "sizeof(long long)" }
                                     else if et == "f64" { es = "sizeof(double)" }
                                     else if et.starts_with("Vec<") { es = "sizeof(al_vec)" }
                                     else if contains_str(user_types, et) { es = "sizeof(struct " + et + ")" }
@@ -1523,6 +1543,55 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                             return "({ " + write_back + " = ({ " + core + " }); " + write_back + "; })"
                         }
                         return "({ " + core + " })"
+                    }
+                    // insert(idx, x) / remove(idx): 原地变更 + 接收者写回(与 push 同族)
+                    if mname == "insert" && args.len() == 2 {
+                        let base_c = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        let ic = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        let ac = c_expr(args[1], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        var es2 = "long long"
+                        let bt2 = base_type(base, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                        match bt2 {
+                            Some(t2) {
+                                if t2.starts_with("Vec<") {
+                                    let et2 = first_type_arg(t2)
+                                    if et2 == "String" { es2 = "char*" }
+                                    else if et2 == "f64" { es2 = "double" }
+                                    else if contains_str(user_types, et2) { es2 = "struct " + et2 }
+                                }
+                            }
+                            None {}
+                        }
+                        var wb2 = ""
+                        match base {
+                            EIdent(vb) { wb2 = base_c }
+                            EField(EIdent(fb), ff) { wb2 = base_c }
+                            _ {}
+                        }
+                        if wb2 != "" {
+                            return "({ " + wb2 + " = ({ al_vec _b = al_vec_clone(" + base_c + "); al_vec_insert(&_b, " + ic + ", &(" + es2 + "){ " + ac + " }); _b; }); " + wb2 + "; })"
+                        }
+                        return "({ al_vec _b = al_vec_clone(" + base_c + "); al_vec_insert(&_b, " + ic + ", &(" + es2 + "){ " + ac + " }); _b; })"
+                    }
+                    if mname == "remove" && args.len() == 1 {
+                        let base_c = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        let ic = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        var wb3 = ""
+                        match base {
+                            EIdent(vb) { wb3 = base_c }
+                            EField(EIdent(fb), ff) { wb3 = base_c }
+                            _ {}
+                        }
+                        if wb3 != "" {
+                            return "({ " + wb3 + " = ({ al_vec _b = al_vec_clone(" + base_c + "); al_vec_remove(&_b, " + ic + "); _b; }); " + wb3 + "; })"
+                        }
+                        return "({ al_vec _b = al_vec_clone(" + base_c + "); al_vec_remove(&_b, " + ic + "); _b; })"
+                    }
+                    // concat(other): 纯表达式(返回新 Vec, 不改接收者 — 与解释器一致)
+                    if mname == "concat" && args.len() == 1 {
+                        let base_c = c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        let oc = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        return "al_vec_concat(" + base_c + ", " + oc + ")"
                     }
                     if mname == "to_i32" && args.len() == 0 {
                         return "atoi(" + c_expr(base, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
@@ -3721,6 +3790,9 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
     out = out + "}\n"
     out = out + "int al_chars_len(const char* s) { int n = 0; for (; *s; s++) { if ((*s & 0xC0) != 0x80) n++; } return n; }\n"
     out = out + "void* al_vec_get(al_vec* vec, long idx) { if (idx < 0 || (size_t)idx >= vec->len) return NULL; return (void*)((char*)vec->data + idx * vec->elem_size); }\n"
+    out = out + "void al_vec_insert(al_vec* v, long idx, void* elem) { if (idx < 0) idx = 0; if ((size_t)idx > v->len) idx = v->len; if (v->elem_size == 0) return; v->data = realloc(v->data, (v->len + 1) * v->elem_size); if (v->data) { memmove((char*)v->data + (idx + 1) * v->elem_size, (char*)v->data + idx * v->elem_size, (v->len - idx) * v->elem_size); memcpy((char*)v->data + idx * v->elem_size, elem, v->elem_size); v->len++; } }\n"
+    out = out + "void al_vec_remove(al_vec* v, long idx) { if (idx < 0 || (size_t)idx >= v->len || v->elem_size == 0) return; memmove((char*)v->data + idx * v->elem_size, (char*)v->data + (idx + 1) * v->elem_size, (v->len - idx - 1) * v->elem_size); v->len--; }\n"
+    out = out + "al_vec al_vec_concat(al_vec a, al_vec b) { if (a.elem_size != b.elem_size) { return a; } al_vec r = { a.len + b.len, a.elem_size, NULL }; if (r.len > 0) { r.data = malloc(r.len * r.elem_size); if (a.len > 0) memcpy(r.data, a.data, a.len * a.elem_size); if (b.len > 0) memcpy((char*)r.data + a.len * a.elem_size, b.data, b.len * b.elem_size); } return r; }\n"
     out = out + "const char* al_char_off(const char* s, long i) { while (i > 0 && *s) { s++; while ((*s & 0xC0) == 0x80) s++; i--; } return s; }\n"
     out = out + "char* al_char_at(const char* s, long i) { const char* p = al_char_off(s, i); long n = 1; while ((p[n] & 0xC0) == 0x80) n++; char* r = (char*)malloc(n + 1); memcpy(r, p, n); r[n] = 0; return r; }\n"
     out = out + "char* al_substr_ch(const char* s, long a, long b) { if (a < 0) a = 0; const char* p = al_char_off(s, a); const char* q = al_char_off(p, b - a); long n = q - p; char* r = (char*)malloc(n + 1); memcpy(r, p, n); r[n] = 0; return r; }\n"

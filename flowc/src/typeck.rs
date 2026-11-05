@@ -498,7 +498,16 @@ impl<'a> TypeChecker<'a> {
                     self.set_env(*sym, final_ty.clone());
                 }
                 if let (Some(a), i) = (ann, init_ty) {
-                    if !Ty::assignable(&i, &a) {
+                    // SD-1 64 位域: 数值字面量适配数值标注(字面量取标注类型的域)
+                    // (let i: i64 = 123456789012 曾被拒 — 字面量固定 i32 与 64 位域决策冲突)
+                    let lit_adapts = matches!(
+                        ls.init.as_deref(),
+                        Some(crate::ast::Expr::Int(_)) | Some(crate::ast::Expr::Float(_))
+                    ) && matches!(
+                        a,
+                        Ty::I32 | Ty::I64 | Ty::U8 | Ty::U16 | Ty::U32 | Ty::U64 | Ty::Usize | Ty::F32 | Ty::F64
+                    );
+                    if !lit_adapts && !Ty::assignable(&i, &a) {
                         let sug = match (&a, &i) {
                             (Ty::Str, _) => "右侧是字符串。若需要文本请把标注改为 String；若需要数字请检查是否漏了转换".to_string(),
                             (Ty::I32 | Ty::I64, Ty::Str) => "右侧是字符串字面量，不能直接当数字用。若要转换请提供显式的转换方法".to_string(),
