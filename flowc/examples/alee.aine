@@ -930,11 +930,12 @@ fn evec_c(items: Vec<Expr>, heap: bool, user_types: Vec<String>, vnames: Vec<Str
         return "((al_vec){ " + f"{items.len()}" + ", sizeof(" + esz + "), " + etag + "{ " + join(parts, ", ") + " } })"
     }
     // 堆物化: 逐元素落临时再 al_push(realloc 到堆), data 指向堆内存可安全逃逸
-    var st = "({ al_vec __v = { 0, sizeof(" + esz + "), NULL }; "
+    // O(n) 一次分配 + 直接下标存储(此前逐元素 al_push = 每次 realloc, O(n²))
+    var st = "({ al_vec __v = { " + f"{items.len()}" + ", sizeof(" + esz + "), malloc(" + f"{items.len()}" + " * sizeof(" + esz + ")) }; "
     var ei = 0
     for it in items {
         let ec = c_expr(it, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
-        st = st + "{ " + esz + " _e" + f"{ei}" + " = " + ec + "; al_push(&__v, sizeof(_e" + f"{ei}" + "), &_e" + f"{ei}" + "); } "
+        st = st + "{ " + esz + " _e" + f"{ei}" + " = " + ec + "; ((" + esz + "*)__v.data)[" + f"{ei}" + "] = _e" + f"{ei}" + "; } "
         ei += 1
     }
     st = st + "__v; })"

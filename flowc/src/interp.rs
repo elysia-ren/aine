@@ -1608,7 +1608,10 @@ impl Interp {
                     let mutable = is_mutating_method(field)
                         && (matches!(base_val, Value::Vec(_)) || matches!(base_val, Value::Map(_)));
                     if mutable {
-                        env.assign(&name, result.clone());
+                        // @global 兜底: env 未命中且全局含该名 → 写全局槽
+                        if !env.assign(&name, result.clone()) && self.globals.contains_key(&name) {
+                            self.globals.insert(name.clone(), result.clone());
+                        }
                     }
                 }
                 Ok(result)
@@ -2021,8 +2024,13 @@ impl Interp {
     /// 当变量槽是缓冲区的唯一持有者时直接修改（O(1) 摊还），否则返回 None 回退
     /// 深拷贝路径。值语义不变：任何别名绑定都会使 strong_count > 1 而走回退。
     fn try_mutate_in_place(&mut self, env: &mut Env, name: &str, method: &str, args: &[Value]) -> Result<Option<Value>, RtError> {
-        let Some(slot) = env.frames.iter_mut().rev().find_map(|f| f.get_mut(name)) else {
-            return Ok(None);
+        // @global 槽兜底(与 Expr::Assign 的 globals 写回同族): 函数内 g.set(k,v)/g.push(x)
+        let slot = match env.frames.iter_mut().rev().find_map(|f| f.get_mut(name)) {
+            Some(s) => s,
+            None => match self.globals.get_mut(name) {
+                Some(s) => s,
+                None => return Ok(None),
+            },
         };
         match slot {
             Value::Vec(arc) => {

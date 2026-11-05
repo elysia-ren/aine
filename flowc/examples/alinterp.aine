@@ -767,6 +767,21 @@ struct Index {
     impls: Vec<IEntry>
 }
 
+@global var ai_globals: Map<String, AVal> = Map.new()
+
+// @global 声明求值: SGlobalVar 初值入全局槽(执行一次)
+fn ai_init_globals(p: Vec<Stmt>) {
+    for s in p {
+        match s {
+            SGlobalVar(vn, _, init) {
+                let v = ai_expr(init, Map.new(), ai_build_index(p))
+                ai_globals.set(vn, v)
+            }
+            _ {}
+        }
+    }
+}
+
 fn ai_build_index(p: Vec<Stmt>) -> Index {
     var fns: Vec<FnEntry> = []
     var structs: Vec<SEntry> = []
@@ -1248,6 +1263,11 @@ fn ai_expr(e: Expr, env: Map<String, AVal>, program: Index) -> AVal {
             let owner = ai_enum_owner(program, n)
             if owner != "" {
                 return AVariant(owner, n, [])
+            }
+            if !env.contains(n) {
+                if ai_globals.contains(n) {
+                    return ai_globals.get(n).unwrap_or(AUnit)
+                }
             }
             let envv = env.get(n).unwrap_or(AUnit)
             match envv {
@@ -2379,6 +2399,12 @@ fn ai_stmt(s: Stmt, env: Map<String, AVal>, program: Index) -> AiFlow {
         }
         SAssign(vn, op, rhs) {
             var new_env = env
+            // @global 写回: 目标不是 env 局部(且是已注册全局) → 写全局槽
+            if ai_dotted_dot(vn) == 0 && !env.contains(vn) && ai_globals.contains(vn) {
+                let gv = ai_expr(rhs, env, program)
+                ai_globals.set(vn, gv)
+                return AiFlow { ctrl: "ok" value: gv env: new_env }
+            }
             if op == "=" {
                 let v = ai_expr(rhs, env, program)
                 // 字段赋值: "p.x" 形式 → 更新 AStruct 对应条目
