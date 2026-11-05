@@ -86,17 +86,19 @@ footer{margin-top:80px;padding-top:22px;border-top:1px solid var(--line);
 <div class="layout">
 <nav id="toc">
 <h1>Aine</h1><div class="ver">语言规范 S1.1 · 教程+参考</div>
-<div class="grp">第一部分 · 入门教程</div>
-<a href="#t1">1 你好,Aine</a>
-<a href="#t2">2 变量与类型</a>
-<a href="#t3">3 控制流</a>
-<a href="#t4">4 函数</a>
-<a href="#t5">5 集合:Vec 与 Map</a>
-<a href="#t6">6 结构体与枚举</a>
-<a href="#t7">7 字符串</a>
-<a href="#t8">8 错误处理</a>
-<a href="#t9">9 闭包与 defer</a>
-<a href="#t10">10 模块与多文件</a>
+<div class="grp">第一部分 · 零基础入门</div>
+<a href="#t0">0 开始之前:你需要准备什么</a>
+<a href="#t1">1 第一个程序:让计算机说话</a>
+<a href="#t2">2 变量:给东西贴上名字</a>
+<a href="#t3">3 数字与计算</a>
+<a href="#t4">4 文字:字符串</a>
+<a href="#t5">5 做决定:如果……就……</a>
+<a href="#t6">6 重复:让计算机干活</a>
+<a href="#t7">7 列表与名册:Vec 和 Map</a>
+<a href="#t8">8 函数:把做法做成菜谱</a>
+<a href="#t9">9 自己的类型:struct 与 enum</a>
+<a href="#t10">10 出错了怎么办</a>
+<a href="#t11">11 进阶一瞥</a>
 <div class="grp">第二部分 · 语言参考</div>
 <a href="#r1">11 词法文法</a>
 <a href="#r2">12 语法文法与优先级</a>
@@ -120,301 +122,339 @@ footer{margin-top:80px;padding-top:22px;border-top:1px solid var(--line);
 <h1 class="doc">Aine 语言规范</h1>
 <div class="subtitle">版本 S1.1 · 三部分:入门教程(学会写)· 语言参考(查得准)· 语义规范(查得深)· 2026-11-06</div>
 
-<h2 id="t1"><span class="part">第一部分 · 入门教程</span>1 你好,Aine</h2>
-<p class="lead">Aine 是一门静态类型的值语义语言:语法接近你所熟悉的现代语言,但<b>一切赋值都是副本、一切变更都产生新值</b>,没有悬垂指针、没有数据竞争、没有手动内存管理。源码先编译为 C,再编译为原生可执行文件。</p>
-<h3>1.1 第一个程序</h3>
-<p>新建文本文件 <code>hello.aine</code>:</p>
+<h2 id="t0"><span class="part">第一部分 · 零基础入门</span>0 开始之前:你需要准备什么</h2>
+<p class="lead">这一部分假设你<b>从来没有写过程序</b>。每一章只教一个概念,每个例子都可以亲手运行,并告诉你屏幕上会出现什么。</p>
+<h3>0.1 什么是程序</h3>
+<p>程序就是<b>写给计算机的菜谱</b>:一步一步告诉计算机先做什么、再做什么、遇到什么情况怎么办。你把菜谱写在一个文本文件里(后缀是 <code>.aine</code>),然后让 Aine 的工具照着执行。</p>
+<div class="analogy">菜谱上写"打三个鸡蛋、加一勺盐、翻炒"——计算机也一样,你说一步它做一步,顺序不能乱、步骤必须写清楚。</div>
+<h3>0.2 你需要准备的东西</h3>
+<table>
+<tr><th>东西</th><th>是什么</th><th>从哪来</th></tr>
+<tr><td><code>aine.exe</code></td><td>Aine 的工具,负责"照菜谱执行"和"把菜谱翻译成独立程序"</td><td>项目仓库 <code>flowc/target/release/aine.exe</code>(或找 aiden 要编译好的)</td></tr>
+<tr><td>一个文本编辑器</td><td>写菜谱用的纸。记事本就够用;VS Code 更舒服</td><td>系统自带或免费下载</td></tr>
+<tr><td>一个文件夹</td><td>放你的菜谱和工具</td><td>自己建一个,比如 <code>D:\aine-start</code></td></tr>
+</table>
+<p>把 <code>aine.exe</code> 复制到你的文件夹里。下面所有章节都假设:你的菜谱和 <code>aine.exe</code> 在同一个文件夹。</p>
+<h3>0.3 终端:你和计算机对话的窗口</h3>
+<p>"终端"就是一个输入文字命令的窗口。打开方式(Windows):在文件夹的地址栏输入 <code>cmd</code> 然后回车;或按 Win 键输入"命令提示符"再 <code>cd</code> 到你的文件夹。</p>
+<pre class="run"><code>cd /d D:\aine-start</code></pre>
+<p>接下来所有章节里,凡是"在终端里输入"的命令,都是在这个窗口里敲、然后按回车。</p>
+<div class="practice">打开终端,输入 <code>aine.exe --help</code> 并回车。看到一大段使用说明(而不是"不是内部或外部命令")就说明工具就位了。</div>
+
+<h2 id="t1"><span class="part">第一部分 · 零基础入门</span>1 第一个程序:让计算机说话</h2>
+<h3>1.1 写下菜谱</h3>
+<p>用记事本在你的文件夹里新建文件 <code>hello.aine</code>,输入下面两行,保存:</p>
 <pre><code><span class="k">fn</span> <span class="fn">main</span>() {
     <span class="fn">print</span>(<span class="s">"你好,Aine"</span>)
 }</code></pre>
-<p>运行它:</p>
-<pre class="run"><code>aine run hello.aine</code></pre>
-<pre class="out"><code>你好,Aine</code></pre>
-<p>编译为独立的原生可执行文件(不依赖任何运行时安装):</p>
-<pre class="run"><code>aine build hello.aine
-hello.exe          <span class="c">← 直接双击/执行</span></code></pre>
-<h3>1.2 一眼看懂语法骨架</h3>
+<p>逐行解释:</p>
 <ul>
-<li>函数用 <code>fn</code> 定义,程序从 <code>main</code> 开始;</li>
-<li><code>print(…)</code> 是内建打印,多个值用空格分隔;</li>
-<li>语句以换行结束,不需要分号;</li>
-<li>块用花括号,块尾的值就是这个块的值。</li>
+<li><code>fn main() {</code> —— 每个程序都从叫 <code>main</code> 的地方开始执行;花括号 <code>{</code> 表示"从这里开始";</li>
+<li><code>print("你好,Aine")</code> —— 让计算机把括号里的文字显示到屏幕上;<code>print</code> 意思是"打印";</li>
+<li><code>}</code> —— main 到这里结束。</li>
 </ul>
+<div class="analogy">文字要用双引号包起来,就像信封装信——告诉计算机"这是一段要原样使用的文字",而不是别的指令。</div>
+<h3>1.2 运行它</h3>
+<p>在终端里输入:</p>
+<pre class="run"><code>aine.exe run hello.aine</code></pre>
+<p>屏幕上会显示:</p>
+<pre class="out"><code>你好,Aine</code></pre>
+<p>恭喜——你已经运行了第一个程序。改改引号里的文字,保存,再运行一次,看输出怎么变。</p>
+<div class="callout warn">常见错误:引号忘了写后半边;花括号只有 <code>{</code> 没有 <code>}</code>;把 <code>print</code> 拼错。出错时工具会告诉你<b>第几行</b>出了什么问题——第 10 章专门教你怎么读错误消息。</div>
+<div class="practice">写一个程序,让屏幕上出现你朋友的名字和一句话。</div>
+
+<h2 id="t2"><span class="part">第一部分 · 零基础入门</span>2 变量:给东西贴上名字</h2>
+<h3>2.1 变量是一个贴了标签的盒子</h3>
+<div class="analogy">变量就是一个盒子,盒子上贴着你起的名字,盒子里放着一样东西(一个数、一段文字……)。以后要用这样东西,喊盒子的名字就行。</div>
 <pre><code><span class="k">fn</span> <span class="fn">main</span>() {
-    <span class="k">let</span> name = <span class="s">"Aine"</span>
-    <span class="fn">print</span>(<span class="s">"你好,"</span> + name)          <span class="c">// 字符串用 + 拼接</span>
-    <span class="fn">print</span>(<span class="s">f"1+1={1 + 1}"</span>)           <span class="c">// f-string 插值</span>
+    <span class="k">let</span> name = <span class="s">"小明"</span>
+    <span class="k">let</span> age = <span class="n">12</span>
+    <span class="fn">print</span>(name)
+    <span class="fn">print</span>(age)
 }</code></pre>
-<pre class="out"><code>你好,Aine
-1+1=2</code></pre>
-<div class="callout good">f-string 里直接写表达式:<code>f"结果: {a + b}"</code>,数值会自动格式化,不需要手动转换。</div>
-
-<h2 id="t2"><span class="part">第一部分 · 入门教程</span>2 变量与类型</h2>
-<h3>2.1 let 与 var</h3>
-<p><code>let</code> 声明不可变绑定,<code>var</code> 声明可变绑定。类型通常自动推断,也可以显式标注:</p>
-<pre><code><span class="k">let</span> x = 10               <span class="c">// 推断为 i32,不可变</span>
-<span class="k">var</span> y = 20               <span class="c">// 可变</span>
-y = y + 5
-<span class="k">let</span> big: <span class="t">i64</span> = 123456789012   <span class="c">// 显式标注类型</span>
-<span class="k">let</span> ratio: <span class="t">f64</span> = 0.5</code></pre>
-<div class="callout note">重新赋值只能针对 <code>var</code> 绑定:<code>x = 99</code> 在上面的例子里是类型错误(T3010)。</div>
-<h3>2.2 基本类型</h3>
+<pre class="out"><code>小明
+12</code></pre>
+<p><code>let name = "小明"</code> 读作:"做一个叫 <code>name</code> 的盒子,里面放文字 <code>小明</code>。"</p>
+<h3>2.2 let 和 var:能不能换盒子里的东西</h3>
+<p><code>let</code> 贴的是<b>封条</b>:东西放进去就不能换。<code>var</code> 没有 封条:随时可以放新东西进去(这叫"重新赋值"):</p>
+<pre><code><span class="k">var</span> score = <span class="n">60</span>
+<span class="fn">print</span>(score)          <span class="c">// 60</span>
+score = <span class="n">95</span>
+<span class="fn">print</span>(score)          <span class="c">// 95</span></code></pre>
+<p><code>score = 95</code> 读作:"把 score 盒子里的东西换成 95"。<b>只写 <code>let</code> 的盒子换东西会报错</b>——这是语言故意保护你:不该变的东西被不小心改掉,是很多错误的来源。</p>
+<h3>2.3 盒子里能放哪几种东西(类型)</h3>
 <table>
-<tr><th>类型</th><th>例子</th><th>说明</th></tr>
-<tr><td><code>i32</code> / <code>i64</code></td><td><code>-42</code> / <code>123456789012</code></td><td>有符号整数;所有整数运算在 64 位域进行,声明宽度在显式转换与 FFI 边界生效</td></tr>
-<tr><td><code>u8</code>–<code>u64</code> / <code>usize</code></td><td><code>let b: u8 = 7</code></td><td>无符号整数(同一 64 位算术域)</td></tr>
-<tr><td><code>f64</code> / <code>f32</code></td><td><code>2.5</code></td><td>浮点(字面量默认 f64)</td></tr>
-<tr><td><code>bool</code></td><td><code>true</code> / <code>false</code></td><td>打印为 <code>true</code> / <code>false</code></td></tr>
-<tr><td><code>String</code></td><td><code>"文本"</code></td><td>拥有语义的 UTF-8 字符串,按<b>字符</b>索引(见第 7 章)</td></tr>
-<tr><td><code>char</code></td><td><code>s[0]</code> 的结果</td><td>恰好一个字符的 String(与单字符 String 可互赋)</td></tr>
+<tr><th>种类(类型)</th><th>例子</th><th>说明</th></tr>
+<tr><td>整数(i32)</td><td><code>12</code>、<code>-7</code>、<code>0</code></td><td>没有小数点的数</td></tr>
+<tr><td>小数(f64)</td><td><code>2.5</code>、<code>-0.5</code></td><td>带小数点的数</td></tr>
+<tr><td>文字(String)</td><td><code>"小明"</code></td><td>用引号包起来的字符,叫字符串</td></tr>
+<tr><td>真假(bool)</td><td><code>true</code> / <code>false</code></td><td>只有两种:真、假</td></tr>
 </table>
-<div class="callout note">数值字面量会适配标注类型:<code>let i: i64 = 123456789012</code> 合法。不同整数类型之间<b>不隐式转换</b>,需要 <code>to_i32()</code> / <code>to_f64()</code> 等显式方法。</div>
-<h3>2.3 一切赋值都是副本</h3>
-<pre><code><span class="k">let</span> a = [<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>]
-<span class="k">let</span> b = a              <span class="c">// b 是独立副本</span>
-b = b.push(<span class="n">4</span>)          <span class="c">// push 追加元素,返回新 Vec</span>
-<span class="fn">print</span>(a.len())          <span class="c">// 3 —— a 不受影响</span>
-<span class="fn">print</span>(b.len())          <span class="c">// 4</span></code></pre>
-<div class="callout good">这就是 Aine 的安全地基:没有别名、没有悬垂引用、没有数据竞争。代价是显式的克隆成本——编译器的优化体系(设计冻结中)负责把它降下来。</div>
+<p>"类型"就是<b>盒子里东西的种类</b>。数字和文字不能混着算——<code>"abc" + 3</code> 这类操作会被拒绝。类型可以在名字后面用冒号写明:</p>
+<pre><code><span class="k">let</span> score: <span class="t">i32</span> = <span class="n">100</span>
+<span class="k">let</span> title: <span class="t">String</span> = <span class="s">"成绩单"</span></code></pre>
+<div class="practice">做三个盒子:你的名字、你的年龄、今天是不是晴天(true/false)。然后把它们都打印出来。</div>
 
-<h2 id="t3"><span class="part">第一部分 · 入门教程</span>3 控制流</h2>
-<h3>3.1 if / else 是表达式</h3>
-<pre><code><span class="k">let</span> n = <span class="n">7</span>
-<span class="k">if</span> n > <span class="n">3</span> {
-    <span class="fn">print</span>(<span class="s">"大"</span>)
+<h2 id="t3"><span class="part">第一部分 · 零基础入门</span>3 数字与计算</h2>
+<h3>3.1 四则运算</h3>
+<pre><code><span class="fn">print</span>(<span class="n">3</span> + <span class="n">4</span>)            <span class="c">// 7</span>
+<span class="fn">print</span>(<span class="n">10</span> - <span class="n">2</span> * <span class="n">3</span>)       <span class="c">// 4 —— 先乘除后加减,和数学一样</span>
+<span class="fn">print</span>(<span class="n">7</span> / <span class="n">2</span>)            <span class="c">// 3.5</span>
+<span class="fn">print</span>(<span class="n">7</span> % <span class="n">2</span>)            <span class="c">// 1 —— % 是"除完剩下的余数"</span></code></pre>
+<h3>3.2 把计算结果放进话里(f-string)</h3>
+<p>在引号前加一个 <code>f</code>,花括号里的计算会被替换成结果:</p>
+<pre><code><span class="k">let</span> a = <span class="n">3</span>
+<span class="k">let</span> b = <span class="n">4</span>
+<span class="fn">print</span>(<span class="s">f"直角边 {a} 和 {b},斜边平方是 {a * a + b * b}"</span>)</code></pre>
+<pre class="out"><code>直角边 3 和 4,斜边平方是 25</code></pre>
+<h3>3.3 大数与小数</h3>
+<pre><code><span class="k">let</span> big: <span class="t">i64</span> = <span class="n">123456789012</span>     <span class="c">// 很大的整数,标注 i64</span>
+<span class="k">let</span> price = <span class="n">9.9</span>                 <span class="c">// 小数</span>
+<span class="fn">print</span>(price * <span class="n">3</span>)                <span class="c">// 29.7</span></code></pre>
+<div class="callout note">所有整数计算都在 64 位域进行,不会突然溢出;需要精确的 32 位边界时用 <code>to_i32()</code> 显式收窄。</div>
+<div class="practice">算一下:一年 365 天,你活了 30 年,大约多少天?打印出来。</div>
+
+<h2 id="t4"><span class="part">第一部分 · 零基础入门</span>4 文字:字符串</h2>
+<h3>4.1 字符串就是一串字符</h3>
+<pre><code><span class="k">let</span> s = <span class="s">"hello"</span>
+<span class="fn">print</span>(s.len())            <span class="c">// 5 —— 字符个数(中文按字数,不是按字节)</span>
+<span class="fn">print</span>(s[<span class="n">0</span>])               <span class="c">// h —— 第 0 个字符(从 0 开始数!)</span></code></pre>
+<div class="callout warn"><b>从 0 开始数</b>:第 1 个字符的位置是 0,第 2 个是 1……几乎所有编程语言都这样,记住它。</div>
+<h3>4.2 常用操作</h3>
+<pre><code><span class="fn">print</span>(s + <span class="s">" world"</span>)        <span class="c">// hello world —— 拼接</span>
+<span class="fn">print</span>(s.contains(<span class="s">"ell"</span>))   <span class="c">// true —— 包含吗</span>
+<span class="fn">print</span>(s.trim())            <span class="c">// 去掉两头的空格</span>
+<span class="fn">print</span>(<span class="s">"a,b,c"</span>.split(<span class="s">","</span>).len())   <span class="c">// 3 —— 按逗号切成三段</span></code></pre>
+<h3>4.3 中文字符</h3>
+<p>中文按<b>字</b>数,不按字节:</p>
+<pre><code><span class="k">let</span> s = <span class="s">"中文"</span>
+<span class="fn">print</span>(s.len())            <span class="c">// 2 —— 两个字符</span>
+<span class="fn">print</span>(s[<span class="n">0</span>] == <span class="s">"中"</span>)       <span class="c">// true</span></code></pre>
+<div class="practice">把你的名字存进变量,打印它的字符数和第一个字符。</div>
+
+<h2 id="t5"><span class="part">第一部分 · 零基础入门</span>5 做决定:如果……就……</h2>
+<h3>5.1 if 和 else</h3>
+<div class="analogy">下雨就带伞,否则戴帽子——程序里的"做决定"就是这个结构:如果条件成立,做甲;否则做乙。</div>
+<pre><code><span class="k">let</span> temp = <span class="n">35</span>
+<span class="k">if</span> temp &gt; <span class="n">30</span> {
+    <span class="fn">print</span>(<span class="s">"开空调"</span>)
 } <span class="k">else</span> {
-    <span class="fn">print</span>(<span class="s">"小"</span>)
+    <span class="fn">print</span>(<span class="s">"不用"</span>)
 }
-
-<span class="c">// if 是表达式:两个分支的块尾值就是它的值</span>
-<span class="k">let</span> level = <span class="k">if</span> n > <span class="n">5</span> { <span class="s">"高"</span> } <span class="k">else</span> { <span class="s">"低"</span> }
-<span class="fn">print</span>(level)            <span class="c">// 高</span></code></pre>
-<h3>3.2 while 与 for-in</h3>
-<pre><code><span class="k">var</span> i = <span class="n">0</span>
-<span class="k">while</span> i &lt; <span class="n">3</span> {
-    <span class="fn">print</span>(i)
-    i = i + <span class="n">1</span>
-}
-
-<span class="k">for</span> i <span class="k">in</span> <span class="n">0</span>..<span class="n">3</span> {        <span class="c">// 区间 0,1,2(不含 3)</span>
-    <span class="fn">print</span>(i)
-}
-
-<span class="k">for</span> ch <span class="k">in</span> <span class="s">"中文"</span> {      <span class="c">// 字符串按字符迭代</span>
-    <span class="fn">print</span>(ch)            <span class="c">// 中 / 文</span>
-}</code></pre>
-<div class="callout note">for-in 对 <code>Vec&lt;T&gt;</code> 逐元素、对 String 逐字符、对区间逐整数。循环变量在每次迭代产生,循环体内对它的修改不影响下一轮。</div>
-<h3>3.3 break 与 continue</h3>
-<pre><code><span class="k">for</span> i <span class="k">in</span> <span class="n">0</span>..<span class="n">10</span> {
-    <span class="k">if</span> i == <span class="n">3</span> {
-        <span class="k">continue</span>          <span class="c">// 跳过本轮</span>
-    }
-    <span class="k">if</span> i &gt; <span class="n">5</span> {
-        <span class="k">break</span>             <span class="c">// 退出循环</span>
-    }
-    <span class="fn">print</span>(i)              <span class="c">// 0 1 2 4 5</span>
-}</code></pre>
-<h3>3.4 match:模式匹配</h3>
-<pre><code><span class="k">enum</span> <span class="t">Shape</span> {
-    <span class="t">Circle</span>(<span class="t">f64</span>)
-    <span class="t">Rect</span>(<span class="t">f64</span>, <span class="t">f64</span>)
-}
-
-<span class="k">fn</span> <span class="fn">area</span>(s: <span class="t">Shape</span>) -&gt; <span class="t">f64</span> {
-    <span class="k">match</span> s {
-        <span class="t">Circle</span>(r) =&gt; <span class="n">3.14</span> * r * r
-        <span class="t">Rect</span>(w, h) =&gt; w * h
-    }
-}</code></pre>
-<p>match 也匹配 <code>Option</code> 与字面量:</p>
-<pre><code><span class="k">match</span> m.get(<span class="s">"k"</span>) {
-    <span class="t">Some</span>(v) =&gt; <span class="fn">print</span>(v)
-    <span class="t">None</span> =&gt; <span class="fn">print</span>(<span class="s">"没有"</span>)
-}</code></pre>
-<div class="callout note">match 各臂类型必须一致;`_` 是兜底臂。枚举变体的载荷按位置绑定到臂参数。</div>
-
-<h2 id="t4"><span class="part">第一部分 · 入门教程</span>4 函数</h2>
-<h3>4.1 定义与调用</h3>
-<pre><code><span class="k">fn</span> <span class="fn">add</span>(a: <span class="t">i32</span>, b: <span class="t">i32</span>) -&gt; <span class="t">i32</span> {
-    <span class="k">return</span> a + b          <span class="c">// 也可以直接写 a + b(块尾值)</span>
-}
-
-<span class="k">fn</span> <span class="fn">greet</span>(name: <span class="t">String</span>) {
-    <span class="fn">print</span>(<span class="s">f"你好,{name}"</span>)
-}</code></pre>
-<h3>4.2 递归</h3>
-<pre><code><span class="k">fn</span> <span class="fn">fib</span>(n: <span class="t">i32</span>) -&gt; <span class="t">i32</span> {
-    <span class="k">if</span> n &lt; <span class="n">2</span> {
-        <span class="k">return</span> n
-    }
-    <span class="k">return</span> fib(n - <span class="n">1</span>) + fib(n - <span class="n">2</span>)
-}</code></pre>
-<h3>4.3 参数模式(进阶)</h3>
+<span class="c">// 输出: 开空调</span></code></pre>
+<h3>5.2 比较与真假</h3>
 <table>
-<tr><th>写法</th><th>语义</th></tr>
-<tr><td><code>fn show(u: User)</code></td><td>按值传入(独立副本)——普通代码只用这个</td></tr>
-<tr><td><code>fn store(move u: User)</code></td><td>声明"我接管这个值"(第一版为文档性标注)</td></tr>
-<tr><td><code>fn inspect(u: &amp;User)</code></td><td>高级借用视图(低频;禁返回、禁存储)</td></tr>
+<tr><th>写法</th><th>意思</th><th>例子(结果)</th></tr>
+<tr><td><code>==</code></td><td>相等吗</td><td><code>3 == 3</code>(true)</td></tr>
+<tr><td><code>!=</code></td><td>不相等吗</td><td><code>3 != 4</code>(true)</td></tr>
+<tr><td><code>&gt; &lt; &gt;= &lt;=</code></td><td>大于/小于/不小于/不大于</td><td><code>5 &gt;= 5</code>(true)</td></tr>
 </table>
-<h3>4.4 函数类型(统一,无 trait 三分法)</h3>
-<pre><code><span class="k">fn</span> <span class="fn">apply</span>(f: <span class="t">fn</span>(<span class="t">i32</span>, <span class="t">i32</span>) -&gt; <span class="t">i32</span>) -&gt; <span class="t">i32</span> {
-    <span class="k">return</span> f(<span class="n">3</span>, <span class="n">4</span>)
+<p>比较的结果是一种叫 <code>bool</code> 的东西,只有两个值:<code>true</code>(真)和 <code>false</code>(假)。可以用 <code>&amp;&amp;</code>(并且)、<code>||</code>(或者)、<code>!</code>(取反)组合:</p>
+<pre><code><span class="k">let</span> age = <span class="n">20</span>
+<span class="k">let</span> has_ticket = <span class="k">true</span>
+<span class="k">if</span> age &gt;= <span class="n">18</span> &amp;&amp; has_ticket {
+    <span class="fn">print</span>(<span class="s">"可以入场"</span>)
+}</code></pre>
+<h3>5.3 else if:多路决定</h3>
+<pre><code><span class="k">let</span> score = <span class="n">85</span>
+<span class="k">if</span> score &gt;= <span class="n">90</span> {
+    <span class="fn">print</span>(<span class="s">"优"</span>)
+} <span class="k">else</span> <span class="k">if</span> score &gt;= <span class="n">80</span> {
+    <span class="fn">print</span>(<span class="s">"良"</span>)
+} <span class="k">else</span> {
+    <span class="fn">print</span>(<span class="s">"继续努力"</span>)
+}
+<span class="c">// 输出: 良</span></code></pre>
+<div class="practice">写程序:一个变量存温度,超过 35 打印"高温预警",30 到 35 打印"偏热",否则打印"舒适"。</div>
+
+<h2 id="t6"><span class="part">第一部分 · 零基础入门</span>6 重复:让计算机干活</h2>
+<h3>6.1 for:数着来</h3>
+<div class="analogy">"从 1 数到 100"——计算机最擅长的就是不知疲倦地重复。</div>
+<pre><code><span class="k">for</span> i <span class="k">in</span> <span class="n">0</span>..<span class="n">5</span> {
+    <span class="fn">print</span>(i)
+}
+<span class="c">// 0 1 2 3 4 —— 从 0 开始,到 5 之前停(不含 5)</span></code></pre>
+<h3>6.2 while:满足条件就一直做</h3>
+<pre><code><span class="k">var</span> cups = <span class="n">3</span>
+<span class="k">while</span> cups &gt; <span class="n">0</span> {
+    <span class="fn">print</span>(<span class="s">f"还剩 {cups} 杯"</span>)
+    cups = cups - <span class="n">1</span>       <span class="c">// 别忘了让条件最终不成立,否则永远停不下来!</span>
+}</code></pre>
+<h3>6.3 对集合逐个处理</h3>
+<pre><code><span class="k">let</span> names = [<span class="s">"张三"</span>, <span class="s">"李四"</span>, <span class="s">"王五"</span>]
+<span class="k">for</span> name <span class="k">in</span> names {
+    <span class="fn">print</span>(name)           <span class="c">// 张三 → 李四 → 王五</span>
+}
+
+<span class="k">for</span> ch <span class="k">in</span> <span class="s">"中文"</span> {        <span class="c">// 字符串也能逐字符</span>
+    <span class="fn">print</span>(ch)
+}</code></pre>
+<h3>6.4 break 与 continue</h3>
+<pre><code><span class="k">for</span> i <span class="k">in</span> <span class="n">0</span>..<span class="n">10</span> {
+    <span class="k">if</span> i == <span class="n">3</span> { <span class="k">continue</span> }   <span class="c">// 跳过 3</span>
+    <span class="k">if</span> i &gt; <span class="n">5</span> { <span class="k">break</span> }       <span class="c">// 到 6 就停</span>
+    <span class="fn">print</span>(i)                  <span class="c">// 0 1 2 4 5</span>
+}</code></pre>
+<div class="practice">用循环打印 1 到 100 里所有 7 的倍数。</div>
+
+<h2 id="t7"><span class="part">第一部分 · 零基础入门</span>7 列表与名册:Vec 和 Map</h2>
+<h3>7.1 Vec:一排盒子</h3>
+<div class="analogy">Vec 就是一排编了号的盒子:第 0 格、第 1 格、第 2 格……编号从 0 开始。</div>
+<pre><code><span class="k">var</span> fruits = [<span class="s">"苹果"</span>, <span class="s">"香蕉"</span>]
+fruits = fruits.push(<span class="s">"橘子"</span>)     <span class="c">// 加一个到末尾</span>
+<span class="fn">print</span>(fruits.len())               <span class="c">// 3 —— 有几格</span>
+<span class="fn">print</span>(fruits[<span class="n">0</span>])                  <span class="c">// 苹果 —— 第 0 格</span>
+fruits[<span class="n">0</span>] = <span class="s">"梨"</span>                  <span class="c">// 把第 0 格换成梨</span>
+<span class="fn">print</span>(fruits)                     <span class="c">// [梨, 香蕉, 橘子]</span></code></pre>
+<table>
+<tr><th>做法</th><th>效果</th></tr>
+<tr><td><code>v.push(x)</code></td><td>末尾加一个</td></tr>
+<tr><td><code>v.insert(i, x)</code></td><td>插到第 i 格</td></tr>
+<tr><td><code>v.remove(i)</code></td><td>删掉第 i 格</td></tr>
+<tr><td><code>v.set(i, x)</code></td><td>把第 i 格换成 x</td></tr>
+<tr><td><code>v.get(i)</code> / <code>v[i]</code></td><td>读第 i 格</td></tr>
+<tr><td><code>v.len()</code> / <code>v.contains(x)</code></td><td>几格 / 有没有</td></tr>
+<tr><td><code>v.concat(w)</code></td><td>把 w 接到后面,得到新列表</td></tr>
+</table>
+<h3>7.2 Map:按名字找的柜子</h3>
+<div class="analogy">Map 像储物柜:不记编号,记<b>标签</b>。"apple" 那格放 3,"banana" 那格放 5——按标签取,不用背编号。</div>
+<pre><code><span class="k">var</span> stock: <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">i32</span>&gt; = <span class="t">Map</span>.new()
+stock.set(<span class="s">"apple"</span>, <span class="n">3</span>)
+stock.set(<span class="s">"banana"</span>, <span class="n">5</span>)
+
+<span class="fn">print</span>(stock.get(<span class="s">"apple"</span>))       <span class="c">// Some(3) —— 找到了</span>
+<span class="fn">print</span>(stock.get(<span class="s">"pear"</span>))        <span class="c">// None —— 没有这一格</span>
+stock.set(<span class="s">"apple"</span>, <span class="n">10</span>)           <span class="c">// 同名格子:内容被替换</span>
+<span class="fn">print</span>(stock.len())               <span class="c">// 2</span></code></pre>
+<div class="callout note"><code>get</code> 的结果包在 <code>Some(…)</code> 里——这是语言在提醒你"这一格可能不存在"。用 match 处理(见第 10 章)。</div>
+<div class="practice">建一个你最近三天睡觉小时数的 Vec,打印每天的和总平均。</div>
+
+<h2 id="t8"><span class="part">第一部分 · 零基础入门</span>8 函数:把做法做成菜谱</h2>
+<h3>8.1 为什么要函数</h3>
+<div class="analogy">"番茄炒蛋"的做法一旦写好,每次想吃就直接念菜谱名,不用每次重新描述。函数就是<b>给一段常用做法起名字</b>。</div>
+<pre><code><span class="k">fn</span> <span class="fn">greet</span>(name) {
+    <span class="fn">print</span>(<span class="s">f"你好,{name}!"</span>)
 }
 
 <span class="k">fn</span> <span class="fn">main</span>() {
-    <span class="fn">print</span>(apply(add))       <span class="c">// 7 —— 具名函数直接传</span>
+    greet(<span class="s">"张三"</span>)      <span class="c">// 你好,张三!</span>
+    greet(<span class="s">"李四"</span>)      <span class="c">// 你好,李四!</span>
 }</code></pre>
-
-<h2 id="t5"><span class="part">第一部分 · 入门教程</span>5 集合:Vec 与 Map</h2>
-<h3>5.1 Vec&lt;T&gt; 动态数组</h3>
-<pre><code><span class="k">var</span> v = [<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>]          <span class="c">// 推断 Vec&lt;i32&gt;</span>
-v = v.push(<span class="n">4</span>)              <span class="c">// 追加(产生新版本,须接住)</span>
-<span class="fn">print</span>(v.len())              <span class="c">// 4</span>
-<span class="fn">print</span>(v[<span class="n">0</span>])                 <span class="c">// 1 —— 下标访问</span>
-v[<span class="n">0</span>] = <span class="n">10</span>                  <span class="c">// 索引赋值</span>
-
-<span class="fn">print</span>(v.contains(<span class="n">2</span>))       <span class="c">// true</span>
-v = v.remove(<span class="n">0</span>)            <span class="c">// 删除下标 0</span>
-<span class="k">for</span> x <span class="k">in</span> v {               <span class="c">// 逐元素迭代</span>
-    <span class="fn">print</span>(x)
-}</code></pre>
-<table>
-<tr><th>方法</th><th>说明</th></tr>
-<tr><td><code>push(x)</code> / <code>pop()</code></td><td>追加 / 弹出尾部</td></tr>
-<tr><td><code>insert(i, x)</code> / <code>remove(i)</code></td><td>插入 / 删除指定位置</td></tr>
-<tr><td><code>set(i, x)</code> / <code>get(i)</code></td><td>替换 / 读取(越界 panic / None)</td></tr>
-<tr><td><code>concat(other)</code></td><td>拼接为新 Vec</td></tr>
-<tr><td><code>len() / contains(x) / sort() / clear()</code></td><td>长度 / 包含 / 排序 / 清空</td></tr>
-</table>
-<div class="callout warn">Aine 的变更方法返回<b>新值</b>。语句形态 <code>v.push(4)</code>(不接住返回值)在解释器里会写回变量,但<b>推荐始终写 <code>v = v.push(4)</code></b>——这是 C 后端与未来并发语义下的确定写法。</div>
-<h3>5.2 Map&lt;K, V&gt; 有序映射</h3>
-<pre><code><span class="k">var</span> m: <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">i32</span>&gt; = <span class="t">Map</span>.new()
-m.set(<span class="s">"苹果"</span>, <span class="n">3</span>)
-m.set(<span class="s">"香蕉"</span>, <span class="n">5</span>)
-
-<span class="fn">print</span>(m.get(<span class="s">"苹果"</span>))       <span class="c">// Some(3)</span>
-<span class="fn">print</span>(m.get(<span class="s">"梨"</span>))         <span class="c">// None</span>
-<span class="fn">print</span>(m.contains(<span class="s">"香蕉"</span>))  <span class="c">// true</span>
-<span class="fn">print</span>(m.len())              <span class="c">// 2</span>
-
-<span class="k">for</span> k <span class="k">in</span> m.keys() {        <span class="c">// 键迭代(插入序)</span>
-    <span class="fn">print</span>(k)
+<p><code>name</code> 是<b>参数</b>——菜谱的配料:调用时给它什么,函数里就用什么。</p>
+<h3>8.2 返回值:菜谱的成品</h3>
+<pre><code><span class="k">fn</span> <span class="fn">add</span>(a, b) {
+    <span class="k">return</span> a + b         <span class="c">// return = 把这个结果交还给调用的人</span>
 }
-<span class="k">for</span> v <span class="k">in</span> m.values() {      <span class="c">// 值迭代</span>
-    <span class="fn">print</span>(v)
-}</code></pre>
-<h3>5.3 嵌套容器</h3>
-<pre><code><span class="k">var</span> grid: <span class="t">Vec</span>&lt;<span class="t">Vec</span>&lt;<span class="t">i32</span>&gt;&gt; = []
-<span class="k">var</span> stock: <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Vec</span>&lt;<span class="t">i32</span>&gt;&gt; = <span class="t">Map</span>.new()</code></pre>
 
-<h2 id="t6"><span class="part">第一部分 · 入门教程</span>6 结构体与枚举</h2>
-<h3>6.1 struct:命名字段</h3>
-<pre><code><span class="k">struct</span> <span class="t">User</span> {
+<span class="fn">print</span>(add(<span class="n">2</span>, <span class="n">3</span>))         <span class="c">// 5</span>
+<span class="fn">print</span>(add(<span class="n">2</span>, <span class="n">3</span>) * <span class="n">10</span>)    <span class="c">// 50 —— 返回值能继续参与计算</span></code></pre>
+<h3>8.3 带类型标注(进阶)</h3>
+<pre><code><span class="k">fn</span> <span class="fn">add</span>(a: <span class="t">i32</span>, b: <span class="t">i32</span>) -&gt; <span class="t">i32</span> {
+    <span class="k">return</span> a + b          <span class="c">// 冒号后是配料种类; -&gt; 后是成品种类</span>
+}</code></pre>
+<div class="callout note">类型标注不是必须的(Aine 会推断),但写出来能获得更早的错误检查——建议养成习惯。</div>
+<h3>8.4 递归:函数调用自己(进阶)</h3>
+<pre><code><span class="k">fn</span> <span class="fn">count_down</span>(n) {
+    <span class="k">if</span> n == <span class="n">0</span> {
+        <span class="fn">print</span>(<span class="s">"发射!"</span>)
+        <span class="k">return</span>
+    }
+    <span class="fn">print</span>(n)
+    count_down(n - <span class="n">1</span>)     <span class="c">// 自己调用自己,每次少 1</span>
+}
+<span class="c">// count_down(3) → 3 2 1 发射!</span></code></pre>
+<div class="practice">写函数 <code>square(x)</code> 返回 x 的平方;再用它打印 1 到 5 的平方。</div>
+
+<h2 id="t9"><span class="part">第一部分 · 零基础入门</span>9 自己的类型:struct 与 enum</h2>
+<h3>9.1 struct:一张登记表</h3>
+<div class="analogy">学生登记表:姓名、年龄、班级——几个格子固定,每张表填一份。</div>
+<pre><code><span class="k">struct</span> <span class="t">Student</span> {
     name: <span class="t">String</span>
     age: <span class="t">i32</span>
 }
 
 <span class="k">fn</span> <span class="fn">main</span>() {
-    <span class="k">var</span> u = <span class="t">User</span> { name: <span class="s">"张三"</span>, age: <span class="n">25</span> }
-    <span class="fn">print</span>(u.name)          <span class="c">// 张三</span>
-    u.age = u.age + <span class="n">1</span>      <span class="c">// 字段赋值(需 var)</span>
-    <span class="fn">print</span>(u.age)           <span class="c">// 26</span>
+    <span class="k">var</span> s = <span class="t">Student</span> { name: <span class="s">"张三"</span>, age: <span class="n">12</span> }
+    <span class="fn">print</span>(s.name)          <span class="c">// 张三</span>
+    s.age = <span class="n">13</span>             <span class="c">// 过生日了,改一格</span>
+    <span class="fn">print</span>(s.age)           <span class="c">// 13</span>
 }</code></pre>
-<h3>6.2 enum:带载荷的变体</h3>
-<pre><code><span class="k">enum</span> <span class="t">Event</span> {
-    <span class="t">Click</span>(<span class="t">String</span>)
-    <span class="t">Move</span>(<span class="t">i32</span>, <span class="t">i32</span>)
-    <span class="t">Quit</span>
+<h3>9.2 enum:有限个选项</h3>
+<div class="analogy">交通灯只有红、黄、绿三种状态——枚举就是"把所有可能的种类列出来,别的都不允许"。</div>
+<pre><code><span class="k">enum</span> <span class="t">Light</span> {
+    <span class="t">Red</span>
+    <span class="t">Yellow</span>
+    <span class="t">Green</span>
 }
 
-<span class="k">fn</span> <span class="fn">handle</span>(e: <span class="t">Event</span>) {
-    <span class="k">match</span> e {
-        <span class="t">Click</span>(target) =&gt; <span class="fn">print</span>(<span class="s">f"点击 {target}"</span>)
-        <span class="t">Move</span>(x, y) =&gt; <span class="fn">print</span>(<span class="s">f"移动 {x},{y}"</span>)
-        <span class="t">Quit</span> =&gt; <span class="fn">print</span>(<span class="s">"退出"</span>)
+<span class="k">fn</span> <span class="fn">action</span>(light: <span class="t">Light</span>) {
+    <span class="k">match</span> light {
+        <span class="t">Red</span> =&gt; <span class="fn">print</span>(<span class="s">"停"</span>)
+        <span class="t">Yellow</span> =&gt; <span class="fn">print</span>(<span class="s">"等一等"</span>)
+        <span class="t">Green</span> =&gt; <span class="fn">print</span>(<span class="s">"走"</span>)
     }
 }</code></pre>
-<div class="callout note">枚举变体的载荷按位置绑定到臂参数。match 必须覆盖所有变体(或以 `_` 兜底)。</div>
+<h3>9.3 match:按种类分头处理</h3>
+<pre><code><span class="k">enum</span> <span class="t">Shape</span> {
+    <span class="t">Circle</span>(<span class="t">f64</span>)              <span class="c">// 变体可以带" payload "(附加信息)</span>
+    <span class="t">Rect</span>(<span class="t">f64</span>, <span class="t">f64</span>)
+}
 
-<h2 id="t7"><span class="part">第一部分 · 入门教程</span>7 字符串</h2>
-<h3>7.1 码点模型</h3>
-<p>Aine 字符串按 <b>Unicode 码点</b>计量:<code>len()</code> 是字符数、<code>s[i]</code> 是第 i 个字符、切片按字符位。你永远不需要关心 UTF-8 字节。</p>
-<pre><code><span class="k">let</span> s = <span class="s">"中a文b"</span>
-<span class="fn">print</span>(s.len())          <span class="c">// 4(不是 8 个字节)</span>
-<span class="fn">print</span>(s[<span class="n">0</span>])             <span class="c">// 中</span>
-<span class="fn">print</span>(s[<span class="n">1</span>..<span class="n">3</span>])          <span class="c">// a文</span>
-<span class="fn">print</span>(s[<span class="n">0</span>] == <span class="s">"中"</span>)     <span class="c">// true</span></code></pre>
-<h3>7.2 常用方法</h3>
+<span class="k">fn</span> <span class="fn">area</span>(s: <span class="t">Shape</span>) -&gt; <span class="t">f64</span> {
+    <span class="k">match</span> s {
+        <span class="t">Circle</span>(r) =&gt; <span class="n">3.14</span> * r * r        <span class="c">// 把载荷取名叫 r 来用</span>
+        <span class="t">Rect</span>(w, h) =&gt; w * h
+    }
+}
+
+<span class="fn">print</span>(area(<span class="t">Shape</span>.<span class="t">Circle</span>(<span class="n">2.0</span>)))       <span class="c">// 12.56</span></code></pre>
+<div class="callout note">match 还能匹配 Option(第 7 章的 Some/None)和字面量。`_` 是"其余全部"的兜底臂。</div>
+<div class="practice">定义 enum Season(四季),写函数按季节打印一句建议。</div>
+
+<h2 id="t10"><span class="part">第一部分 · 零基础入门</span>10 出错了怎么办</h2>
+<h3>10.1 错误消息是帮手,不是敌人</h3>
+<p>程序出错时,Aine 会告诉你:<b>哪个文件、第几行、什么问题、怎么改</b>。比如把 <code>print</code> 拼成 <code>prnt</code>:</p>
+<pre><code>error[N3001]: 未定义的名称 'prnt'
+ --&gt; hello.aine:2:5
+  |
+2 |     prnt("你好")
+  |     ^^^^
+  |
+  = 建议: 未定义的名称 'prnt'。Aine 中使用的每个名字都需要先声明</code></pre>
+<p>读法:<b>先看行号</b>(2:5 = 第 2 行第 5 列),<b>再看错误码</b>(N3001 = 名字没定义),<b>最后读建议</b>。改完再运行,逐个消灭。</p>
+<h3>10.2 两类错误</h3>
 <table>
-<tr><th>方法</th><th>例子</th><th>结果</th></tr>
-<tr><td><code>trim()</code></td><td><code>"  hi  ".trim()</code></td><td><code>"hi"</code>(含全角空格)</td></tr>
-<tr><td><code>split(sep)</code></td><td><code>"a,b".split(",")</code></td><td>Vec&lt;String&gt;</td></tr>
-<tr><td><code>contains(s)</code></td><td><code>"hello".contains("ell")</code></td><td>true</td></tr>
-<tr><td><code>starts_with(s)</code> / <code>ends_with(s)</code></td><td><code>"ab".starts_with("a")</code></td><td>true</td></tr>
-<tr><td><code>replace(a, b)</code></td><td><code>"aa".replace("a", "b")</code></td><td><code>"bb"</code></td></tr>
-<tr><td><code>to_i32()</code> / <code>to_f64()</code></td><td><code>"42".to_i32()</code></td><td>42</td></tr>
+<tr><th>类别</th><th>什么时候发现</th><th>例子</th></tr>
+<tr><td>编译错误(N/T 开头)</td><td>运行之前——程序根本没跑</td><td>名字拼错、类型不匹配、少了括号</td></tr>
+<tr><td>运行时错误(panic)</td><td>跑到一半才炸</td><td>取了列表里不存在的格子、除以零</td></tr>
 </table>
-<h3>7.3 拼接与格式化</h3>
-<pre><code><span class="k">let</span> name = <span class="s">"Aine"</span>
-<span class="k">let</span> version = <span class="n">1.5</span>
-<span class="fn">print</span>(<span class="s">f"{name} v{version}"</span>)          <span class="c">// Aine v1.5</span>
-<span class="fn">print</span>(<span class="s">f"{name.len()} 个字符"</span>)        <span class="c">// 4 个字符</span></code></pre>
-<div class="callout note">f-string 对任意表达式求值:数值、bool 自动格式化;字符串原样嵌入。拼接也可以用 <code>+</code>(两侧同为字符串)。</div>
+<h3>10.3 运行时错误:你的程序有缺陷</h3>
+<pre><code><span class="k">let</span> v = [<span class="n">1</span>]
+<span class="fn">print</span>(v[<span class="n">5</span>])</code></pre>
+<pre class="out"><code>运行时错误: 索引越界: idx=5 len=1 vec=[1] 于函数 main</code></pre>
+<p>消息把<b>你要的编号、列表实际长度、列表内容、出错的函数</b>都告诉你了——照着改就行。这类"程序缺陷"在 Aine 里不可被捕获(它会诚实地暴露 bug),列表可能为空的情形请用 <code>get</code>(返回 Option)。</p>
+<div class="practice">故意制造一个越界错误,读懂消息,再把它修好。</div>
 
-<h2 id="t8"><span class="part">第一部分 · 入门教程</span>8 错误处理</h2>
-<h3>8.1 Option:有或没有</h3>
-<pre><code><span class="k">let</span> m: <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">i32</span>&gt; = <span class="t">Map</span>.new()
-<span class="k">let</span> hit = m.get(<span class="s">"k"</span>)       <span class="c">// Option&lt;i32&gt;</span>
-<span class="k">match</span> hit {
-    <span class="t">Some</span>(v) =&gt; <span class="fn">print</span>(v)
-    <span class="t">None</span> =&gt; <span class="fn">print</span>(<span class="s">"没有"</span>)
-}
-<span class="fn">print</span>(hit)                  <span class="c">// 直接打印: Some(…) / None</span></code></pre>
-<h3>8.2 Result 与 ?</h3>
-<pre><code><span class="k">fn</span> <span class="fn">load</span>(path: <span class="t">String</span>) -&gt; <span class="t">Result</span>&lt;<span class="t">String</span>, <span class="t">String</span>&gt; {
-    <span class="k">let</span> text = read_file(path)
-    <span class="k">if</span> text.contains(<span class="s">"[read_file error"</span>) {
-        <span class="k">return</span> <span class="t">Err</span>(<span class="s">"读取失败"</span>)
-    }
-    <span class="k">return</span> <span class="t">Ok</span>(text)
-}
-
-<span class="k">fn</span> <span class="fn">main</span>() {
-    <span class="k">let</span> text = load(<span class="s">"a.txt"</span>)?   <span class="c">// 失败则 main 返回 Err</span>
-    <span class="fn">print</span>(text)
-}</code></pre>
-<div class="callout note">`?` 要求操作数类型与所在函数的错误通道一致(Option 函数内用 Result 的 `?` 是类型错误)。</div>
-<h3>8.3 defer:退出时必执行</h3>
+<h2 id="t11"><span class="part">第一部分 · 零基础入门</span>11 进阶一瞥(知道有这些就够)</h2>
+<h3>11.1 defer:收尾动作</h3>
 <pre><code><span class="k">fn</span> <span class="fn">work</span>() {
-    <span class="k">defer</span> <span class="fn">print</span>(<span class="s">"收尾"</span>)     <span class="c">// 所有退出路径都会执行,LIFO</span>
-    <span class="fn">print</span>(<span class="s">"工作中"</span>)
-}
-<span class="c">// 输出: 工作中 → 收尾</span></code></pre>
-<h3>8.4 panic:程序缺陷,不可捕获</h3>
-<p>以下情形产生确定性 panic(终止程序,消息含函数栈):索引越界、Map 键不存在、<code>assert</code> 失败、类型不匹配、栈超限、defer 内出错、除零。<b>业务失败永远用 Result,不用 panic。</b></p>
-
-<h2 id="t9"><span class="part">第一部分 · 入门教程</span>9 闭包与 defer</h2>
-<h3>9.1 闭包</h3>
-<pre><code><span class="k">let</span> base = <span class="n">10</span>
-<span class="k">let</span> add_base = |x| x + base     <span class="c">// 捕获 base 的快照</span>
-<span class="fn">print</span>(add_base(<span class="n">5</span>))               <span class="c">// 15</span>
-
-<span class="k">let</span> add = |a: <span class="t">i32</span>, b: <span class="t">i32</span>| a + b <span class="c">// 独立闭包(参数带类型)</span>
-<span class="fn">print</span>(add(<span class="n">1</span>, <span class="n">2</span>))                 <span class="c">// 3</span></code></pre>
-<div class="callout note">捕获发生在<b>创建时</b>(快照语义):之后修改外部变量不影响已创建的闭包。闭包与具名函数是同一类型 <code>fn(A) -&gt; R</code>,可以互相传递。</div>
-
-<h2 id="t10"><span class="part">第一部分 · 入门教程</span>10 模块与多文件</h2>
-<p>用 <code>module</code> 把源码按文件组织,入口文件声明后即可使用其中的一切:</p>
-<pre><code><span class="c">// —— 文件 stdlib/json.aine ——</span>
-<span class="k">fn</span> <span class="fn">stringify</span>(j: <span class="t">Json</span>) -&gt; <span class="t">String</span> { … }
-
-<span class="c">// —— 文件 main.aine ——</span>
-<span class="k">module</span> json;
-
-<span class="k">fn</span> <span class="fn">main</span>() {
-    <span class="fn">print</span>(json.stringify(value))
+    <span class="k">defer</span> <span class="fn">print</span>(<span class="s">"收尾"</span>)     <span class="c">// 离开函数时一定会执行(倒序)</span>
+    <span class="fn">print</span>(<span class="s">"干活"</span>)
 }</code></pre>
-<p>标准库(<code>stdlib/</code>)提供 json 等模块,按搜索路径自动解析。</p>
+<h3>11.2 @global:全程序共用的格子</h3>
+<pre><code><span class="k">@global</span> <span class="k">var</span> visits = <span class="n">0</span>
+
+<span class="k">fn</span> <span class="fn">hit</span>() {
+    visits = visits + <span class="n">1</span>
+}</code></pre>
+<h3>11.3 闭包:把一段做法存起来</h3>
+<pre><code><span class="k">let</span> base = <span class="n">10</span>
+<span class="k">let</span> add_base = |x| x + base
+<span class="fn">print</span>(add_base(<span class="n">5</span>))       <span class="c">// 15</span></code></pre>
+<h3>11.4 模块:把代码分到多个文件</h3>
+<pre><code><span class="k">module</span> json;          <span class="c">// 引入 stdlib/json.aine 里的全部内容</span></code></pre>
+<div class="callout note">这些特性在第二、三部分有完整参考。学到这里,你已经能写有实际用途的小程序了——去写吧,遇到问题查第二部分,想理解为什么查第三部分。</div>
+
 
 <h2 id="r1"><span class="part">第二部分 · 语言参考</span>11 词法文法</h2>
 <h3>11.1 空白与注释</h3>
