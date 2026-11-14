@@ -1,0 +1,8 @@
+fn main() {
+    let m: Map<String, i32> = Map.new()
+    m.set("k", 3)
+    var m2 = m
+    m2.set("k2", 9)
+    print(m.len())
+    print(m2.len())
+}

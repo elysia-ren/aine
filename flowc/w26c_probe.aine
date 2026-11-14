@@ -1,0 +1,21 @@
+fn main() {
+    let v: Vec<i32> = [1, 2, 3]
+    print(v)
+    let s: Vec<String> = ["a", "b"]
+    print(s)
+    let b: Vec<bool> = [true, false]
+    print(b)
+    let f: Vec<f64> = [1.5]
+    print(f)
+    let e: Vec<i32> = [1]
+    print(e)
+    let m: Map<String, i32> = Map.new()
+    m.set("a", 1)
+    m.set("b", 2)
+    print(m)
+    let mm: Map<String, String> = Map.new()
+    mm.set("x", "y")
+    print(mm)
+    let me: Map<String, i32> = Map.new()
+    print(me)
+}

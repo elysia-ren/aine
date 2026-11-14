@@ -41,12 +41,15 @@ fn tck_split(s: String, sep: String) -> Vec<String> {
     var cur = ""
     var depth = 0
     var i = 0
+    var prev = ""
     while i < s.len() {
         let c = s[i..i + 1]
-        if c == "(" {
+        if c == "(" || c == "<" {
+            // W26b: 泛型尖括号同计入深度 — Map<String, i32> 的逗号不拆参
             depth += 1
         }
-        if c == ")" {
+        if c == ")" || (c == ">" && prev != "-") {
+            // prev != "-": fn(i32) -> i32 的 -> 不计闭合
             depth -= 1
         }
         if c == sep && depth == 0 {
@@ -55,6 +58,7 @@ fn tck_split(s: String, sep: String) -> Vec<String> {
         } else {
             cur = cur + c
         }
+        prev = c
         i += 1
     }
     out.push(cur)
@@ -120,6 +124,20 @@ fn tck_expr(e: Expr, cur: String, fnames: Vec<String>, fptypes: Vec<String>, fre
                     }
                     if !is_builtin && tck_in(fname, params) {
                         // fn 类型参数调用(高阶函数) — 跳过
+                    } else if !is_builtin && tck_in(fname, vnames) {
+                        // W44: 局部 fn 值调用(let g = f) — fn( 类型变量跳过;
+                        // 非_fn 类型变量被当函数调用仍报未定义
+                        var vt9_idx = 0
+                        var vt9_found = ""
+                        for vn9 in vnames {
+                            if vn9 == fname && vt9_idx < vtypes.len() {
+                                vt9_found = vtypes[vt9_idx]
+                            }
+                            vt9_idx += 1
+                        }
+                        if !vt9_found.starts_with("fn(") && vt9_found != "infer" {
+                            diags.push(cur + ": 未定义函数 " + fname)
+                        }
                     } else if !is_builtin && !tck_in(fname, fnames) {
                         diags.push(cur + ": 未定义函数 " + fname)
                     } else if !is_builtin && tck_in(fname, fnames) {

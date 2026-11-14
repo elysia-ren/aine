@@ -1,0 +1,15 @@
+enum Color {
+    Red
+    Green
+}
+fn name(c: Color) -> String {
+    return match c {
+        Red { "r" }
+        Green { "g" }
+        _ { "?" }
+    }
+}
+fn main() {
+    print(name(Red))
+    print(name(Green))
+}

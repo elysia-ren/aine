@@ -411,6 +411,7 @@ stock.set(<span class="s">"apple"</span>, <span class="n">10</span>)           <
 
 <span class="fn">print</span>(area(<span class="t">Shape</span>.<span class="t">Circle</span>(<span class="n">2.0</span>)))       <span class="c">// 12.56</span></code></pre>
 <div class="callout note">match 还能匹配 Option(第 7 章的 Some/None)和字面量。`_` 是"其余全部"的兜底臂。</div>
+<div class="callout note"><b>穷尽性(W34)</b>:match 要么每个变体都有臂,要么有 `_` 兜底。缺臂的程序仍然定义完整——运行到未覆盖的值时 <b>panic</b>("match 未匹配任何分支",两条实现路径一致);静态检查会<b>警告</b>提示补臂(T3014,补 `_` 后逐域升级为错误)。</div>
 <div class="practice">定义 enum Season(四季),写函数按季节打印一句建议。</div>
 
 <h2 id="t10"><span class="part">第一部分 · 零基础入门</span>10 出错了怎么办</h2>
@@ -487,6 +488,7 @@ Escape        ::= '\' ('n' | 't' | 'r' | '0' | '\' | '"' | ''' | 'x' HexDigit He
 <tr><td>一元</td><td><code>- ! &amp; *</code></td><td>右</td></tr>
 <tr><td>后缀</td><td>调用 <code>()</code> 字段 <code>.x</code> 索引 <code>[i]</code> Try <code>?</code> 尾部块</td><td>左</td></tr>
 </table>
+<div class="callout note"><b>求值顺序(W34 定稿)</b>:二元运算<b>先左后右</b>;赋值<b>先右后左</b>(右值完全求值后写入);函数实参<b>从左到右</b>;match 被扫者先于臂。顺序是语言承诺,不是实现细节。</div>
 <h3>12.2 原子表达式</h3>
 <pre><code>Primary ::= IntLiteral | FloatLiteral | StrLiteral | FmtStrLiteral | 'true' | 'false'
           | Ident | Path | '(' Expr ')' | '(' Expr { ',' Expr } ')'      (* 元组 *)
@@ -603,7 +605,7 @@ Closure   ::= '|' [ Param { ',' Param } ] '|' Expr | '||' Expr</code></pre>
 <li>索引/切片越界;2. Map 键不存在;3. assert 失败;4. 运行时类型不匹配;5. 调用栈超限(500);6. defer 体内出错(abort);7. 整数除零;8. <code>i64::MIN ÷ -1</code>、对 <code>i64::MIN</code> 取负(SD-1 补全);9. 移位量 &lt; 0 或 &gt; 63(SD-1 补全)。</li>
 </ol>
 <h3>17.2 defer 全退出路径(D13/SD-2)</h3>
-<p>正常返回、early return、panic 冒泡、`?` 传播、可捕获异常——全部 LIFO 执行;defer 体内再出错 = abort(立即以该错误终止)。</p>
+<p>正常返回、early return、panic 冒泡、`?` 传播、可捕获异常——全部 LIFO 执行;defer 体内再出错 = abort(立即以该错误终止)。<b>求值时机(W30 定稿)</b>:defer 体在其<b>执行时</b>求值——退出时读取变量的<b>当前值</b>(非 defer 语句处快照;实测 `var x=1; defer print(x); x=2` 打印 2,双路一致)。defer 不是闭包,不适用 SD-7 快照语义。</p>
 <h3>17.3 try/catch 边界(D9)</h3>
 <p>仅 FFI exception、平台 exception、<code>#[catchable]</code> 函数可捕获;普通 panic 的 catch 为编译期拒绝;`#[catchable]` 仅限 unsafe/FFI 模块。<span class="badge b-defined">已定义</span>(宿主 TryCatch 实现;C 路径 AST 缺失,登记 W6)</p>
 

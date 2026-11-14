@@ -1,0 +1,7 @@
+fn f(m: Map<String, i32>, n: i32) -> i32 {
+    return n
+}
+fn main() {
+    let m: Map<String, i32> = Map.new()
+    print(f(m, 7))
+}

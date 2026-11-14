@@ -741,7 +741,53 @@ impl<'a> TypeChecker<'a> {
             }
             Expr::If(ifexpr) => self.check_if_expr(ifexpr),
             Expr::Match { scrutinee, arms, span } => {
-                self.infer_expr(scrutinee);
+                let st = self.infer_expr(scrutinee);
+                // W34: match 穷尽性 — 枚举被扫者无 `_` 臂时必须覆盖全部变体(T3014);
+                // C 路径兜底与宿主运行时对齐为 panic(alee EMatch 兜底 abort)
+                if let Ty::Named(en) = &st {
+                    if let Some(variants) = self.enums.get(en).cloned() {
+                        let mut has_wild = false;
+                        let mut covered: Vec<String> = Vec::new();
+                        for arm in arms {
+                            match &arm.pat {
+                                crate::ast::Pattern::Wildcard => has_wild = true,
+                                crate::ast::Pattern::Ident { name, .. } => {
+                                    if name == "_" {
+                                        has_wild = true;
+                                    } else {
+                                        covered.push(name.clone());
+                                    }
+                                }
+                                crate::ast::Pattern::Variant { name, .. } => covered.push(name.clone()),
+                                _ => {}
+                            }
+                        }
+                        if !has_wild {
+                            for v in &variants {
+                                if !covered.contains(v) {
+                                    // 警告级(N3003 先例): 既有 21k 行自举代码与 awen 全量依赖
+                                    // "缺臂 = 运行时 panic" 语义(双路已闭环); 静态化错误 = 全库迁移,
+                                    // 登记强化条件(补 `_` 臂后逐域转错误)
+                                    let (line, col) = self.loc(span.start);
+                                    let d = Diagnostic::new(
+                                        codes::MATCH_NON_EXHAUSTIVE,
+                                        Severity::Warning,
+                                        "type warning",
+                                        &format!(
+                                            "match 未穷尽: {} 缺少变体 {}(缺臂运行时 panic; 补臂或用 `_` 兜底)",
+                                            en, v
+                                        ),
+                                        line,
+                                        col,
+                                    )
+                                    .with_span(span.start, span.end);
+                                    self.diagnostics.push(d);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
                 let mut result = Ty::Unknown;
                 for arm in arms {
                     self.push_scope();

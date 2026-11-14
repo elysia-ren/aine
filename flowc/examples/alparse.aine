@@ -1338,9 +1338,15 @@ fn token_line(tokens: Vec<Token>, index: i32) -> i32 {
 // ctype → Aine 类型名（闭包提升时推导返回类型）
 fn ctype_to_aine(ct: String) -> String {
     if ct == "int" { return "i32" }
+    // W44: 64 位域(SD-1)后整型 C 表示为 long long — 闭包提升 ret 曾落 void(-Wreturn-mismatch)
+    if ct == "long long" { return "i64" }
     if ct == "double" { return "f64" }
     if ct == "char*" { return "String" }
     if ct == "char" { return "char" }
+    if ct == "bool" { return "bool" }
+    if ct == "al_vec" { return "Vec<infer>" }
+    if ct == "al_opt" { return "Option<infer>" }
+    if ct == "al_map" { return "Map<String, infer>" }
     if ct.starts_with("struct ") {
         return ct[7..ct.len()]
     }

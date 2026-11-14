@@ -1,0 +1,10 @@
+fn apply(f: fn(i32) -> i32) -> i32 {
+    return f(3)
+}
+fn main() {
+    let f = (x: i32) => x * 2
+    print(apply(f))
+    let g = f
+    let r: i32 = g(5)
+    print(r)
+}

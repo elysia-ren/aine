@@ -148,6 +148,7 @@ pub mod codes {
     pub const BAD_TRY: &str = "T3011";
     pub const METHOD_ARG_COUNT: &str = "T3012";
     pub const METHOD_ARG_TYPE: &str = "T3013";
+    pub const MATCH_NON_EXHAUSTIVE: &str = "T3014";
 }
 
 /// Render a diagnostic into a rustc-style text block for the CLI.
