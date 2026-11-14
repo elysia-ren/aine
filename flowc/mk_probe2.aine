@@ -1,0 +1,70 @@
+struct Frame {
+    kind: Option<MarkerKind>
+    children: Vec<String>
+}
+enum MarkerKind {
+    MkBold
+    MkItalic
+}
+enum Atom {
+    MkOpen(MarkerKind)
+    MkClose(MarkerKind)
+    Txt(String)
+}
+fn mk_text(s: String) -> String {
+    return s
+}
+fn main() {
+    var atoms: Vec<Atom> = [MkOpen(MkBold), Txt("a"), MkOpen(MkItalic), Txt("b"), MkClose(MkItalic), MkClose(MkBold)]
+    var frames: Vec<Frame> = [Frame { kind: None, children: [] }]
+    for atom in atoms {
+        match atom {
+            MkOpen(k) {
+                print("open")
+                frames = frames.push(Frame { kind: Some(k), children: [] })
+            }
+            MkClose(k) {
+                print("close")
+                let top = frames[frames.len() - 1].kind
+                if top == Some(k) {
+                    print("pop")
+                    let f = frames[frames.len() - 1]
+                    frames = drop_last(frames)
+                    let fi = frames.len() - 1
+                    let pf = frames[fi]
+                    frames = set_at(frames, fi, Frame { kind: pf.kind, children: pf.children.push(f.children[0]) })
+                } else {
+                    print("nopop")
+                }
+            }
+            Txt(s) {
+                let fi = frames.len() - 1
+                let f = frames[fi]
+                frames = set_at(frames, fi, Frame { kind: f.kind, children: f.children.push(mk_text(s)) })
+            }
+        }
+    }
+    print(frames.len())
+}
+fn drop_last(v: Vec<Frame>) -> Vec<Frame> {
+    var out: Vec<Frame> = []
+    var k = 0
+    while k < v.len() - 1 {
+        out = out.push(v[k])
+        k += 1
+    }
+    return out
+}
+fn set_at(v: Vec<Frame>, i: i32, f: Frame) -> Vec<Frame> {
+    var out: Vec<Frame> = []
+    var k = 0
+    while k < v.len() {
+        if k == i {
+            out = out.push(f)
+        } else {
+            out = out.push(v[k])
+        }
+        k += 1
+    }
+    return out
+}

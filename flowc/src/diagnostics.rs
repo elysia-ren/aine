@@ -146,6 +146,8 @@ pub mod codes {
     pub const DUPLICATE_FIELD: &str = "T3009";
     pub const ASSIGN_TO_IMMUTABLE: &str = "T3010";
     pub const BAD_TRY: &str = "T3011";
+    pub const METHOD_ARG_COUNT: &str = "T3012";
+    pub const METHOD_ARG_TYPE: &str = "T3013";
 }
 
 /// Render a diagnostic into a rustc-style text block for the CLI.
@@ -170,6 +172,12 @@ pub fn render(diag: &Diagnostic, source: &str, file: &str) -> String {
             .map(|i| start + i)
             .unwrap_or(source.len());
         let end = end.clamp(line_start, line_end);
+        // span 防御: 起点 >= 终点(如 fn 类型标注等解析期 span 反转)时不渲染插字符
+        if start >= end {
+            out.push_str(&format!("  |\n"));
+            out.push_str(&format!("{} | <源片段不可用>\n", diag.line));
+            out.push_str(&format!("  |\n"));
+        } else {
         let line_text: String = source[line_start..line_end].chars().collect();
         out.push_str(&format!("  |\n"));
         out.push_str(&format!("{} | {}\n", diag.line, line_text));
@@ -180,6 +188,7 @@ pub fn render(diag: &Diagnostic, source: &str, file: &str) -> String {
         let carets = "^".repeat(width);
         out.push_str(&format!("  | {}{}\n", pad, carets));
         out.push_str(&format!("  |\n"));
+        }
     }
     if let Some(cause) = &diag.cause {
         out.push_str(&format!("  = 原因: {}\n", cause));

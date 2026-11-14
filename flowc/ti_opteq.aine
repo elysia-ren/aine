@@ -1,0 +1,5 @@
+fn main() {
+    let v: Vec<i32> = [1, 2]
+    print(v.get(0) == Some(1))
+    print(v.get(5) == None)
+}

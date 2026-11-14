@@ -1,0 +1,7 @@
+fn main() {
+    var v: Vec<i32> = [1, 2]
+    let alias = v
+    print(v.pop())
+    print(v.len())
+    print(alias.len())
+}

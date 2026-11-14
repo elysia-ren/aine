@@ -1,0 +1,4 @@
+fn main() {
+    let c: char = "中"
+    print(c)
+}

@@ -69,8 +69,15 @@ fn payload_member(ty: Option<String>, user_types: Vec<String>) -> String {
     match ty {
         Some(t) {
             if t == "String" { return "s" }
+            // W42/SD-1: 64 位域整数族统一 .i 槽(全部 long long 表示)
             if t == "i32" { return "i" }
+            if t == "i64" || t == "u8" || t == "u16" || t == "u32" || t == "u64" || t == "usize" { return "i" }
             if t == "f64" { return "f" }
+            if t == "f32" { return "f" }
+            // bool: 存 .i 槽, 打印按 "b" 分派(al_opt_str_b)
+            if t == "bool" { return "b" }
+            // char ≡ 1 字符 String(SD-4): .s 槽
+            if t == "char" { return "s" }
             if t.starts_with("Vec<") { return "v" }
             if t.starts_with("Map<") { return "p" }
             if contains_str(user_types, t) { return "t_" + t }
@@ -225,6 +232,8 @@ fn some_member(e: Expr, user_types: Vec<String>, varnames: Vec<String>, vartypes
         EMatch(ms2, ma2) { return "t_Stmt" }
         EClosure(ps2, b2) { return "t_Expr" }
         EIdent(n) {
+            // W42: bool 字面量载荷(语言层 true/false 为 EIdent)
+            if n == "true" || n == "false" { return "b" }
             let vt = var_type(n, varnames, vartypes)
             match vt {
                 Some(_) { return payload_member(vt, user_types) }
@@ -670,7 +679,8 @@ fn c_type(ty: Option<String>, user_types: Vec<String>) -> String {
             if t == "f32" { return "double" }
             if t == "f64" { return "double" }
             if t == "bool" { return "int" }
-            if t == "char" { return "char" }
+            // SD-4/W43: char ≡ 1 字符 String → char*(单字节 C char 装不下一个码点)
+            if t == "char" { return "char*" }
             if t == "String" { return "char*" }
             if t.starts_with("Vec<") { return "al_vec" }
             if t.starts_with("Map<") || t == "Map" { return "al_map" }

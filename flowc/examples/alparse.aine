@@ -781,6 +781,10 @@ fn parse_fn(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {    let nam
         if tokens[j].text == "mut" {
             j += 1
         }
+        // move 形参前缀(SD-6: 文档性标注, C 路径不消费 — 与宿主解析器语法对齐)
+        if tokens[j].text == "move" {
+            j += 1
+        }
         let pn = tokens[j]
         if pn.kind != TIdent {
             return Err("参数需要名字")
@@ -841,6 +845,10 @@ fn parse_extern_fn(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
         if tokens[j].text == "," {
             j += 1
             continue
+        }
+        // move 形参前缀(SD-6 文档性标注, extern 侧同样跳过)
+        if tokens[j].text == "move" {
+            j += 1
         }
         let pn = tokens[j]
         if pn.kind != TIdent {

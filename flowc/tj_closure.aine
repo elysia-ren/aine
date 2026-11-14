@@ -1,0 +1,4 @@
+fn main() {
+    let f = (x: i32) => x * 2
+    print(f(21))
+}

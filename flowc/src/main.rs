@@ -1008,31 +1008,17 @@ fn run_check(path: &str) -> ExitCode {
         }
         return ExitCode::FAILURE;
     }
-    // valueal: ownership + summary analysis (M2)
+    // valueal 摘要计数保留(仅统计); 所有权诊断(V4001 等)不进 check —
+    // SD-6: move = 文档性标注, 无可观察语义; 所有权分析属 aine opt 实验命令(P2-2 VIR)
     let vf = ValueFlow::new(&resolved.program, &resolved.resolution, &typeck, &lexed.tokens).analyze();
-    let mut va_failed = false;
-    for d in &vf.diagnostics.diagnostics {
-        if d.severity == Severity::Error {
-            va_failed = true;
-        }
-        if d.severity == Severity::Warning {
-            warnings += 1;
-        }
-        eprint!("{}", render(d, &source, path));
-    }
-    if va_failed {
-        eprintln!("check: 失败（{} 个所有权错误）", vf.diagnostics.error_count());
-        ExitCode::FAILURE
-    } else {
-        println!(
-            "check: OK（{} 个 token，{} 个顶层项目，{} 个符号，{} 个类型，{} 个摘要，{} 个警告）",
-            lexed.tokens.len(),
-            program.items.len(),
-            resolved.program.symbols.len(),
-            typeck.types.len(),
-            vf.summaries.len(),
-            warnings
-        );
-        ExitCode::SUCCESS
-    }
+    println!(
+        "check: OK（{} 个 token，{} 个顶层项目，{} 个符号，{} 个类型，{} 个摘要，{} 个警告）",
+        lexed.tokens.len(),
+        program.items.len(),
+        resolved.program.symbols.len(),
+        typeck.types.len(),
+        vf.summaries.len(),
+        warnings
+    );
+    ExitCode::SUCCESS
 }

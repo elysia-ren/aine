@@ -1,0 +1,10 @@
+fn main() {
+    let w: Vec<i64> = [1, 2, 3]
+    print(w.get(0))
+    print(w.get(5))
+    print(w.get(0).unwrap_or(0))
+    let b: Vec<bool> = [true, false]
+    print(b.get(0))
+    let f: Vec<f64> = [1.5, 2.5]
+    print(f.get(1))
+}

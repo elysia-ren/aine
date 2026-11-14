@@ -1,0 +1,13 @@
+fn inc(x: i32) -> i32 {
+    return x + 1
+}
+fn wrap(s: String) -> String {
+    return s
+}
+fn apply(f: fn(i32) -> i32) -> i32 {
+    return f(3)
+}
+fn main() {
+    print(apply(inc))
+    print(apply(wrap))
+}

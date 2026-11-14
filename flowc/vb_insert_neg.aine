@@ -1,0 +1,7 @@
+fn main() {
+    var v: Vec<i32> = [1, 2, 3]
+    v.insert(-1, 9)
+    print(v.len())
+    print(v[0])
+    print(v[3])
+}

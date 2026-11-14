@@ -946,7 +946,13 @@ impl Interp {
                 let v = self.eval(env, expr)?;
                 match op {
                     crate::ast::UnOp::Neg => match v {
-                        Value::Int(i) => Ok(Value::Int(-i)),
+                        Value::Int(i) => {
+                            // W41: i64::MIN 取负 = 溢出 panic(与 al_wneg 对齐)
+                            if i == i64::MIN {
+                                return Err(RtError::msg("取负溢出: i64 最小值"));
+                            }
+                            Ok(Value::Int(-i))
+                        }
                         Value::Float(f) => Ok(Value::Float(-f)),
                         _ => Err(RtError::msg("一元负号要求数值")),
                     },
@@ -1454,12 +1460,23 @@ impl Interp {
                 let l = self.eval(env, lhs)?;
                 let r = self.eval(env, rhs)?;
                 let (a, b) = (int_of(&l), int_of(&r));
+                // W41: 移位量越界 = panic; 位移按 64 位二补数环绕(与 al_wshl/wshr 对齐)
                 let v = match op {
                     BinOp::BitAnd => a & b,
                     BinOp::BitOr => a | b,
                     BinOp::BitXor => a ^ b,
-                    BinOp::Shl => a << b,
-                    BinOp::Shr => a >> b,
+                    BinOp::Shl => {
+                        if b < 0 || b > 63 {
+                            return Err(RtError::msg(format!("移位量越界: {}", b)));
+                        }
+                        ((a as u64) << b) as i64
+                    }
+                    BinOp::Shr => {
+                        if b < 0 || b > 63 {
+                            return Err(RtError::msg(format!("移位量越界: {}", b)));
+                        }
+                        a >> b
+                    }
                     _ => 0,
                 };
                 Ok(Value::Int(v))
@@ -1484,21 +1501,28 @@ impl Interp {
         use crate::ast::BinOp;
         match (a, b) {
             (Value::Int(x), Value::Int(y)) => {
+                // W41/SD-1: 64 位域模运算(二补数环绕) — 与 profile 无关, 与 C 后端 al_w* 对齐
                 let v = match op {
-                    BinOp::Add => x + y,
-                    BinOp::Sub => x - y,
-                    BinOp::Mul => x * y,
+                    BinOp::Add => x.wrapping_add(*y),
+                    BinOp::Sub => x.wrapping_sub(*y),
+                    BinOp::Mul => x.wrapping_mul(*y),
                     BinOp::Div => {
                         if *y == 0 {
                             return Err(RtError::msg("除零错误"));
                         }
-                        x / y
+                        if *x == i64::MIN && *y == -1 {
+                            return Err(RtError::msg("除法溢出: i64 最小值除以 -1"));
+                        }
+                        x.wrapping_div(*y)
                     }
                     BinOp::Rem => {
                         if *y == 0 {
                             return Err(RtError::msg("除零错误"));
                         }
-                        x % y
+                        if *x == i64::MIN && *y == -1 {
+                            return Err(RtError::msg("取余溢出: i64 最小值对 -1"));
+                        }
+                        x.wrapping_rem(*y)
                     }
                     _ => return Err(RtError::msg("非法算术运算")),
                 };
@@ -1603,6 +1627,25 @@ impl Interp {
                     }
                 }
                 let base_val = self.eval(env, base)?;
+                // W36: pop 特例 — 深拷贝回退路径中"方法返回值(元素)"与"容器新状态"必须分离;
+                // 否则回退写回会把接收者变量覆盖成 Option(唯一持有路径 try_mutate 无此问题)
+                if field == "pop" {
+                    if let Value::Vec(items) = &base_val {
+                        let mut new_items: Vec<Value> = items.iter().cloned().collect();
+                        let popped = new_items.pop();
+                        let ret = match popped {
+                            Some(v) => Value::Option { some: true, value: Box::new(v) },
+                            None => Value::Option { some: false, value: Box::new(Value::Unit) },
+                        };
+                        if let Some(name) = receiver_name.clone() {
+                            let newv = Value::Vec(new_items.into());
+                            if !env.assign(&name, newv.clone()) && self.globals.contains_key(&name) {
+                                self.globals.insert(name.clone(), newv);
+                            }
+                        }
+                        return Ok(ret);
+                    }
+                }
                 let result = self.call_method(&base_val, field, &arg_vals)?;
                 if let Some(name) = receiver_name {
                     let mutable = is_mutating_method(field)
@@ -2057,22 +2100,28 @@ impl Interp {
                     }
                     "set" => {
                         if let (Some(Value::Int(idx)), Some(v)) = (args.first(), args.get(1)) {
-                            let idx = *idx as usize;
-                            if idx < items.len() { items[idx] = v.clone(); }
+                            // W35/W37: 越界 = panic(SD-5 第 1 项); 负索引同样越界
+                            if *idx < 0 || (*idx as usize) >= items.len() {
+                                return Err(RtError::msg(format!("索引越界: idx={} len={}", idx, items.len())));
+                            }
+                            items[*idx as usize] = v.clone();
                         }
                         Ok(Some(slot.clone()))
                     }
                     "remove" => {
                         if let Some(Value::Int(idx)) = args.first() {
-                            let idx = *idx as usize;
-                            if idx < items.len() { items.remove(idx); }
+                            if *idx < 0 || (*idx as usize) >= items.len() {
+                                return Err(RtError::msg(format!("索引越界: idx={} len={}", idx, items.len())));
+                            }
+                            items.remove(*idx as usize);
                         }
                         Ok(Some(slot.clone()))
                     }
                     "insert" => {
                         if let (Some(Value::Int(idx)), Some(v)) = (args.first(), args.get(1)) {
-                            let idx = (*idx as usize).min(items.len());
-                            items.insert(idx, v.clone());
+                            // W37: 负索引钳制到 0(与 C 后端 al_vec_insert 对齐; 规范 §14.1 越界钳制)
+                            let pos = if *idx < 0 { 0usize } else { (*idx as usize).min(items.len()) };
+                            items.insert(pos, v.clone());
                         }
                         Ok(Some(slot.clone()))
                     }
@@ -2227,24 +2276,30 @@ impl Interp {
                 "set" => {
                     let mut new_items: Vec<Value> = items.iter().cloned().collect();
                     if let (Some(Value::Int(idx)), Some(v)) = (args.first(), args.get(1)) {
-                        let idx = *idx as usize;
-                        if idx < new_items.len() { new_items[idx] = v.clone(); }
+                        // W35/W37: 越界 = panic(SD-5 第 1 项)
+                        if *idx < 0 || (*idx as usize) >= new_items.len() {
+                            return Err(RtError::msg(format!("索引越界: idx={} len={}", idx, new_items.len())));
+                        }
+                        new_items[*idx as usize] = v.clone();
                     }
                     Ok(Value::Vec(new_items.into()))
                 }
                 "remove" => {
                     let mut new_items: Vec<Value> = items.iter().cloned().collect();
                     if let Some(Value::Int(idx)) = args.first() {
-                        let idx = *idx as usize;
-                        if idx < new_items.len() { new_items.remove(idx); }
+                        if *idx < 0 || (*idx as usize) >= new_items.len() {
+                            return Err(RtError::msg(format!("索引越界: idx={} len={}", idx, new_items.len())));
+                        }
+                        new_items.remove(*idx as usize);
                     }
                     Ok(Value::Vec(new_items.into()))
                 }
                 "insert" => {
                     let mut new_items: Vec<Value> = items.iter().cloned().collect();
                     if let (Some(Value::Int(idx)), Some(v)) = (args.first(), args.get(1)) {
-                        let idx = (*idx as usize).min(new_items.len());
-                        new_items.insert(idx, v.clone());
+                        // W37: 负索引钳制到 0(与 C 后端 al_vec_insert 对齐)
+                        let pos = if *idx < 0 { 0usize } else { (*idx as usize).min(new_items.len()) };
+                        new_items.insert(pos, v.clone());
                     }
                     Ok(Value::Vec(new_items.into()))
                 }

@@ -129,8 +129,26 @@ impl Ty {
             return true;
         }
         match (a, b) {
-            // 统一函数类型：捕获/非捕获同型，签名宽松匹配（无 Fn/Options 三分法）
-            (Ty::Fn(_, _), Ty::Fn(_, _)) => true,
+            // W46/SD-1 裁决: 64 位域下整数宽度是存储标注而非算术类型 —
+            // 整数值赋给任意整数宽度标注 = 存储适配(域内同值, 非数值转换);
+            // 算术结果恒 I64(见 check_binop)。收敛 C 路径既有行为(W11 方向反转)。
+            (
+                Ty::I32 | Ty::I64 | Ty::U8 | Ty::U16 | Ty::U32 | Ty::U64 | Ty::Usize,
+                Ty::I32 | Ty::I64 | Ty::U8 | Ty::U16 | Ty::U32 | Ty::U64 | Ty::Usize,
+            ) => true,
+            // SD-4/W43: char ≡ 1 字符 String — 无条件互赋
+            (Ty::Str, Ty::Char) | (Ty::Char, Ty::Str) => true,
+            // 统一函数类型：捕获/非捕获同型(W39 定稿: 签名相等匹配 — 参数数量/参数类型/返回类型;
+            // 无 Fn/FnMut/FnOnce 三分法, 无变体 — 变体随 Phase 2)
+            (Ty::Fn(pa, ra), Ty::Fn(pb, rb)) => {
+                pa.len() == pb.len()
+                    && pa.iter().zip(pb.iter()).all(|(x, y)| Ty::assignable(x, y) && Ty::assignable(y, x))
+                    && match (ra, rb) {
+                        (None, None) => true,
+                        (Some(x), Some(y)) => Ty::assignable(x, y) && Ty::assignable(y, x),
+                        _ => false,
+                    }
+            }
             (Ty::Vec(x), Ty::Vec(y)) => Ty::assignable(x, y),
             (Ty::Map(x), Ty::Map(y)) => Ty::assignable(x, y),
             (Ty::OptionT(x), Ty::OptionT(y)) => Ty::assignable(x, y),
@@ -507,7 +525,29 @@ impl<'a> TypeChecker<'a> {
                         a,
                         Ty::I32 | Ty::I64 | Ty::U8 | Ty::U16 | Ty::U32 | Ty::U64 | Ty::Usize | Ty::F32 | Ty::F64
                     );
-                    if !lit_adapts && !Ty::assignable(&i, &a) {
+                    // W36: 字面量适配递归到容器元素 — Vec<T> 标注 × 全字面量数组字面量
+                    // (let w: Vec<i64> = [1, 2, 3] 曾被拒: 推导 Vec<i32> ≠ Vec<i64>;
+                    //  §13.3 "整数字面量适配标注除外"应覆盖容器元素位)
+                    let vec_lit_adapts = match (&a, ls.init.as_deref()) {
+                        (Ty::Vec(et), Some(crate::ast::Expr::Array(items))) => {
+                            let int_ann = matches!(
+                                et.as_ref(),
+                                Ty::I32 | Ty::I64 | Ty::U8 | Ty::U16 | Ty::U32 | Ty::U64 | Ty::Usize
+                            );
+                            let flt_ann = matches!(et.as_ref(), Ty::F32 | Ty::F64);
+                            if int_ann {
+                                items.iter().all(|it| matches!(it, crate::ast::Expr::Int(_)))
+                            } else if flt_ann {
+                                items
+                                    .iter()
+                                    .all(|it| matches!(it, crate::ast::Expr::Int(_) | crate::ast::Expr::Float(_)))
+                            } else {
+                                false
+                            }
+                        }
+                        _ => false,
+                    };
+                    if !lit_adapts && !vec_lit_adapts && !Ty::assignable(&i, &a) {
                         let sug = match (&a, &i) {
                             (Ty::Str, _) => "右侧是字符串。若需要文本请把标注改为 String；若需要数字请检查是否漏了转换".to_string(),
                             (Ty::I32 | Ty::I64, Ty::Str) => "右侧是字符串字面量，不能直接当数字用。若要转换请提供显式的转换方法".to_string(),
@@ -771,6 +811,11 @@ impl<'a> TypeChecker<'a> {
                     | SymbolKind::ClosureParam
                     | SymbolKind::ForPattern
                     | SymbolKind::Global => self.env_type(sym),
+                    // W39: fn 项按名携带签名类型 — 使 apply(wrap) 类实参错误可静态拒绝
+                    SymbolKind::Fn => match self.symbol(sym).map(|s| self.fns.get(&s.name)) {
+                        Some(Some(sig)) => Ty::Fn(sig.params.clone(), Some(Box::new(sig.ret.clone()))),
+                        _ => Ty::Unknown,
+                    },
                     _ => Ty::Unknown,
                 }
             }
@@ -808,7 +853,8 @@ impl<'a> TypeChecker<'a> {
                 if matches!(lt, Ty::F64 | Ty::F32) || matches!(rt, Ty::F64 | Ty::F32) {
                     Ty::F64
                 } else if lt.is_integer() && rt.is_integer() {
-                    lt
+                    // W46/SD-1: 混合整数宽度运算结果 = 64 位算术域 i64(对称, 不随操作数顺序翻转)
+                    Ty::I64
                 } else {
                     Ty::Unknown
                 }
@@ -933,10 +979,86 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_call(&mut self, callee: &Expr, args: &[crate::ast::CallArg], span: Span) -> Ty {
-        if let Expr::Field { base, .. } = callee {
-            self.infer_expr(base);
-            for a in args {
-                self.infer_expr(&a.expr);
+        if let Expr::Field { base, field, .. } = callee {
+            let bt = self.infer_expr(base);
+            let arg_tys: Vec<Ty> = args.iter().map(|a| self.infer_expr(&a.expr)).collect();
+            // W40: 已知容器/字符串方法进入静态签名检查 — Unknown 回退仅限未知接收者/用户 impl
+            let known = matches!(bt, Ty::Vec(_) | Ty::Map(_) | Ty::Str);
+            if known {
+                // (方法名, 允许的参数个数) — 与宿主 call_method 内建清单一致
+                let (vec_arity, map_arity, str_arity): (&[(&str, &[usize])], &[(&str, &[usize])], &[(&str, &[usize])]) = (
+                    &[
+                        ("len", &[0]), ("pop", &[0]), ("clear", &[0]), ("sort", &[0]),
+                        ("iter", &[0]), ("sum", &[0]), ("map", &[1]), ("contains", &[1]),
+                        ("get", &[1]), ("set", &[2]), ("insert", &[2]), ("remove", &[1]),
+                        ("push", &[1]), ("concat", &[1]),
+                    ],
+                    &[
+                        ("new", &[0]), ("set", &[2]), ("get", &[1]), ("contains", &[1]),
+                        ("remove", &[1]), ("keys", &[0]), ("values", &[0]), ("len", &[0]),
+                    ],
+                    &[
+                        ("len", &[0]), ("trim", &[0]), ("to_i32", &[0]), ("to_f64", &[0]),
+                        ("split", &[1]), ("replace", &[2]), ("contains", &[1]),
+                        ("starts_with", &[1]), ("ends_with", &[1]), ("codepoint_at", &[1]),
+                        ("clone", &[0]),
+                    ],
+                );
+                let table: &[(&str, &[usize])] = match &bt {
+                    Ty::Vec(_) => vec_arity,
+                    Ty::Map(_) => map_arity,
+                    _ => str_arity,
+                };
+                match table.iter().find(|(n, _)| *n == field.as_str()) {
+                    None => {
+                        self.err(
+                            codes::METHOD_ARG_COUNT,
+                            &format!("类型 {} 上没有方法 {}", match &bt { Ty::Vec(_) => "Vec", Ty::Map(_) => "Map", _ => "String" }, field),
+                            span,
+                        );
+                    }
+                    Some((_, allowed)) => {
+                        if !allowed.contains(&arg_tys.len()) {
+                            self.err(
+                                codes::METHOD_ARG_COUNT,
+                                &format!(
+                                    "方法 {} 期望 {} 个参数，实际传了 {} 个",
+                                    field,
+                                    allowed.iter().map(|n| n.to_string()).collect::<Vec<_>>().join("/"),
+                                    arg_tys.len()
+                                ),
+                                span,
+                            );
+                        } else {
+                            // 下标/键实参类型: Vec 索引整数; Map 键 String
+                            let idx_ok = |t: &Ty| matches!(t, Ty::I32 | Ty::I64 | Ty::U8 | Ty::U16 | Ty::U32 | Ty::U64 | Ty::Usize | Ty::Unknown | Ty::Error);
+                            let first = arg_tys.first();
+                            let type_bad = match field.as_str() {
+                                "get" | "set" | "insert" | "remove" if matches!(bt, Ty::Vec(_)) => {
+                                    first.map(|t| !idx_ok(t)).unwrap_or(false)
+                                }
+                                "get" | "set" | "contains" | "remove" if matches!(bt, Ty::Map(_)) => {
+                                    first.map(|t| !matches!(t, Ty::Str | Ty::Unknown | Ty::Error)).unwrap_or(false)
+                                }
+                                "replace" | "split" | "starts_with" | "ends_with" | "contains" if matches!(bt, Ty::Str) => {
+                                    first.map(|t| !matches!(t, Ty::Str | Ty::Unknown | Ty::Error)).unwrap_or(false)
+                                }
+                                _ => false,
+                            };
+                            if type_bad {
+                                self.err(
+                                    codes::METHOD_ARG_TYPE,
+                                    &format!(
+                                        "方法 {} 的第 1 个实参类型不符: 需要 {}",
+                                        field,
+                                        if matches!(bt, Ty::Map(_)) { "String(键)" } else if matches!(bt, Ty::Str) { "String" } else { "整数(索引)" }
+                                    ),
+                                    span,
+                                );
+                            }
+                        }
+                    }
+                }
             }
             return Ty::Unknown;
         }

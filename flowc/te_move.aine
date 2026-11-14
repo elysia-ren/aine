@@ -1,0 +1,9 @@
+fn take(move s: String) -> String {
+    return s
+}
+fn main() {
+    let a = "hello"
+    let b = take(a)
+    print(a)
+    print(b)
+}

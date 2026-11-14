@@ -1,0 +1,4 @@
+fn main() {
+    var v: Vec<i32> = [1, 2]
+    v.set(5, 9)
+}

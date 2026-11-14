@@ -80,13 +80,9 @@ fn c_operand(e: Expr, is_char_side: bool, user_types: Vec<String>, vnames: Vec<S
 }
 
 
-// 字符串拼接操作数：char 值 → (char[2]){c, 0}
+// 字符串拼接操作数：char ≡ 1 字符 String(SD-4/W43) — char 变量已是 char*, 无需转换
 fn c_str_operand(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>, vfnames: Vec<String>, vftypes: Vec<String>) -> String {
-    let c = c_expr(e, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
-    if is_char_typed(e, varnames, vartypes) {
-        return "al_char_to_str(" + c + ")"
-    }
-    return c
+    return c_expr(e, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
 }
 
 
@@ -297,7 +293,7 @@ fn fstr_piece(val: String, varnames: Vec<String>, vartypes: Vec<String>, fnames:
                 let ct = expr_ctype(fx, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, user_types)
                 if ct == "long long" { return "al_num(" + c + ")" }
                 if ct == "double" { return "al_fnum(" + c + ")" }
-                if ct == "char" { return "al_char_to_str(" + c + ")" }
+                // char ≡ 1 字符 String(SD-4/W43): char* 直接进插值, 无需 al_char_to_str
                 return c
             }
         }
@@ -682,6 +678,41 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
                         }
                     }
                     EField(_, mname) {
+                        // W42: X.get(k).unwrap_or(d) 直接打印 — 解包值按载荷类型分派
+                        // (此前数字形态落裸 %s → long long 当 char* 解引用段错误)
+                        if mname == "unwrap_or" {
+                            var u_mem = ""
+                            match c2 {
+                                EField(ub, _) {
+                                    match ub {
+                                        ECall(uc, _) {
+                                            match uc {
+                                                EField(uib, _) {
+                                                    let ubt = base_type(uib, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                                                    match ubt {
+                                                        Some(umt) {
+                                                            if umt.starts_with("Map<") { u_mem = payload_member(Some(second_type_arg(umt)), user_types) }
+                                                            else if umt.starts_with("Vec<") { u_mem = payload_member(Some(first_type_arg(umt)), user_types) }
+                                                        }
+                                                        None {}
+                                                    }
+                                                }
+                                                _ {}
+                                            }
+                                        }
+                                        _ {}
+                                    }
+                                }
+                                _ {}
+                            }
+                            if u_mem == "i" { f1 = "%s"
+                            part = "al_num(" + pc + ")" }
+                            else if u_mem == "f" { f1 = "%s"
+                            part = "al_fnum(" + pc + ")" }
+                            else if u_mem == "b" { f1 = "%s"
+                            part = "al_bool((int)(" + pc + "))" }
+                            // s 载荷: 解包值即 char*, 裸 %s 正确
+                        }
                         let mr = method_ret(mname, a2.len())
                         if mr == "i32" { f1 = "%s"
                             part = "al_num(" + pc + ")" }
@@ -725,6 +756,9 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
                             } else if is_opt_get && mem == "s" {
                                 f1 = "%s"
                                 part = "al_opt_str_s(" + pc + ")"
+                            } else if is_opt_get && mem == "b" {
+                                f1 = "%s"
+                                part = "al_opt_str_b(" + pc + ")"
                             } else if mem == "i" {
                                 f1 = "%s"
                                 part = "al_num(" + pc + ")"
@@ -799,6 +833,8 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
                             part = "al_opt_str_f(" + pc + ")" }
                             else if pm == "s" { f1 = "%s"
                             part = "al_opt_str_s(" + pc + ")" }
+                            else if pm == "b" { f1 = "%s"
+                            part = "al_opt_str_b(" + pc + ")" }
                         }
                     }
                     _ {
@@ -827,9 +863,7 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
                 f1 = "%s"
                 part = "al_num(" + pc + ")"
             }
-            if hint == "char" {
-                f1 = "%d"
-            }
+            // hint == "char" 撤销 %d: SD-4/W43 后 char ≡ 1 字符 String(char*) → 裸 %s
             if hint == "bool" {
                 f1 = "%s"
                 part = "al_bool(" + pc + ")"
@@ -1052,17 +1086,11 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
             let l_lit_char = is_1char_str(l)
             let r_lit_char = is_1char_str(r)
             if l_char || r_char || l_lit_char || r_lit_char {
-                let lc: String = if l_char || l_lit_char {
-                    c_operand(l, true, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
-                } else {
-                    "(" + c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")[0]"
-                }
-                let rc: String = if r_char || r_lit_char {
-                    c_operand(r, true, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
-                } else {
-                    "(" + c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")[0]"
-                }
-                return "(" + lc + " " + c_op(op) + " " + rc + ")"
+                // SD-4/W43: char ≡ 1 字符 String(char*) — 比较一律 strcmp
+                // (旧 C char 'x' 字面量形态随表示退役; 与宿主 Str 比较语义一致)
+                let lc: String = c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                let rc: String = c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                return "(strcmp(" + lc + ", " + rc + ") " + c_op(op) + " 0)"
             }
             // enum 值与变体名比较：x.kind != TOp → x.kind.tag != TOp
             let l_vn = variant_ident(l)
@@ -1311,9 +1339,53 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     return "__extension__ ({ al_opt _l = (" + lc4 + "); al_opt _r = (" + rc4 + "); " + core + "; })"
                 }
             }
+            // W41: 数值算术路由确定性助手(二补数环绕 + panic 面); 浮点(字面量/f32/f64 提示)原样
+            var is_flop = false
+            match l {
+                EFloat(_) { is_flop = true }
+                _ {}
+            }
+            match r {
+                EFloat(_) { is_flop = true }
+                _ {}
+            }
+            if !is_flop {
+                let lh = expr_num_hint(l, varnames, vartypes, fnames, freturns)
+                let rh = expr_num_hint(r, varnames, vartypes, fnames, freturns)
+                if lh == "f64" || lh == "f32" || rh == "f64" || rh == "f32" { is_flop = true }
+            }
+            if op == "+" || op == "-" || op == "*" || op == "/" || op == "%" || op == "<<" || op == ">>" {
+                if !is_flop {
+                    let lc = c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                    let rc = c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                    if op == "+" { return "al_wadd(" + lc + ", " + rc + ")" }
+                    if op == "-" { return "al_wsub(" + lc + ", " + rc + ")" }
+                    if op == "*" { return "al_wmul(" + lc + ", " + rc + ")" }
+                    if op == "/" { return "al_wdiv(" + lc + ", " + rc + ")" }
+                    if op == "%" { return "al_wrem(" + lc + ", " + rc + ")" }
+                    if op == "<<" { return "al_wshl(" + lc + ", " + rc + ")" }
+                    return "al_wshr(" + lc + ", " + rc + ")"
+                }
+            }
             return "(" + c_expr(l, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + " " + c_op(op) + " " + c_expr(r, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
         }
-        EUnary(op, x) { return "(" + op + c_expr(x, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")" }
+        EUnary(op, x) {
+            // W41: 取负走 al_wneg(浮点除外)
+            if op == "-" {
+                var is_flop = false
+                match x {
+                    EFloat(_) { is_flop = true }
+                    _ {}
+                }
+                if !is_flop {
+                    let xh = expr_num_hint(x, varnames, vartypes, fnames, freturns)
+                    if xh != "f64" && xh != "f32" {
+                        return "al_wneg(" + c_expr(x, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
+                    }
+                }
+            }
+            return "(" + op + c_expr(x, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
+        }
         ECall(f, args) {
             // 内置构造：Some/None/Ok/Err → al_opt 宏
             match f {
@@ -1394,6 +1466,8 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                             }
                             _ {}
                         }
+                        // bool 载荷存 .i 槽(打印按 "b" 分派 al_opt_str_b)
+                        if mem2 == "b" { mem2 = "i" }
                         // s/i/f 成员按值存储; 仅 t_ 指针成员需解引用
                         var deref2 = ""
                         if mem2.starts_with("t_") {
@@ -1540,11 +1614,16 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                                 }
                             }
                             EIndex(_, _) {
-                                // String 切片/Vec<String> 索引 → char* 复合字面量；Vec 元素是 lvalue → 直接取址
+                                // String 切片/Vec<String> 索引 → char* 复合字面量;
+                                // Vec 元素: v[i] 读现经 al_vec_at 语句表达式(W35 越界 panic)是右值。
+                                // 临时必须落在**外层**语句表达式作用域(push_pre 前置声明)——
+                                // 若放进内层 ({...}), __ep 地址在内层结束时即死, al_push memcpy 读死栈
+                                // (awen 嵌套标记帧污染根因)
                                 if expr_is_string(args[0], EStr(""), varnames, vartypes, fnames, freturns, snames, sfnames, sftypes) {
                                     addr = "&(char*){ " + arg_c + " }"
                                 } else {
-                                    addr = "&" + arg_c
+                                    push_pre = "__typeof__(" + arg_c + ") __ep = (" + arg_c + "); "
+                                    addr = "&__ep"
                                 }
                             }
                             _ {}
@@ -1794,7 +1873,8 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                                     let vc = c_expr(args[1], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
                                     let et = first_type_arg(mt)
                                     let ect = c_type(Some(et), user_types)
-                                    return "({ ((" + ect + "*)" + mc + ".data)[" + idx_c + "] = (" + vc + "); })"
+                                    // W35/W37: set 越界 = panic(SD-5 第 1 项, 与宿主对齐)
+                                    return "({ long long __si = (" + idx_c + "); if (__si < 0 || (size_t)__si >= (" + mc + ").len) { fprintf(stderr, \"索引越界: idx=%lld len=%zu\\n\", __si, (size_t)(" + mc + ").len); abort(); } ((" + ect + "*)" + mc + ".data)[__si] = (" + vc + "); })"
                                 }
                             }
                             None {}
@@ -2717,7 +2797,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                                             if t == "String" { ct = "char*" }
                                             else if t == "i32" { ct = "int" }
                                             else if t == "f64" { ct = "double" }
-                                            else if t == "char" { ct = "char" }
+                                            else if t == "char" { ct = "char*" }
                                             else if t.starts_with("Vec<") { ct = "al_vec" }
                                             else if contains_str(user_types, t) { ct = "struct " + t }
                                         }
@@ -3160,6 +3240,25 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                         }
                     }
                     _ {}
+                }
+            }
+            // W41: 复合算术赋值走确定性助手(浮点标注除外)
+            if op == "+=" || op == "-=" || op == "*=" || op == "/=" || op == "%=" {
+                var is_f = false
+                let vt_s = var_type(name, varnames, vartypes)
+                match vt_s {
+                    Some(t_s) {
+                        if t_s == "f64" || t_s == "f32" { is_f = true }
+                    }
+                    None {}
+                }
+                if !is_f {
+                    var wfn = "al_wadd"
+                    if op == "-=" { wfn = "al_wsub" }
+                    else if op == "*=" { wfn = "al_wmul" }
+                    else if op == "/=" { wfn = "al_wdiv" }
+                    else if op == "%=" { wfn = "al_wrem" }
+                    return pad + name + " = " + wfn + "(" + name + ", " + c_expr(rhs, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ");"
                 }
             }
             return pad + name + " " + op + " " + c_expr(rhs, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";"
@@ -3865,8 +3964,17 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
     out = out + "void* al_vec_get(al_vec* vec, long idx) { if (idx < 0 || (size_t)idx >= vec->len) return NULL; return (void*)((char*)vec->data + idx * vec->elem_size); }\n"
     // SD-5 词表第 1 项: 索引越界 = panic — v[i] 读路径与宿主 RtError 对齐(诊断文案除外)
     out = out + "void* al_vec_at(al_vec* vec, long idx) { if (idx < 0 || (size_t)idx >= vec->len) { fprintf(stderr, \"索引越界: idx=%ld len=%zu\\n\", idx, vec->len); abort(); } return (void*)((char*)vec->data + idx * vec->elem_size); }\n"
+    // W41/SD-1: 64 位域确定性算术 — 二补数环绕(宿主 wrapping_* 对齐), 除零/MIN÷-1/移位越界/取负溢出 = panic
+    out = out + "static long long al_wadd(long long a, long long b) { return (long long)((unsigned long long)a + (unsigned long long)b); }\n"
+    out = out + "static long long al_wsub(long long a, long long b) { return (long long)((unsigned long long)a - (unsigned long long)b); }\n"
+    out = out + "static long long al_wmul(long long a, long long b) { return (long long)((unsigned long long)a * (unsigned long long)b); }\n"
+    out = out + "static long long al_wdiv(long long a, long long b) { if (b == 0) { fprintf(stderr, \"除零错误\\n\"); abort(); } if (a == (-9223372036854775807LL - 1) && b == -1) { fprintf(stderr, \"除法溢出: i64 最小值除以 -1\\n\"); abort(); } return a / b; }\n"
+    out = out + "static long long al_wrem(long long a, long long b) { if (b == 0) { fprintf(stderr, \"除零错误\\n\"); abort(); } if (a == (-9223372036854775807LL - 1) && b == -1) { fprintf(stderr, \"取余溢出: i64 最小值对 -1\\n\"); abort(); } return a % b; }\n"
+    out = out + "static long long al_wneg(long long a) { if (a == (-9223372036854775807LL - 1)) { fprintf(stderr, \"取负溢出: i64 最小值\\n\"); abort(); } return -a; }\n"
+    out = out + "static long long al_wshl(long long a, long long b) { if (b < 0 || b > 63) { fprintf(stderr, \"移位量越界: %lld\\n\", b); abort(); } return (long long)((unsigned long long)a << b); }\n"
+    out = out + "static long long al_wshr(long long a, long long b) { if (b < 0 || b > 63) { fprintf(stderr, \"移位量越界: %lld\\n\", b); abort(); } return a >> b; }\n"
     out = out + "void al_vec_insert(al_vec* v, long idx, void* elem) { if (idx < 0) idx = 0; if ((size_t)idx > v->len) idx = v->len; if (v->elem_size == 0) return; v->data = realloc(v->data, (v->len + 1) * v->elem_size); if (v->data) { memmove((char*)v->data + (idx + 1) * v->elem_size, (char*)v->data + idx * v->elem_size, (v->len - idx) * v->elem_size); memcpy((char*)v->data + idx * v->elem_size, elem, v->elem_size); v->len++; } }\n"
-    out = out + "void al_vec_remove(al_vec* v, long idx) { if (idx < 0 || (size_t)idx >= v->len || v->elem_size == 0) return; memmove((char*)v->data + idx * v->elem_size, (char*)v->data + (idx + 1) * v->elem_size, (v->len - idx - 1) * v->elem_size); v->len--; }\n"
+    out = out + "void al_vec_remove(al_vec* v, long idx) { if (idx < 0 || (size_t)idx >= v->len) { fprintf(stderr, \"索引越界: idx=%ld len=%zu\\n\", idx, v->len); abort(); } if (v->elem_size == 0) { return; } memmove((char*)v->data + idx * v->elem_size, (char*)v->data + (idx + 1) * v->elem_size, (v->len - idx - 1) * v->elem_size); v->len--; }\n"
     out = out + "al_vec al_vec_concat(al_vec a, al_vec b) { if (a.elem_size != b.elem_size) { return a; } al_vec r = { a.len + b.len, a.elem_size, NULL }; if (r.len > 0) { r.data = malloc(r.len * r.elem_size); if (a.len > 0) memcpy(r.data, a.data, a.len * a.elem_size); if (b.len > 0) memcpy((char*)r.data + a.len * a.elem_size, b.data, b.len * b.elem_size); } return r; }\n"
     out = out + "const char* al_char_off(const char* s, long i) { while (i > 0 && *s) { s++; while ((*s & 0xC0) == 0x80) s++; i--; } return s; }\n"
     out = out + "char* al_char_at(const char* s, long i) { const char* p = al_char_off(s, i); long n = 1; while ((p[n] & 0xC0) == 0x80) n++; char* r = (char*)malloc(n + 1); memcpy(r, p, n); r[n] = 0; return r; }\n"
@@ -4315,6 +4423,8 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
     out = out + "static char* al_opt_str_i(al_opt o) { if (!o.tag) { return \"None\"; } char* n = al_num(o.data.i); char* r = al_strcat(\"Some(\", n); return al_strcat(r, \")\"); }\n"
     out = out + "static char* al_opt_str_f(al_opt o) { if (!o.tag) { return \"None\"; } char* n = al_fnum(o.data.f); char* r = al_strcat(\"Some(\", n); return al_strcat(r, \")\"); }\n"
     out = out + "static char* al_opt_str_s(al_opt o) { if (!o.tag) { return \"None\"; } char* r = al_strcat(\"Some(\", o.data.s ? o.data.s : \"\"); return al_strcat(r, \")\"); }\n"
+    // W42: bool 载荷存 .i 槽, 打印 Some(true)/None
+    out = out + "static char* al_opt_str_b(al_opt o) { if (!o.tag) { return \"None\"; } char* n = al_bool((int)o.data.i); char* r = al_strcat(\"Some(\", n); return al_strcat(r, \")\"); }\n"
     out = out + "#define al_some_i(x) ((al_opt){ .tag = 1, .data.i = (x) })\n"
     out = out + "#define al_some_f(x) ((al_opt){ .tag = 1, .data.f = (x) })\n"
     out = out + "#define al_some_s(x) ((al_opt){ .tag = 1, .data.s = (x) })\n"

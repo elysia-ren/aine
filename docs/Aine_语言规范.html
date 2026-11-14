@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Aine 语言规范 · S1.1</title>
+<title>Aine 语言规范 · S1.3</title>
 <style>
 :root{
   --ink:#1c2430; --sub:#5a6a7e; --line:#dde4ec; --bg:#fbfcfe; --card:#fff;
@@ -85,7 +85,7 @@ footer{margin-top:80px;padding-top:22px;border-top:1px solid var(--line);
 <body>
 <div class="layout">
 <nav id="toc">
-<h1>Aine</h1><div class="ver">语言规范 S1.1 · 教程+参考</div>
+<h1>Aine</h1><div class="ver">语言规范 S1.3 · 教程+参考</div>
 <div class="grp">第一部分 · 零基础入门</div>
 <a href="#t0">0 开始之前:你需要准备什么</a>
 <a href="#t1">1 第一个程序:让计算机说话</a>
@@ -120,7 +120,7 @@ footer{margin-top:80px;padding-top:22px;border-top:1px solid var(--line);
 </nav>
 <main>
 <h1 class="doc">Aine 语言规范</h1>
-<div class="subtitle">版本 S1.1 · 三部分:入门教程(学会写)· 语言参考(查得准)· 语义规范(查得深)· 2026-11-06</div>
+<div class="subtitle">版本 S1.3 · 三部分:入门教程(学会写)· 语言参考(查得准)· 语义规范(查得深)· 2026-11-14</div>
 
 <h2 id="t0"><span class="part">第一部分 · 零基础入门</span>0 开始之前:你需要准备什么</h2>
 <p class="lead">这一部分假设你<b>从来没有写过程序</b>。每一章只教一个概念,每个例子都可以亲手运行,并告诉你屏幕上会出现什么。</p>
@@ -529,7 +529,7 @@ Closure   ::= '|' [ Param { ',' Param } ] '|' Expr | '||' Expr</code></pre>
 <tr><td><code>e?</code></td><td>Option(T)→T;Result(T,E)→T;交叉通道 = 类型错误(SD-3)</td><td>—</td></tr>
 </table>
 <h3>13.3 赋值兼容</h3>
-<p>Unknown/Error 回退;或相等;或结构递归相等。<b>不允许隐式数值转换</b>(整数字面量适配标注除外)。用户自定义泛型为 Phase 2(显式不支持);内建 Vec/Map 泛型容器支持嵌套。</p>
+<p>Unknown/Error 回退;或相等;或结构递归相等。<b>整数存储适配(SD-10)</b>:64 位域下整数值赋给任意整数宽度标注(i32/i64/u8-u64/usize)= 域内同值,允许;<b>char ≡ 1 字符 String</b> 无条件互赋(SD-4);<b>函数类型 = 签名相等匹配</b>(参数数量/参数类型/返回类型,SD-11)。其余数值之间不允许隐式转换。整数字面量适配标注(含容器元素位)。用户自定义泛型为 Phase 2(显式不支持);内建 Vec/Map 泛型容器支持嵌套。</p>
 
 <h2 id="r4"><span class="part">第二部分 · 语言参考</span>14 容器方法语义表</h2>
 <h3>14.1 Vec&lt;T&gt;</h3>
@@ -589,8 +589,8 @@ Closure   ::= '|' [ Param { ',' Param } ] '|' Expr | '||' Expr</code></pre>
 <li>push/insert/remove 写回接收者变量(与解释器一致);</li>
 <li>自引用初始化 <code>var x = x + 1</code> 读外层 x(C 侧经临时捕获保证)。</li>
 </ul>
-<h3>16.3 整数算术域(SD-1/SD-8)</h3>
-<p>+ - * / % 在 64 位有符号域执行;声明宽度在显式窄化(to_i32 等/FFI)时按二补数环绕生效;extern 签名保持 C ABI。<b>除法与取余截断向零</b>(C23 语义,SD-8):<code>7 / 2 = 3</code>,<code>-7 / 2 = -3</code>;除零 = panic(词表第 7 项)。不变量:宿主与 C 后端整数结果逐位一致。</p>
+<h3>16.3 整数算术域(SD-1/SD-8/SD-10)</h3>
+<p>+ - * / % 在 64 位有符号域执行;<b>算术结果类型恒 i64</b>,整数宽度是存储标注而非算术类型(SD-10);声明宽度在显式窄化(to_i32 等/FFI)时按二补数环绕生效;extern 签名保持 C ABI。<b>加/减/乘按二补数模 2^64 环绕</b>(与编译 profile 无关);<b>除法与取余截断向零</b>(C23 语义,SD-8):<code>7 / 2 = 3</code>,<code>-7 / 2 = -3</code>;<code>i64::MIN ÷ -1</code>、对 MIN 取负、移位量越界 = panic(词表第 8/9 项);除零 = panic(第 7 项)。不变量:宿主与 C 后端整数结果逐位一致。</p>
 <h3>16.4 Materialization 与优化 <span class="badge b-intent">只有意图</span></h3>
 <p>视图化(D1 四条件)/物化三档诊断(64KB/1MB)/禁隐式大型 Clone(§10 禁"静默"复制)——实现未启动;"零额外分配"是优化目标,不是语言保证(M-6)。</p>
 <h3>16.5 统一缺失值模型(SD-9)</h3>
@@ -600,7 +600,7 @@ Closure   ::= '|' [ Param { ',' Param } ] '|' Expr | '||' Expr</code></pre>
 <h3>17.1 panic 构造词表(封闭)</h3>
 <p>以下产生 panic(终止程序,消息含函数栈),不可被普通 catch(D9):</p>
 <ol>
-<li>索引/切片越界;2. Map 键不存在;3. assert 失败;4. 运行时类型不匹配;5. 调用栈超限(500);6. defer 体内出错(abort);7. 整数除零。</li>
+<li>索引/切片越界;2. Map 键不存在;3. assert 失败;4. 运行时类型不匹配;5. 调用栈超限(500);6. defer 体内出错(abort);7. 整数除零;8. <code>i64::MIN ÷ -1</code>、对 <code>i64::MIN</code> 取负(SD-1 补全);9. 移位量 &lt; 0 或 &gt; 63(SD-1 补全)。</li>
 </ol>
 <h3>17.2 defer 全退出路径(D13/SD-2)</h3>
 <p>正常返回、early return、panic 冒泡、`?` 传播、可捕获异常——全部 LIFO 执行;defer 体内再出错 = abort(立即以该错误终止)。</p>
@@ -614,7 +614,7 @@ Closure   ::= '|' [ Param { ',' Param } ] '|' Expr | '||' Expr</code></pre>
 <tr><td>M-2</td><td>显式优先于隐式</td></tr>
 <tr><td>M-3</td><td>安全默认优先于便利</td></tr>
 <tr><td>M-4</td><td>后定稿优先于先定稿(首例判例:§25 捕获推导 × D14 快照,D14 胜)。废止须走四要素:指明被替代条款/书面理由/迁移依赖/重验不变量</td></tr>
-<tr><td>M-5</td><td>双实现分歧时,宿主解释器为参考实现。三对象:规范(Normative)/参考实现(宿主)/交付实现(C 后端);"双路一致" = 语言子集 × stdout/exit 字节等价(诊断文案除外)</td></tr>
+<tr><td>M-5</td><td>双实现分歧时,宿主解释器为参考实现。三对象:规范(Normative)/参考实现(宿主)/交付实现(C 后端);"双路一致" = 语言子集 × stdout/exit 字节等价(诊断文案除外)。可观察面:stdout/exit 为基础面;文件系统变化/外部调用/资源释放/并发可达状态为扩展面,随对应域定稿启用</td></tr>
 <tr><td>M-6</td><td>优化失败不是语义错误:任何精度/优化/缓存组合下可观察行为(stdout/exit)一致</td></tr>
 </table>
 <p>规则按职能五分类:<b>定义</b>(saṃjñā)/<b>操作</b>(vṛtti)/<b>例外</b>(niyama)/<b>管辖</b>(adhikāra)/<b>元规则</b>(paribhāṣā)。每条规则的含义来自它与体系中其他规则的关系——因此本规范每条规则都标注编号与管辖域。</p>
@@ -652,6 +652,9 @@ Closure   ::= '|' [ Param { ',' Param } ] '|' Expr | '||' Expr</code></pre>
 <tr><td>SD-7</td><td>捕获 = 快照(§25 废止,M-4 裁决)</td><td><span class="badge b-proposal">定稿提案</span></td></tr>
 <tr><td>SD-8</td><td>整数除/余截断向零;除零 panic</td><td><span class="badge b-verified">已验证</span></td></tr>
 <tr><td>SD-9</td><td>统一缺失值模型:Map.get/Vec.get/Vec.pop 一律 Option&lt;T&gt;;index 读越界 panic 双路对齐</td><td><span class="badge b-verified">已验证</span></td></tr>
+<tr><td>SD-10</td><td>整数存储适配:宽度 = 存储标注;算术恒 i64;字面量适配递归容器元素</td><td><span class="badge b-verified">已验证</span></td></tr>
+<tr><td>SD-11</td><td>函数类型签名相等匹配;fn 项携带签名</td><td><span class="badge b-verified">已验证</span></td></tr>
+<tr><td>SD-12</td><td>已知方法静态签名检查(T3012/T3013);Unknown 回退仅限未知接收者</td><td><span class="badge b-verified">已验证</span></td></tr>
 </table>
 
 <h2 id="a1"><span class="part">附录</span>A 关键字表</h2>
@@ -691,7 +694,7 @@ Closure   ::= '|' [ Param { ',' Param } ] '|' Expr | '||' Expr</code></pre>
 <tr><td>I 平台工具链</td><td>3</td><td>—</td><td>2</td><td>1</td><td>—</td></tr>
 <tr><td>元规则</td><td>6</td><td>—</td><td>—</td><td>6</td><td>—</td></tr>
 </table>
-<p>完整九字段卡片:docs/audit/01-语义规则总表.md。发现账本 W1–W34(审计主链 W1–W22 + 外部审读轮 W23–W34,关闭记录见 02-清单)、正面确认(有意识决定)6 项。规则总数 69(九域 63 + 元规则 6)。</p>
+<p>完整九字段卡片:docs/audit/01-语义规则总表.md。发现账本 W1–W47(审计主链 W1–W22 + 外部审读轮 W23–W34 + 专项审计轮 W36–W47;关闭记录见 02-清单)、正面确认(有意识决定)6 项。规则总数 69(九域 63 + 元规则 6)。<b>证据类型分层(P2-02)</b>:"已验证"规则均以<b>双路差分</b>为证据;更高档(性质验证/模型检验/形式证明)随 M6-TCK 与形式化项启用。</p>
 
 <h2 id="a5"><span class="part">附录</span>E 运行指南</h2>
 <pre class="run"><code>aine run hello.aine [参数…]      <span class="c"># 解释执行(参数注入 cli_args)</span>
@@ -705,7 +708,7 @@ aine debug hello.aine 行号…      <span class="c"># 断点执行</span></code
 
 <footer>
 Aine 语言规范 S1.3 · 审计版 · 2026-11-14<br>
-语义依据:docs/audit/01-语义规则总表(九域 63 + 元规则 6 = 69 条)· docs/audit/05-语义定稿补遗(SD-1~SD-9)· 设计决策登记簿(D1-D15)· 差分语料 examples/cons.aine·mapt.aine·w27.aine<br>
+语义依据:docs/audit/01-语义规则总表(九域 63 + 元规则 6 = 69 条)· docs/audit/05-语义定稿补遗(SD-1~SD-12)· docs/audit/07-专项审计核查 · 设计决策登记簿(D1-D15)· 差分语料 cons·mapt·w27·va·vb·vd·vmix·mk_probe2 等 18 篇<br>
 修订须经设计变更评审;行为声明以双实现差分验证为准(元规则 M-5/M-6)。
 </footer>
 </main>

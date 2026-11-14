@@ -1,0 +1,5 @@
+fn main() {
+    let v = [1, 2, 3]
+    let x = v.get("wrong")
+    print(x)
+}
