@@ -1,0 +1,10 @@
+fn main() {
+    let b: u8 = 200
+    let total = b + 100
+    print(total)
+    print(b)
+    let u: usize = 42
+    print(u + 8)
+    let f: f32 = 1.5
+    print(f * 2.0)
+}

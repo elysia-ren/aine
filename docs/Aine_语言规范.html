@@ -312,7 +312,9 @@ fruits[<span class="n">0</span>] = <span class="s">"梨"</span>                 
 <tr><td><code>v.insert(i, x)</code></td><td>插到第 i 格</td></tr>
 <tr><td><code>v.remove(i)</code></td><td>删掉第 i 格</td></tr>
 <tr><td><code>v.set(i, x)</code></td><td>把第 i 格换成 x</td></tr>
-<tr><td><code>v.get(i)</code> / <code>v[i]</code></td><td>读第 i 格</td></tr>
+<tr><td><code>v[i]</code></td><td>读第 i 格(越界 = 程序报错)</td></tr>
+<tr><td><code>v.get(i)</code></td><td>读第 i 格,包成 <code>Option</code>:有 = <code>Some(内容)</code>,没有 = <code>None</code></td></tr>
+<tr><td><code>v.pop()</code></td><td>取走最后一格(列表变短);空列表得 <code>None</code></td></tr>
 <tr><td><code>v.len()</code> / <code>v.contains(x)</code></td><td>几格 / 有没有</td></tr>
 <tr><td><code>v.concat(w)</code></td><td>把 w 接到后面,得到新列表</td></tr>
 </table>
@@ -504,6 +506,7 @@ Closure   ::= '|' [ Param { ',' Param } ] '|' Expr | '||' Expr</code></pre>
 <table>
 <tr><th>组</th><th>类型</th></tr>
 <tr><td>整数</td><td><code>i32</code> <code>i64</code> <code>u8</code> <code>u16</code> <code>u32</code> <code>u64</code> <code>usize</code></td></tr>
+<tr><td>↳ 表示局限</td><td>整数算术全在 64 位有符号域(SD-1/16.3);<code>u64</code> 字面量上限 = i64 上限,超出即词法拒绝 F1004(W29,T1.0 增补项)</td></tr>
 <tr><td>浮点</td><td><code>f32</code>(双精度别名)<code>f64</code></td></tr>
 <tr><td>其他标量</td><td><code>bool</code> <code>char</code>(≡ 单字符 String)</td></tr>
 <tr><td>文本</td><td><code>String</code>(拥有)/ <code>&amp;str</code>(高级借用)</td></tr>
@@ -533,14 +536,15 @@ Closure   ::= '|' [ Param { ',' Param } ] '|' Expr | '||' Expr</code></pre>
 <table>
 <tr><th>方法</th><th>签名</th><th>语义</th><th>失败</th></tr>
 <tr><td>push</td><td><code>(x: T) → Vec&lt;T&gt;</code></td><td>尾部追加,产生新版本,写回接收者</td><td>—</td></tr>
-<tr><td>pop</td><td><code>() → T</code></td><td>弹出尾部;空时 Nil</td><td>—</td></tr>
+<tr><td>pop</td><td><code>() → Option&lt;T&gt;</code></td><td>弹出尾部并缩容;空时 None(SD-9)</td><td>—</td></tr>
 <tr><td>insert</td><td><code>(i: i32, x: T) → Vec&lt;T&gt;</code></td><td>插入(越界钳制),写回接收者</td><td>—</td></tr>
 <tr><td>remove</td><td><code>(i: i32) → Vec&lt;T&gt;</code></td><td>删除,写回接收者</td><td>越界 panic</td></tr>
 <tr><td>set</td><td><code>(i: i32, x: T) → Vec&lt;T&gt;</code></td><td>替换</td><td>越界 panic</td></tr>
-<tr><td>get</td><td><code>(i: i32) → T</code></td><td>读取;越界返回 Nil</td><td>—</td></tr>
+<tr><td>get</td><td><code>(i: i32) → Option&lt;T&gt;</code></td><td>读取;界内 Some(elem),越界 None(SD-9)</td><td>—</td></tr>
 <tr><td>concat</td><td><code>(other: Vec&lt;T&gt;) → Vec&lt;T&gt;</code></td><td>拼接新 Vec,不改接收者</td><td>—</td></tr>
-<tr><td>len / contains / sort / clear / index-assign</td><td>—</td><td>常规</td><td>—</td></tr>
+<tr><td>len / contains / sort / clear / index-assign</td><td>—</td><td>常规(index 读越界 = panic,SD-5 第 1 项)</td><td>—</td></tr>
 </table>
+<div class="callout note"><b>统一缺失值模型(SD-9)</b>:三种容器"可能取不到值"的读取一律返回 <code>Option&lt;T&gt;</code>——<code>Map.get(k)</code> / <code>Vec.get(i)</code> / <code>Vec.pop()</code>。界内/非空 = <code>Some(…)</code>,越界/空 = <code>None</code>。有无用 Option,业务失败用 Result,程序缺陷用 panic(三分法不变)。</div>
 <h3>14.2 Map&lt;K, V&gt;</h3>
 <table>
 <tr><th>方法</th><th>签名</th><th>语义</th><th>失败</th></tr>
@@ -585,10 +589,12 @@ Closure   ::= '|' [ Param { ',' Param } ] '|' Expr | '||' Expr</code></pre>
 <li>push/insert/remove 写回接收者变量(与解释器一致);</li>
 <li>自引用初始化 <code>var x = x + 1</code> 读外层 x(C 侧经临时捕获保证)。</li>
 </ul>
-<h3>16.3 整数算术域(SD-1)</h3>
-<p>+ - * / % 在 64 位有符号域执行;声明宽度在显式窄化(to_i32 等/FFI)时按二补数环绕生效;extern 签名保持 C ABI。不变量:宿主与 C 后端整数结果逐位一致。</p>
+<h3>16.3 整数算术域(SD-1/SD-8)</h3>
+<p>+ - * / % 在 64 位有符号域执行;声明宽度在显式窄化(to_i32 等/FFI)时按二补数环绕生效;extern 签名保持 C ABI。<b>除法与取余截断向零</b>(C23 语义,SD-8):<code>7 / 2 = 3</code>,<code>-7 / 2 = -3</code>;除零 = panic(词表第 7 项)。不变量:宿主与 C 后端整数结果逐位一致。</p>
 <h3>16.4 Materialization 与优化 <span class="badge b-intent">只有意图</span></h3>
 <p>视图化(D1 四条件)/物化三档诊断(64KB/1MB)/禁隐式大型 Clone(§10 禁"静默"复制)——实现未启动;"零额外分配"是优化目标,不是语言保证(M-6)。</p>
+<h3>16.5 统一缺失值模型(SD-9)</h3>
+<p>容器"可能取不到值"的读取<b>一律返回 <code>Option&lt;T&gt;</code></b>:<code>Map.get(k) → Option&lt;V&gt;</code>;<code>Vec.get(i) → Option&lt;T&gt;</code>(界内 Some,越界 None);<code>Vec.pop() → Option&lt;T&gt;</code>(非空 Some 并缩容,空 None)。缺失哨兵 Nil 从容器取值面退役;有无 = Option / 业务失败 = Result / 程序缺陷 = panic 的三分法不变。<span class="badge b-verified">已验证</span>(w27.aine 双路 14 断言)</p>
 
 <h2 id="s2"><span class="part">第三部分 · 语义规范</span>17 错误语义与 panic 词表</h2>
 <h3>17.1 panic 构造词表(封闭)</h3>
@@ -607,9 +613,9 @@ Closure   ::= '|' [ Param { ',' Param } ] '|' Expr | '||' Expr</code></pre>
 <tr><td>M-1</td><td>具体规则优先于一般规则(环境真包含判据,Elsewhere Condition)</td></tr>
 <tr><td>M-2</td><td>显式优先于隐式</td></tr>
 <tr><td>M-3</td><td>安全默认优先于便利</td></tr>
-<tr><td>M-4</td><td>后定稿优先于先定稿(首例判例:§25 捕获推导 × D14 快照,D14 胜)</td></tr>
-<tr><td>M-5</td><td>双实现分歧时,宿主解释器为参考实现</td></tr>
-<tr><td>M-6</td><td>优化失败不是语义错误:任何精度/优化/缓存组合下行为一致</td></tr>
+<tr><td>M-4</td><td>后定稿优先于先定稿(首例判例:§25 捕获推导 × D14 快照,D14 胜)。废止须走四要素:指明被替代条款/书面理由/迁移依赖/重验不变量</td></tr>
+<tr><td>M-5</td><td>双实现分歧时,宿主解释器为参考实现。三对象:规范(Normative)/参考实现(宿主)/交付实现(C 后端);"双路一致" = 语言子集 × stdout/exit 字节等价(诊断文案除外)</td></tr>
+<tr><td>M-6</td><td>优化失败不是语义错误:任何精度/优化/缓存组合下可观察行为(stdout/exit)一致</td></tr>
 </table>
 <p>规则按职能五分类:<b>定义</b>(saṃjñā)/<b>操作</b>(vṛtti)/<b>例外</b>(niyama)/<b>管辖</b>(adhikāra)/<b>元规则</b>(paribhāṣā)。每条规则的含义来自它与体系中其他规则的关系——因此本规范每条规则都标注编号与管辖域。</p>
 
@@ -633,7 +639,7 @@ Closure   ::= '|' [ Param { ',' Param } ] '|' Expr | '||' Expr</code></pre>
 <tr><td>自举 C 后端(交付路径)</td><td>Aine → C → zig cc → 原生;差分另一端</td><td>核心语义(缺 defer/catch 语法节点)</td></tr>
 </table>
 <h3>20.2 差分方法</h3>
-<p>同一语料双路运行,stdout/退出码字节级 diff(诊断文案排除;CRLF 归一)。常驻语料:cons.aine(13 行跨面)/ mapt.aine(Map)/ kar·ovf·df(审计钉子)/ conformance 七文件 / 自测 31 用例。</p>
+<p>同一语料双路运行,stdout/退出码字节级 diff(诊断文案排除;CRLF 归一)。常驻语料:cons.aine(13 行跨面)/ mapt.aine(Map)/ w27.aine(缺失值模型 14 断言)/ w24·ovf·df(审计钉子)/ conformance 七文件 / 自测 32 用例。</p>
 <h3>20.3 语义定稿记录(SD 系列)</h3>
 <table>
 <tr><th>#</th><th>定稿</th><th>状态</th></tr>
@@ -644,6 +650,8 @@ Closure   ::= '|' [ Param { ',' Param } ] '|' Expr | '||' Expr</code></pre>
 <tr><td>SD-5</td><td>panic 词表封闭七类</td><td><span class="badge b-defined">已定义</span></td></tr>
 <tr><td>SD-6</td><td>move = 文档性标注(值语义下可观察等效)</td><td><span class="badge b-proposal">定稿提案</span></td></tr>
 <tr><td>SD-7</td><td>捕获 = 快照(§25 废止,M-4 裁决)</td><td><span class="badge b-proposal">定稿提案</span></td></tr>
+<tr><td>SD-8</td><td>整数除/余截断向零;除零 panic</td><td><span class="badge b-verified">已验证</span></td></tr>
+<tr><td>SD-9</td><td>统一缺失值模型:Map.get/Vec.get/Vec.pop 一律 Option&lt;T&gt;;index 读越界 panic 双路对齐</td><td><span class="badge b-verified">已验证</span></td></tr>
 </table>
 
 <h2 id="a1"><span class="part">附录</span>A 关键字表</h2>
@@ -673,7 +681,7 @@ Closure   ::= '|' [ Param { ',' Param } ] '|' Expr | '||' Expr</code></pre>
 <table>
 <tr><th>域</th><th>规则数</th><th>已验证</th><th>已闭合</th><th>已定义</th><th>只有意图</th></tr>
 <tr><td>A 值语义与内存</td><td>12</td><td>3</td><td>4</td><td>3</td><td>2</td></tr>
-<tr><td>B 类型系统</td><td>12</td><td>2</td><td>4</td><td>5</td><td>1(已随 SD-1 关闭)</td></tr>
+<tr><td>B 类型系统</td><td>12</td><td>2</td><td>4</td><td>5</td><td>0(B-9 已随 SD-1 转为已验证,W32 校正)</td></tr>
 <tr><td>C 函数与闭包</td><td>10</td><td>2</td><td>4</td><td>4</td><td>—</td></tr>
 <tr><td>D 错误与资源</td><td>9</td><td>1</td><td>3</td><td>3</td><td>2</td></tr>
 <tr><td>E 并发</td><td>5</td><td>—</td><td>—</td><td>1</td><td>4</td></tr>
@@ -683,7 +691,7 @@ Closure   ::= '|' [ Param { ',' Param } ] '|' Expr | '||' Expr</code></pre>
 <tr><td>I 平台工具链</td><td>3</td><td>—</td><td>2</td><td>1</td><td>—</td></tr>
 <tr><td>元规则</td><td>6</td><td>—</td><td>—</td><td>6</td><td>—</td></tr>
 </table>
-<p>完整九字段卡片:docs/audit/01-语义规则总表.md。发现账本 W1–W22(审计关闭记录)、正面确认(有意识决定)6 项。</p>
+<p>完整九字段卡片:docs/audit/01-语义规则总表.md。发现账本 W1–W34(审计主链 W1–W22 + 外部审读轮 W23–W34,关闭记录见 02-清单)、正面确认(有意识决定)6 项。规则总数 69(九域 63 + 元规则 6)。</p>
 
 <h2 id="a5"><span class="part">附录</span>E 运行指南</h2>
 <pre class="run"><code>aine run hello.aine [参数…]      <span class="c"># 解释执行(参数注入 cli_args)</span>
@@ -693,11 +701,11 @@ aine lsp                         <span class="c"># 语言服务器(IDE 用)</spa
 aine fmt hello.aine              <span class="c"># 格式化</span>
 aine profile hello.aine          <span class="c"># 性能分析</span>
 aine debug hello.aine 行号…      <span class="c"># 断点执行</span></code></pre>
-<p>双实现说明:<code>aine run</code> 走宿主解释器(参考实现);<code>aine build</code> 走自举 C 后端。核心语义双路一致(cons.aine 语料背书);并发/UI 运行时两侧均为占位。</p>
+<p>双实现说明:<code>aine run</code> 走宿主解释器(参考实现);<code>aine build</code> 走自举 C 后端。核心语义双路一致(cons.aine·w27.aine 语料背书;等价判据见 M-5 三对象化);并发/UI 运行时两侧均为占位。</p>
 
 <footer>
-Aine 语言规范 S1.1 · 审计版 · 2026-11-06<br>
-语义依据:docs/audit/01-语义规则总表(九域 70 条)· docs/audit/05-语义定稿补遗(SD-1~SD-7)· 设计决策登记簿(D1-D15)· 差分语料 examples/cons.aine·mapt.aine<br>
+Aine 语言规范 S1.3 · 审计版 · 2026-11-14<br>
+语义依据:docs/audit/01-语义规则总表(九域 63 + 元规则 6 = 69 条)· docs/audit/05-语义定稿补遗(SD-1~SD-9)· 设计决策登记簿(D1-D15)· 差分语料 examples/cons.aine·mapt.aine·w27.aine<br>
 修订须经设计变更评审;行为声明以双实现差分验证为准(元规则 M-5/M-6)。
 </footer>
 </main>

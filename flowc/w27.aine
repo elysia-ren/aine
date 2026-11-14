@@ -1,0 +1,21 @@
+fn main() {
+    var v: Vec<i32> = [1, 2, 3]
+    print(v.get(0))
+    print(v.get(2))
+    print(v.get(5))
+    let a: i32 = v.get(0).unwrap_or(0)
+    print(a)
+    v.set(0, 10)
+    print(v.get(0))
+    let d: i32 = v.get(9).unwrap_or(-1)
+    print(d)
+    let s: Vec<String> = ["a", "b"]
+    print(s.get(0))
+    print(s.get(3))
+    print(s.get(1).unwrap_or("z"))
+    print(s.pop())
+    print(s.len())
+    print(s.pop())
+    print(s.len())
+    print(s.pop())
+}

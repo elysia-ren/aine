@@ -2042,7 +2042,11 @@ impl Interp {
                         items.push(args.first().cloned().unwrap_or(Value::Unit));
                         Ok(Some(slot.clone()))
                     }
-                    "pop" => Ok(Some(items.pop().unwrap_or(Value::Nil))),
+                    // SD-9: pop 返回 Option (原地缩容保留, 空容器 None)
+                    "pop" => Ok(Some(match items.pop() {
+                        Some(v) => Value::Option { some: true, value: Box::new(v) },
+                        None => Value::Option { some: false, value: Box::new(Value::Unit) },
+                    })),
                     "clear" => {
                         items.clear();
                         Ok(Some(Value::Unit))
@@ -2199,13 +2203,20 @@ impl Interp {
                     }
                 }
                 "get" => {
+                    // SD-9 缺失值模型: Vec.get 界内 Some(elem), 越界 None (与 Map.get 一致)
                     let i = args.first().map(int_of).unwrap_or(0) as usize;
-                    Ok(items.get(i).cloned().unwrap_or(Value::Nil))
+                    match items.get(i).cloned() {
+                        Some(v) => Ok(Value::Option { some: true, value: Box::new(v) }),
+                        None => Ok(Value::Option { some: false, value: Box::new(Value::Unit) }),
+                    }
                 }
                 "pop" => {
+                    // SD-9: Vec.pop 界内 Some(尾元素), 空 None
                     let mut new_items: Vec<Value> = items.iter().cloned().collect();
-                    let last = new_items.pop();
-                    Ok(last.unwrap_or(Value::Nil))
+                    match new_items.pop() {
+                        Some(v) => Ok(Value::Option { some: true, value: Box::new(v) }),
+                        None => Ok(Value::Option { some: false, value: Box::new(Value::Unit) }),
+                    }
                 }
                 "clear" => Ok(Value::Vec(Vec::new().into())),
                 "sort" => {

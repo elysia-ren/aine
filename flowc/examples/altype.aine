@@ -58,7 +58,7 @@ fn method_ret(mname: String, argc: i32) -> String {
     if mname == "sum" { return "f64" }
     if mname == "new" { return "Map" }
     if mname == "set" || mname == "remove" { return "()" }
-    if mname == "get" { return "Option" }
+    if mname == "get" || mname == "pop" { return "Option" }
     if mname == "contains" { return "bool" }
     if mname == "keys" { return "Vec<String>" }
     if mname == "values" { return "Vec" }
@@ -153,6 +153,8 @@ fn expr_ctype(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec
                             _ {}
                         }
                     }
+                    // SD-9: Option 返回方法(get/pop) → al_opt
+                    if method_ret(mname, args.len()) == "Option" { return "al_opt" }
                     c_type(Some(method_ret(mname, args.len())), user_types)
                 }
                 _ { return "int" }
@@ -1016,11 +1018,11 @@ fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Ve
                                 if is_cmp {
                                     types.push("bool")
                                 } else {
-                                    // 算术: 按操作数类型提示(i32/f64); 未知保持 infer
+                                    // 算术: SD-1 64 位域 — 整数族 → i64, f32 → f64
                                     let hint2 = expr_num_hint(EBin(op2, l2, r2), names, types, all_fnames, all_freturns)
-                                    if hint2 == "i32" {
-                                        types.push("i32")
-                                    } else if hint2 == "f64" {
+                                    if hint2 == "i32" || hint2 == "i64" || hint2 == "u8" || hint2 == "u16" || hint2 == "u32" || hint2 == "u64" || hint2 == "usize" {
+                                        types.push("i64")
+                                    } else if hint2 == "f64" || hint2 == "f32" {
                                         types.push("f64")
                                     } else {
                                         types.push("infer")
@@ -1451,14 +1453,14 @@ fn base_type(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<
                     return fn_return(fname, fnames, freturns)
                 }
                 EField(ib, mname) {
-                    // get 分派先于 method_ret: Map.get → Option<V>(Map 专属);
-                    // Vec.get → 裸元素类型(与解释器一致, 不包 Option)
+                    // get 分派先于 method_ret: SD-9 统一缺失值模型 —
+                    // Map.get → Option<V>, Vec.get → Option<T>
                     if mname == "get" {
                         let gb = base_type(ib, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
                         match gb {
                             Some(gt) {
                                 if gt.starts_with("Map<") { return Some("Option<" + second_type_arg(gt) + ">") }
-                                if gt.starts_with("Vec<") { return Some(first_type_arg(gt)) }
+                                if gt.starts_with("Vec<") { return Some("Option<" + first_type_arg(gt) + ">") }
                             }
                             None {}
                         }
