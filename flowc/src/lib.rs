@@ -4,6 +4,7 @@
 //! 当前实现：Lexer（词法分析）+ 结构化诊断（设计稿 §57）。
 
 pub mod ast;
+pub mod ast_dump;
 pub mod bench;
 #[cfg(test)]
 mod conformance_tests;

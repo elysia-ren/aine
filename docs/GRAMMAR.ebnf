@@ -1,0 +1,153 @@
+// Aine 文法(机器可查 EBNF)— P0-3 动作 A4 交付物
+// 基准: 宿主解析器 src/parser.rs + 自举解析器 examples/allex.aine/alparse.aine(双解析器解析树
+// 差分常驻: flowc/conformance/parse_diff.sh)。本文件是文法的规范引用; 行为语义以双实现差分为准(M-5)。
+// 记法: EBNF (ISO)。 { X } = 重复, [ X ] = 可选, | = 或, 终结符加引号。
+// 版本: S1.3 · 2026-11-16
+
+(* ===================== 词法 ===================== *)
+
+Comment        = '//' { ?任意非换行字符? } | '/*' { ?任意字符? } '/*' ;
+Newline        = ?\n? ;
+
+Identifier     = IdentStart { IdentContinue } ;
+IdentStart     = ?'a'..'z' | 'A'..'Z' | '_'? ;
+IdentContinue  = IdentStart | ?'0'..'9'? ;
+
+IntLiteral     = Digit { Digit } | '0x' HexDigit { HexDigit } | '0X' HexDigit { HexDigit } ;
+FloatLiteral   = Digit { Digit } '.' Digit { Digit } ;
+StringLiteral  = '"' { StrChar | Escape } '"' ;
+Escape         = '\\' ( 'n' | 'r' | 't' | '0' | '"' | '\\' | 'u{' HexDigit { HexDigit } '}' ) ;
+FmtStringLit   = 'f' StringLiteral ;            (* f-string: 整体捕获, {expr} 为插值 *)
+CharLiteral    = "'" StrChar "'" ;              (* SD-4: ≡ 单字符 String *)
+
+Operator       = '+=' | '-=' | '*=' | '/=' | '%=' | '->' | '==' | '!=' | '<=' | '>=' | '&&'
+               | '||' | '<<' | '>>' | '..' | '+' | '-' | '*' | '/' | '%' | '=' | '<' | '>'
+               | '!' | '&' | '|' | '^' | '~' | '?' | ':' | '.' | ',' | ';' | '(' | ')'
+               | '[' | ']' | '{' | '}' | '@' ;
+
+Keyword        = 'fn' | 'let' | 'var' | 'const' | 'if' | 'else' | 'for' | 'in' | 'while'
+               | 'return' | 'break' | 'continue' | 'match' | 'struct' | 'enum' | 'trait'
+               | 'impl' | 'where' | 'export' | 'module' | 'mod' | 'import' | 'move'
+               | 'unsafe' | 'extern' | 'try' | 'catch' | 'ui' | 'render' | 'go' | 'defer'
+               | 'true' | 'false' ;
+
+(* ===================== 程序与项 ===================== *)
+
+Program        = { Item } ;
+Item           = Attribute { Attribute } ( FnDef | StructDef | EnumDef | TraitDef | ImplBlock
+                 | ExternBlock | GlobalState | ModDecl | Import | UiDef | TypeAlias ) ;
+Attribute      = '@' Identifier ;
+
+FnDef          = 'fn' Identifier [ Generics ] '(' [ ParamList ] ')' [ '->' Type ] ( Block | ';' ) ;
+ParamList      = Param { ',' Param } [ ',' ] ;
+Param          = [ 'mut' ] [ 'move' ] Identifier ':' Type ;
+Generics       = '<' Identifier { ',' Identifier } '>' ;
+
+StructDef      = 'struct' Identifier [ Generics ] '{' [ StructField { ',' StructField } [ ',' ] ] '}' ;
+StructField    = Identifier ':' Type ;
+
+EnumDef        = 'enum' Identifier [ Generics ] '{' [ EnumVariant { [','] EnumVariant } [','] ] '}' ;
+EnumVariant    = Identifier [ '(' [ TypeList ] ')' ] ;
+TypeList       = Type { ',' Type } ;
+
+TraitDef       = 'trait' Identifier [ Generics ] '{' { FnSig } '}' ;
+FnSig          = 'fn' Identifier '(' [ ParamList ] ')' [ '->' Type ] [ Block ] ;
+ImplBlock      = 'impl' Type '{' { Item } '}' ;
+ExternBlock    = 'extern' [ StringLiteral ] '{' { FnSig } '}' ;
+GlobalState    = '@global' ( 'let' | 'var' ) Identifier ':' Type [ '=' Expr ] ;
+ModDecl        = ( 'mod' | 'module' ) Identifier [ Block ] ;   (* 无 Block = 文件模块 name.aine *)
+Import         = 'import' PathExpr ;
+UiDef          = 'ui' Identifier '{' { UiItem } '}' ;           (* 运行时占位: 解析面即全部 *)
+TypeAlias      = 'type' Identifier '=' Type ;
+
+(* ===================== 类型(SD-10: 宽度 = 存储标注) ===================== *)
+
+Type           = TypeFn ;
+TypeFn         = [ '&mut' | '&' ] TypeAtom { '->' TypeFn } ;   (* fn(A,B) -> R 统一函数类型 *)
+TypeAtom       = PathType | '(' [ TypeList ] ')' ;
+PathType       = Identifier [ '<' TypeList '>' ] { '::' Identifier [ '<' TypeList '>' ] } ;
+(* 原语: i32 i64 u8 u16 u32 u64 usize f32 f64 bool char String
+   容器: Vec<T> Map<K,V>(K 恒 String) Option<T> Result<T,E>
+   char ≡ 1 字符 String(SD-4); 整数族互赋 = 存储适配(SD-10) *)
+
+(* ===================== 语句 ===================== *)
+
+Block          = '{' { Stmt } [ ExprTail ] '}' ;   (* 尾表达式 = 块值 *)
+Stmt           = LetStmt | AssignStmt | ReturnStmt | IfStmt | WhileStmt | ForStmt
+               | BreakStmt | ContinueStmt | DeferStmt | TryCatchStmt | MatchStmtExpr
+               | GoStmt | UiStmt | BlockStmt | ExprStmt ;
+
+LetStmt        = ( 'let' | 'var' ) [ 'mut' ] Identifier [ ':' Type ] [ '=' Expr ] ';'?
+                 (* let = 不可变, var = 可变; 数组字面量元素适配容器元素类型(W36) *)
+AssignStmt     = AssignTarget AssignOp Expr ';'? ;
+AssignTarget   = Identifier [ '[' Expr ']' ] ;      (* 字段赋值 s.x = v 经表达式通路 *)
+AssignOp       = '=' | '+=' | '-=' | '*=' | '/=' | '%=' ;
+ReturnStmt     = 'return' [ Expr ] ';'?
+IfStmt         = 'if' Expr Block { 'else' ( IfStmt | Block ) } ;
+WhileStmt      = 'while' Expr Block ;
+ForStmt        = 'for' Identifier 'in' Expr Block ; (* Vec/Range/String 三形态(S3 债务登记) *)
+BreakStmt      = 'break' ';'?
+ContinueStmt   = 'continue' ';'?
+DeferStmt      = 'defer' Expr ';'?                  (* 执行时求值(W30); 全退出路径 LIFO(SD-2) *)
+TryCatchStmt   = 'try' Block 'catch' '(' [ Identifier ':' Type ] ')' Block ;
+GoStmt         = 'go' '!'? Block ;                  (* 运行时占位: 同步块 *)
+UiStmt         = 'ui' Block ;                       (* 运行时占位 *)
+ExprStmt       = Expr ';'?
+MatchStmtExpr  = MatchExpr ;                        (* 语句位的 match = 表达式语句 *)
+
+(* ===================== 表达式(优先级自低到高; 求值顺序见下) ===================== *)
+
+Expr           = AssignExpr | RangeExpr | BinExpr ;
+AssignExpr     = UnaryExpr AssignOp Expr ;          (* 右结合; 先右后左求值(W34 定稿) *)
+RangeExpr      = OrExpr [ '..' OrExpr ] ;
+BinExpr        = OrExpr ;
+OrExpr         = AndExpr { '||' AndExpr } ;
+AndExpr        = CmpExpr { '&&' CmpExpr } ;
+CmpExpr        = BitOrExpr { ('==' | '!=' | '<' | '<=' | '>' | '>=') BitOrExpr } ;
+BitOrExpr      = BitXorExpr { '|' BitXorExpr } ;
+BitXorExpr     = BitAndExpr { '^' BitAndExpr } ;
+BitAndExpr     = ShiftExpr { '&' ShiftExpr } ;
+ShiftExpr      = AddExpr { ('<<' | '>>') AddExpr } ;
+AddExpr        = MulExpr { ('+' | '-') MulExpr } ;
+MulExpr        = UnaryExpr { ('*' | '/' | '%') UnaryExpr } ;
+UnaryExpr      = ( '!' | '-' | '&' | '*' ) UnaryExpr | PostfixExpr ;
+PostfixExpr    = Primary { CallSuffix | IndexSuffix | FieldSuffix | TrySuffix } ;
+CallSuffix     = '(' [ ArgList ] ')' [ TrailingBlock ] ;  (* 尾随块/闭包实参 §69 *)
+ArgList        = [ Arg { ',' Arg } [ ',' ] ] ;
+Arg            = [ Identifier '=' ] Expr ;
+IndexSuffix    = '[' Expr ']' ;                     (* 读越界 = panic(SD-5); 容器取值用 .get(SD-9) *)
+FieldSuffix    = '.' Identifier ;
+TrySuffix      = '?' ;                              (* 交叉通道 = 类型错误(SD-3) *)
+TrailingBlock  = Block ;
+
+Primary        = IntLiteral | FloatLiteral | StringLiteral | FmtStringLit | CharLiteral
+               | 'true' | 'false' | '(' Expr ')' | ArrayLit | TupleLit
+               | StructLit | MatchExpr | ClosureExpr | IfExpr | BlockExpr
+               | GoExpr | UiExpr | PathOrCall ;
+
+ArrayLit       = '[' [ Expr { ',' Expr } [ ',' ] ] ']' ;
+TupleLit       = '(' Expr ',' Expr { ',' Expr } ')' ;
+StructLit      = Identifier '{' [ Identifier ':' Expr { ',' Identifier ':' Expr } [ ',' ] ] '}' ;
+ClosureExpr    = '|' ParamList '|' Expr | '(' ParamList ')' '=>' Expr | ParamPattern '=>' Expr ;
+ParamPattern   = Identifier ;
+MatchExpr      = 'match' Expr '{' { MatchArm } '}' ;
+MatchArm       = MatchPattern ( Block | '=>' Expr ) ;
+MatchPattern   = '_'
+               | 'Some' '(' MatchPattern ')' | 'Ok' '(' MatchPattern ')'
+               | 'Err' '(' MatchPattern ')' | 'None'
+               | Identifier [ '(' MatchPattern { ',' MatchPattern } ')' ]
+               | Literal ;
+IfExpr         = 'if' Expr Block [ 'else' ( IfExpr | Block ) ] ;
+BlockExpr      = Block ;
+GoExpr         = 'go' '!'? Block ;
+UiExpr         = 'ui' Block ;
+PathOrCall     = PathHead { CallSuffix | IndexSuffix | FieldSuffix | TrySuffix } ;
+PathHead       = Identifier { '::' Identifier } ;
+
+Literal        = IntLiteral | FloatLiteral | StringLiteral | CharLiteral | 'true' | 'false' ;
+
+(* ===================== 求值顺序(W34 定稿, 语言承诺) ===================== *)
+(* 二元运算: 先左后右; 赋值: 先右后左; 函数实参: 从左到右; match: 被扫者先于臂 *)
+(* ===================== 穷尽性(W34): match 缺臂 = 运行时 panic + 静态警告 T3014 ============ *)
+(* ===================== 整数算术(SD-1/SD-8): 64 位域, 加减乘环绕, 除余截断向零,
+   除零/MIN÷-1/取负溢出/移位量∉[0,63] = panic(SD-5 词表 9 类) ===================== *)

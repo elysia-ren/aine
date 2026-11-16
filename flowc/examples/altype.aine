@@ -55,7 +55,7 @@ fn method_ret(mname: String, argc: i32) -> String {
     if mname == "push" { return "()" }
     if mname == "iter" { return "Vec" }
     if mname == "map" { return "Vec" }
-    if mname == "sum" { return "f64" }
+    if mname == "sum" { return "i64" }  // px2: 整数主路径(浮点 sum print 分派登记)
     if mname == "new" { return "Map" }
     if mname == "set" || mname == "remove" { return "()" }
     if mname == "get" || mname == "pop" { return "Option" }
@@ -1016,6 +1016,19 @@ fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Ve
                             }
                             EInt(n3) { types.push("i32") }
                             EFloat(f3) { types.push("f64") }
+                            EStruct(sn3, _sf3) {
+                                // px_probe 首曝: 结构体字面量初始化推 infer → p.x + p.y
+                                // 裸 %s 段错误; 字段链(EField 臂 + struct_field_ty)依赖此类型入表
+                                types.push(sn3)
+                            }
+                            EIf(cond3, then3, _e3) {
+                                // px_probe 首曝: if 表达式赋值推 infer → print 裸 %s 段错误
+                                let bt3 = block_tail_expr(then3)
+                                match bt3 {
+                                    Some(te3) { types.push(expr_num_hint(te3, names, types, all_fnames, all_freturns, snames, sfnames, sftypes)) }
+                                    None { types.push("infer") }
+                                }
+                            }
                             EBin(op2, l2, r2) {
                                 // 比较运算产生 bool（==/!=/</>/<=/>=）
                                 var is_cmp = false
@@ -1029,11 +1042,15 @@ fn var_info_of_stmts(stmts: Vec<Stmt>, all_fnames: Vec<String>, all_freturns: Ve
                                     types.push("bool")
                                 } else {
                                     // 算术: SD-1 64 位域 — 整数族 → i64, f32 → f64
-                                    let hint2 = expr_num_hint(EBin(op2, l2, r2), names, types, all_fnames, all_freturns)
+                                    let hint2 = expr_num_hint(EBin(op2, l2, r2), names, types, all_fnames, all_freturns, snames, sfnames, sftypes)
                                     if hint2 == "i32" || hint2 == "i64" || hint2 == "u8" || hint2 == "u16" || hint2 == "u32" || hint2 == "u64" || hint2 == "usize" {
                                         types.push("i64")
                                     } else if hint2 == "f64" || hint2 == "f32" {
                                         types.push("f64")
+                                    } else if expr_is_string(l2, r2, names, types, all_fnames, all_freturns, snames, sfnames, sftypes) || expr_is_string(r2, l2, names, types, all_fnames, all_freturns, snames, sfnames, sftypes) {
+                                        // 字符串拼接 → String(let s = "a" + "b" 曾推 infer,
+                                        // s.len() 发射走字段兜底 .len 于 char* = 编译错; px_probe 首曝)
+                                        types.push("String")
                                     } else {
                                         types.push("infer")
                                     }

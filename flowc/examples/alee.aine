@@ -567,6 +567,30 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
         var part = pc
         // 先按表达式类型提示选格式（覆盖 EBin/EIndex 等组合形态）
         match a {
+            EBin(pb, pl, pr) {
+                // px_probe 首曝: EBin 实参从不 hint → p.x + p.y 裸 %s 段错误
+                let hint9 = expr_num_hint(a, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                if hint9 == "i32" || hint9 == "i64" || hint9 == "u8" || hint9 == "u16" || hint9 == "u32" || hint9 == "u64" || hint9 == "usize" {
+                    f1 = "%s"
+                    part = "al_num(" + pc + ")"
+                } else if hint9 == "f64" || hint9 == "f32" {
+                    f1 = "%s"
+                    part = "al_fnum(" + pc + ")"
+                } else if hint9 == "bool" {
+                    f1 = "%s"
+                    part = "al_bool((int)(" + pc + "))"
+                }
+            }
+            EUnary(ub, ux) {
+                let hinta = expr_num_hint(a, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                if hinta == "i32" || hinta == "i64" || hinta == "u8" || hinta == "u16" || hinta == "u32" || hinta == "u64" || hinta == "usize" {
+                    f1 = "%s"
+                    part = "al_num(" + pc + ")"
+                } else if hinta == "f64" || hinta == "f32" {
+                    f1 = "%s"
+                    part = "al_fnum(" + pc + ")"
+                }
+            }
             EInt(n) { f1 = "%s"
             part = "al_num(" + pc + ")" }
             EFloat(n) {
@@ -732,6 +756,18 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
                 match vt {
                     Some("i32") { f1 = "%s"
                     part = "al_num(" + pc + ")" }
+                    Some("i64") { f1 = "%s"
+                    part = "al_num(" + pc + ")" }
+                    Some("u8") { f1 = "%s"
+                    part = "al_num(" + pc + ")" }
+                    Some("u16") { f1 = "%s"
+                    part = "al_num(" + pc + ")" }
+                    Some("u32") { f1 = "%s"
+                    part = "al_num(" + pc + ")" }
+                    Some("u64") { f1 = "%s"
+                    part = "al_num(" + pc + ")" }
+                    Some("usize") { f1 = "%s"
+                    part = "al_num(" + pc + ")" }
                     Some("f64") {
                         f1 = "%s"
                         part = "al_fnum(" + pc + ")"
@@ -768,6 +804,17 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
                             part = "al_opt_str_s(" + pc + ")" }
                             else if pm == "b" { f1 = "%s"
                             part = "al_opt_str_b(" + pc + ")" }
+                            else if pm == "v" {
+                                // Option<Vec<T>> → 内联 Some(al_vec_str_X) / None
+                                let et3 = first_type_arg(vt2)
+                                let pm3 = payload_member(Some(et3), user_types)
+                                var vf = "al_vec_str_i"
+                                if pm3 == "f" { vf = "al_vec_str_f" }
+                                else if pm3 == "s" { vf = "al_vec_str_s" }
+                                else if pm3 == "b" { vf = "al_vec_str_b" }
+                                f1 = "%s"
+                                part = "(" + pc + ".tag ? al_strcat(al_strcat(\"Some(\", " + vf + "(" + pc + ".data.v)), \")\") : \"None\")"
+                            }
                         }
                     }
                     _ {
@@ -790,7 +837,7 @@ fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: V
             _ {}
         }
         // G2.0 类型提示切片：非空 hint 覆盖形状兜底（%zu 长度形态除外）
-        let hint = expr_num_hint(a, varnames, vartypes, fnames, freturns)
+        let hint = expr_num_hint(a, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
         if f1 != "%zu" {
             if hint == "i32" || hint == "i64" || hint == "u8" || hint == "u16" || hint == "u32" || hint == "u64" || hint == "usize" {
                 f1 = "%s"
@@ -869,6 +916,11 @@ fn evec_c(items: Vec<Expr>, heap: bool, user_types: Vec<String>, vnames: Vec<Str
             // 字符串字面量元素 → char*（字面量静态存储）
             etag = "(char*[])"
             esz = "char*"
+        }
+        EVec(_) {
+            // 嵌套 Vec 字面量元素 → al_vec(px2 首曝: [[1,2],[3,4]] 曾按 int 元素写入)
+            etag = "(al_vec[])"
+            esz = "al_vec"
         }
         EStruct(t0, _) {
             etag = "(struct " + t0 + "[])"
@@ -1283,8 +1335,8 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 _ {}
             }
             if !is_flop {
-                let lh = expr_num_hint(l, varnames, vartypes, fnames, freturns)
-                let rh = expr_num_hint(r, varnames, vartypes, fnames, freturns)
+                let lh = expr_num_hint(l, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
+                let rh = expr_num_hint(r, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
                 if lh == "f64" || lh == "f32" || rh == "f64" || rh == "f32" { is_flop = true }
             }
             if op == "+" || op == "-" || op == "*" || op == "/" || op == "%" || op == "<<" || op == ">>" {
@@ -1311,7 +1363,7 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     _ {}
                 }
                 if !is_flop {
-                    let xh = expr_num_hint(x, varnames, vartypes, fnames, freturns)
+                    let xh = expr_num_hint(x, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
                     if xh != "f64" && xh != "f32" {
                         return "al_wneg(" + c_expr(x, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ")"
                     }
@@ -2882,7 +2934,7 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
                             }
                             // SD-1 64 位域: 数值 EBin → 按 hint 定 ct(总/浮点), 防止 int 截断
                             if ct != "char*" {
-                                let h3 = expr_num_hint(EBin(op3, l3, r3), varnames, vartypes, fnames, freturns)
+                                let h3 = expr_num_hint(EBin(op3, l3, r3), varnames, vartypes, fnames, freturns, snames, sfnames, sftypes)
                                 if h3 == "i32" || h3 == "i64" || h3 == "u8" || h3 == "u16" || h3 == "u32" || h3 == "u64" || h3 == "usize" {
                                     ct = "long long"
                                 } else if h3 == "f64" || h3 == "f32" {
@@ -4707,7 +4759,7 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
     return out
 }
 
-fn expr_num_hint(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>) -> String {
+fn expr_num_hint(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, snames2: Vec<String>, sfnames2: Vec<String>, sftypes2: Vec<String>) -> String {
     match e {
         EInt(n) { return "i32" }
         EFloat(n) { return "f64" }
@@ -4749,7 +4801,7 @@ fn expr_num_hint(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: 
                 }
                 _ {
                     // 高阶调用链: get_op(0)(...) → 被调表达式类型 fn(...)->R 取 R
-                    let ct2 = expr_num_hint(c2, varnames, vartypes, fnames, freturns)
+                    let ct2 = expr_num_hint(c2, varnames, vartypes, fnames, freturns, snames2, sfnames2, sftypes2)
                     if ct2.starts_with("fn(") { fn_ret_of_fn_type(ct2) }
                     return ""
                 }
@@ -4757,6 +4809,18 @@ fn expr_num_hint(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: 
         }
         EField(b2, m2) {
             if m2 == "len" { return "i32" }
+            // 结构体字段类型(px_probe: p.x + p.y → i32; var_info EStruct 入表后链路可用)
+            let bt9 = base_type(b2, varnames, vartypes, fnames, freturns, snames2, sfnames2, sftypes2)
+            match bt9 {
+                Some(t9) {
+                    let ft9 = struct_field_ty(t9, m2, snames2, sfnames2, sftypes2)
+                    match ft9 {
+                        Some(ftv) { return ftv }
+                        None {}
+                    }
+                }
+                None {}
+            }
             return ""
         }
         EIndex(b2, i2) {
@@ -4775,11 +4839,11 @@ fn expr_num_hint(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: 
             if op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">=" || op == "&&" || op == "||" {
                 return "bool"
             }
-            return expr_num_hint(l, varnames, vartypes, fnames, freturns)
+            return expr_num_hint(l, varnames, vartypes, fnames, freturns, snames2, sfnames2, sftypes2)
         }
         EUnary(op, x) {
             if op == "!" { return "bool" }
-            return expr_num_hint(x, varnames, vartypes, fnames, freturns)
+            return expr_num_hint(x, varnames, vartypes, fnames, freturns, snames2, sfnames2, sftypes2)
         }
         _ { return "" }
     }

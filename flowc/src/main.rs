@@ -265,7 +265,7 @@ fn run_ast(path: &str) -> ExitCode {
             eprintln!("error: {}", e);
             return ExitCode::FAILURE;
         }
-        println!("{:#?}", program);
+        print!("{}", aine::ast_dump::dump_program(&program));
     }
     println!("ast: OK");
     ExitCode::SUCCESS
@@ -933,6 +933,7 @@ fn run_fmt_aine(path: &str) -> String {
         _ => out,
     }
 }
+
 
 fn run_check(path: &str) -> ExitCode {
     let source = match load_source(path) {

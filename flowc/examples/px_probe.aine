@@ -1,0 +1,40 @@
+struct Pt {
+    x: i32
+    y: i32
+}
+enum Op {
+    Add
+    Sub
+}
+fn apply(o: Op, a: i32, b: i32) -> i32 {
+    return match o {
+        Add { a + b }
+        Sub { a - b }
+    }
+}
+fn main() {
+    let p = Pt { x: 3, y: 4 }
+    let sum = p.x + p.y
+    print(sum)
+    let two = if p.x > 0 { 1 } else { 2 }
+    print(two)
+    print(apply(Add, 1, 2))
+    let v: Vec<i32> = [1, 2, 3]
+    var total = 0
+    for x in v {
+        total += x
+    }
+    print(total)
+    while total > 5 {
+        total -= 3
+    }
+    print(total)
+    let s = "a" + "b"
+    if s == "ab" && total <= 0 || p.x != 3 {
+        print("branch")
+    } else if s.len() == 2 {
+        print("len2")
+    } else {
+        print("else")
+    }
+}

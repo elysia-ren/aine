@@ -976,6 +976,10 @@ fn parse_enum(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
             j += 1
         }
         variants.push(EVariant { name: vn.text fields: fields })
+        // 变体间逗号分隔(conf 风格 `Circle(i32),`) — 宿主两种都收, 自举补齐(P0-3)
+        if tokens[j].text == "," {
+            j += 1
+        }
     }
     return Ok(SPResult { stmt: SEnum(name, variants) next: j })
 }
@@ -1256,6 +1260,13 @@ fn parse_program(tokens: Vec<Token>) -> Result<Vec<Stmt>, String> {
                 }
                 return Err("@ 后需要 global")
             }
+        // @name 属性标注(如 @test/@not_send) — 宿主收集进 attributes 后忽略;
+        // 自举对齐: 跳过 @ 与属性名(转储/编译均不消费), 与宿主解析面一致(P0-3)
+        let ni2 = i + 1
+        if tokens[ni2].kind == TIdent {
+            i = ni2 + 1
+            continue
+        }
             return Err("无法识别的 @ 语法")
         }
         let rs = parse_stmt(tokens, i)

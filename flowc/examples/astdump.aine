@@ -1,0 +1,658 @@
+// astdump.aine — 自举侧规范化 AST 转储(P0-3 双解析器解析树 diff)
+// 输出形态与宿主 `aine ast`(src/ast_dump.rs)逐 token 约定一致,见该文件头注释。
+// 用法: aine run examples/astdump.aine <file.aine>
+
+enum TokKind {
+    TIdent
+    TInt
+    TFloat
+    TStr
+    TOp
+    TSemi
+    TEof
+}
+
+struct Token {
+    kind: TokKind
+    text: String
+}
+
+enum Expr {
+    EInt(i32)
+    EFloat(f64)
+    EStr(String)
+    EIdent(String)
+    EBin(String, Expr, Expr)
+    EUnary(String, Expr)
+    ECall(Expr, Vec<Expr>)
+    EField(Expr, String)
+    EBlock(Vec<Stmt>)
+    EVec(Vec<Expr>)
+    EUnit
+    EStruct(String, Vec<StructField>)
+    ETry(Expr)
+    ERange(Expr, Expr)
+    EClosure(Vec<Param>, Expr)
+    EIndex(Expr, Expr)
+    EIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    EMatch(Expr, Vec<MatchArm>)
+}
+
+enum Stmt {
+    SLet(String, bool, Option<String>, Expr)
+    SIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    SWhile(Expr, Vec<Stmt>)
+    SFor(String, Expr, Vec<Stmt>)
+    SReturn(Option<Expr>)
+    SExpr(Expr)
+    SBlock(Vec<Stmt>)
+    SAssign(String, String, Expr)
+    SAssignIdx(String, Expr, String, Expr)
+    SDef(String, Vec<Param>, Option<String>, Vec<Stmt>)
+    SStruct(String, Vec<Field>)
+    SEnum(String, Vec<EVariant>)
+    SImpl(String, Vec<Stmt>)
+    SMod(String, Vec<Stmt>)
+    SImport(String)
+    SMatch(Expr, Vec<MatchArm>)
+    SGo(bool, Vec<Stmt>)
+    SUi(Vec<Stmt>)
+    SGlobalVar(String, Option<String>, Expr)
+}
+
+struct MatchArm {
+    pat: String
+    body: Stmt
+}
+
+struct Field {
+    name: String
+    ty: String
+}
+
+struct StructField {
+    name: String
+    value: Expr
+}
+
+struct EVariant {
+    name: String
+    fields: Vec<String>
+}
+
+struct Param {
+    name: String
+    ty: String
+}
+
+struct EPResult {
+    value: Expr
+    next: i32
+}
+
+struct SPResult {
+    stmt: Stmt
+    next: i32
+}
+
+struct BlockResult {
+    stmts: Vec<Stmt>
+    next: i32
+}
+
+struct TyResult {
+    ty: String
+    next: i32
+}
+
+struct FlatResult {
+    out: Vec<Stmt>
+    loaded: Vec<String>
+}
+
+// var name -> type tables
+struct VarInfo {
+    names: Vec<String>
+    types: Vec<String>
+}
+
+// ---------- C 关键字规避 ----------
+// 用户标识符与 C 关键字同名(如字段名 inline)会生成非法 C。
+// 统一在 codegen 前做 AST 级重命名: kw → kw + "_a"，声明与引用同过此关保持一致。
+// 仅覆盖 C 关键字中非 Aine 保留字的子集(true/false/bool 等排除，防误伤字面量)。
+
+
+
+
+
+
+
+module allex;
+module alparse;
+module alstr;
+module alcollect;
+module altype;
+module alee;
+
+fn main() {
+    let path = cli_args[0]
+    let src = read_file(path)
+    let toks = tokenize(src)
+    let p = parse_program(toks)?
+    print(sexp_program(p))
+}
+
+fn sexp_escape(s: String) -> String {
+    var out = ""
+    var i = 0
+    while i < s.len() {
+        let c = s[i..i + 1]
+        if c == "\\" {
+            out = out + "\\\\"
+        } else if c == "\"" {
+            out = out + "\\\""
+        } else if c == "\n" {
+            out = out + "\\n"
+        } else if c == "\r" {
+            out = out + "\\r"
+        } else if c == "\t" {
+            out = out + "\\t"
+        } else {
+            out = out + c
+        }
+        i += 1
+    }
+    return out
+}
+
+fn pad(n: i32) -> String {
+    var out = ""
+    var i = 0
+    while i < n {
+        out = out + "  "
+        i += 1
+    }
+    return out
+}
+
+fn opt_ty_sexp(ty: Option<String>) -> String {
+    match ty {
+        Some(t) {
+            // 去空白规范形(与宿主 ty_str 一致): 类型文本逐字符拼接, 跳过空格
+            var t2 = ""
+            var i = 0
+            while i < t.len() {
+                let c = t[i..i + 1]
+                if c != " " {
+                    t2 = t2 + c
+                }
+                i += 1
+            }
+            return " (ty " + t2 + ")"
+        }
+        None { return "" }
+    }
+}
+
+// match 臂 pattern 归一化: 自举保存原文文本(Name / Name(f1, f2) / _),
+// 宿主是结构化 Pattern — 拆解为 (p-wild)/(p-id N)/(p-variant N field*)/
+// (p-lit <int>) 与宿主 dump_pattern 对齐(W50 归一化)
+fn pat_norm(t: String) -> String {
+    if t == "_" {
+        return "(p-wild)"
+    }
+    var lp = -1
+    var i = 0
+    while i < t.len() {
+        if t[i..i + 1] == "(" {
+            lp = i
+            break
+        }
+        i += 1
+    }
+    if lp < 0 {
+        return "(p-id " + t + ")"
+    }
+    let name = t[0..lp]
+    var inner = t[lp + 1..t.len() - 1]
+    var out = "(p-variant " + name
+    var parts: Vec<String> = []
+    var cur = ""
+    var depth = 0
+    var k = 0
+    while k < inner.len() {
+        let c = inner[k..k + 1]
+        if c == "(" {
+            depth += 1
+        }
+        if c == ")" {
+            depth -= 1
+        }
+        if c == "," && depth == 0 {
+            parts.push(cur)
+            cur = ""
+        } else {
+            cur = cur + c
+        }
+        k += 1
+    }
+    if cur != "" {
+        parts.push(cur)
+    }
+    for p2 in parts {
+        var p3 = p2
+        if p3 == "_" {
+            out = out + " (p-wild)"
+        } else {
+            var is_num = true
+            var di = 0
+            while di < p3.len() {
+                let dc = p3[di..di + 1]
+                if dc < "0" || dc > "9" {
+                    is_num = false
+                }
+                di += 1
+            }
+            if is_num && p3.len() > 0 {
+                out = out + " (p-lit (int " + p3 + "))"
+            } else {
+                out = out + " (p-id " + p3 + ")"
+            }
+        }
+    }
+    return out + ")"
+}
+
+fn sexp_program(p: Vec<Stmt>) -> String {
+    var out = "(program\n"
+    for s in p {
+        out = out + sexp_item(s, 1)
+    }
+    return out + ")"
+}
+
+fn sexp_item(s: Stmt, depth: i32) -> String {
+    match s {
+        SDef(name, params, ret, body) {
+            var out = pad(depth) + "(fn " + name
+            for prm in params {
+                // 自举 Param 无 is_move(SD-6: 文档性标注, 自举不消费) — 语料规避 move 形参
+                var ty_part = ""
+                if prm.ty != "" {
+                    ty_part = opt_ty_sexp(Some(prm.ty))
+                }
+                out = out + " (param " + prm.name + ty_part + ")"
+            }
+            match ret {
+                Some(r) {
+                    out = out + " (ret" + opt_ty_sexp(Some(r)) + ")"
+                }
+                None {}
+            }
+            out = out + "\n"
+            out = out + sexp_block(body, depth + 1)
+            out = out + pad(depth) + ")\n"
+            return out
+        }
+        SStruct(name, fields) {
+            var out = pad(depth) + "(struct " + name + "\n"
+            for f in fields {
+                out = out + pad(depth + 1) + "(field " + f.name + opt_ty_sexp(Some(f.ty)) + ")\n"
+            }
+            out = out + pad(depth) + ")\n"
+            return out
+        }
+        SEnum(name, variants) {
+            var out = pad(depth) + "(enum " + name + "\n"
+            for v in variants {
+                if v.fields.len() == 0 {
+                    out = out + pad(depth + 1) + "(variant " + v.name + ")\n"
+                } else {
+                    var tys = ""
+                    var first = true
+                    for t in v.fields {
+                        if !first {
+                            tys = tys + " "
+                        }
+                        tys = tys + t
+                        first = false
+                    }
+                    out = out + pad(depth + 1) + "(variant " + v.name + " (payload " + tys + "))\n"
+                }
+            }
+            out = out + pad(depth) + ")\n"
+            return out
+        }
+        SImpl(name, stmts) {
+            var out = pad(depth) + "(impl " + name + "\n"
+            for st in stmts {
+                out = out + sexp_item(st, depth + 1)
+            }
+            out = out + pad(depth) + ")\n"
+            return out
+        }
+        SImport(s) {
+            return pad(depth) + "(import " + s + ")\n"
+        }
+        SGlobalVar(name, ty, init) {
+            var out = pad(depth) + "(global " + name + opt_ty_sexp(ty)
+            out = out + " " + sexp_expr(init)
+            return out + ")\n"
+        }
+        _ {
+            // fn 体外其余语句形(理论不可达)按语句输出, 保持总行数对齐
+            return sexp_stmt(s, depth)
+        }
+    }
+}
+
+fn sexp_block(stmts: Vec<Stmt>, depth: i32) -> String {
+    var out = pad(depth) + "(block\n"
+    for s in stmts {
+        out = out + sexp_stmt(s, depth + 1)
+    }
+    out = out + pad(depth) + ")\n"
+    return out
+}
+
+fn rtrim(s: String) -> String {
+    var e = s.len()
+    while e > 0 {
+        let c = s[e - 1..e]
+        if c == " " || c == "\n" || c == "\r" || c == "\t" {
+            e -= 1
+        } else {
+            break
+        }
+    }
+    return s[0..e]
+}
+
+fn stmt_inline(s: Stmt) -> String {
+    return rtrim(sexp_stmt(s, 0))
+}
+
+fn sexp_stmt(s: Stmt, depth: i32) -> String {
+    match s {
+        SLet(name, is_mut, ty, init) {
+            var mutp = ""
+            if is_mut {
+                mutp = "mut "
+            }
+            var out = pad(depth) + "(let " + mutp + name + opt_ty_sexp(ty)
+            // 自举无初始化器的声明宿主侧不存在(语料规避); __noinit__ 特判跳过 init
+            if !expr_is_noinit(init) {
+                out = out + " " + sexp_expr(init)
+            }
+            return out + ")\n"
+        }
+        SExpr(e) {
+            return pad(depth) + "(expr " + sexp_expr(e) + ")\n"
+        }
+        SReturn(e) {
+            match e {
+                Some(x) {
+                    return pad(depth) + "(return " + sexp_expr(x) + ")\n"
+                }
+                None {
+                    return pad(depth) + "(return)\n"
+                }
+            }
+        }
+        SIf(cond, then_s, else_s) {
+            var out = pad(depth) + "(if " + sexp_expr(cond) + "\n"
+            out = out + sexp_block(then_s, depth + 1)
+            if else_s.len() > 0 {
+                // 与 then 对称: else 块包 (block) 壳(宿主 else_branch = Expr::Block);
+                // else-if 链(自举 else_s = [SIf])直接平铺下一个 (if …), 不包壳
+                if else_s.len() == 1 {
+                    match else_s[0] {
+                        SIf(_, _, _) {
+                            out = out + sexp_stmt(else_s[0], depth + 1)
+                        }
+                        _ {
+                            out = out + sexp_block(else_s, depth + 1)
+                        }
+                    }
+                } else {
+                    out = out + sexp_block(else_s, depth + 1)
+                }
+            }
+            out = out + pad(depth) + ")\n"
+            return out
+        }
+        SWhile(cond, body) {
+            var out = pad(depth) + "(while " + sexp_expr(cond) + "\n"
+            out = out + sexp_block(body, depth + 1)
+            out = out + pad(depth) + ")\n"
+            return out
+        }
+        SFor(name, iter, body) {
+            var out = pad(depth) + "(for " + name + " " + sexp_expr(iter) + "\n"
+            out = out + sexp_block(body, depth + 1)
+            out = out + pad(depth) + ")\n"
+            return out
+        }
+        SAssign(name, op, rhs) {
+            return pad(depth) + "(expr (assign (id " + name + ") " + op + " " + sexp_expr(rhs) + "))\n"
+        }
+        SAssignIdx(name, idxe, op, rhs) {
+            return pad(depth) + "(expr (assign (index (id " + name + ") " + sexp_expr(idxe) + ") " + op + " " + sexp_expr(rhs) + "))\n"
+        }
+        SMatch(scrut, arms) {
+            var out = pad(depth) + "(expr (match " + sexp_expr(scrut)
+            for a in arms {
+                var pp = ""
+                pp = pat_norm(a.pat)
+                out = out + " (arm " + pp + " " + arm_body_inline(a.body) + ")"
+            }
+            return out + "))\n"
+        }
+        SGo(_, body) {
+            var out = pad(depth) + "(go"
+            for st in body {
+                out = out + " " + stmt_inline(st)
+            }
+            return out + ")\n"
+        }
+        SUi(body) {
+            var out = pad(depth) + "(ui-op"
+            for st in body {
+                out = out + " " + stmt_inline(st)
+            }
+            return out + ")\n"
+        }
+        SBlock(body) {
+            return sexp_block(body, depth)
+        }
+        _ {
+            return pad(depth) + "(unsupported)\n"
+        }
+    }
+}
+
+fn arm_body_inline(b: Stmt) -> String {
+    match b {
+        SBlock(bs) {
+            var out = "(block"
+            for st in bs {
+                out = out + " " + stmt_inline(st)
+            }
+            return out + ")"
+        }
+        SExpr(e) {
+            return sexp_expr(e)
+        }
+        _ {
+            return "(unsupported)"
+        }
+    }
+}
+
+fn expr_is_noinit(e: Expr) -> bool {
+    match e {
+        EIdent(n) {
+            return n == "__noinit__"
+        }
+        _ {
+            return false
+        }
+    }
+}
+
+fn sexp_expr(e: Expr) -> String {
+    match e {
+        EInt(n) {
+            return "(int " + f"{n}" + ")"
+        }
+        EFloat(nf) {
+            return "(float " + f"{nf}" + ")"
+        }
+        EStr(s) {
+            // f-string: 自举 EStr 值 = f"…" 带壳 — 剥壳输出 (fstr f"<inner>")
+            if s.len() >= 3 && s[0..2] == "f\"" && s[s.len() - 1..s.len()] == "\"" {
+                let inner = s[2..s.len() - 1]
+                return "(fstr f\"" + sexp_escape(inner) + "\")"
+            }
+            return "(str \"" + sexp_escape(s) + "\")"
+        }
+        EIdent(n) {
+            // true/false: 自举解析为 EIdent — 与宿主 Bool 归一化一致
+            return "(id " + n + ")"
+        }
+        EUnit {
+            return "()"
+        }
+        ERange(a, b) {
+            return "(range " + sexp_expr(a) + " " + sexp_expr(b) + ")"
+        }
+        EClosure(params, body) {
+            var out = "(closure"
+            for p in params {
+                var ty_part = ""
+                if p.ty != "" {
+                    ty_part = opt_ty_sexp(Some(p.ty))
+                }
+                out = out + " (param " + p.name + ty_part + ")"
+            }
+            return out + " " + sexp_expr(body) + ")"
+        }
+        EIndex(b, idx) {
+            return "(index " + sexp_expr(b) + " " + sexp_expr(idx) + ")"
+        }
+        EIf(cond, then_s, else_s) {
+            var out = "(if " + sexp_expr(cond) + " (then"
+            for st in then_s {
+                out = out + " " + stmt_inline(st)
+            }
+            out = out + ")"
+            if else_s.len() > 0 {
+                out = out + " (else"
+                // else if 链: 自举 else_s = [SIf(...)] — 与宿主 dump_if_inline 的
+                // Expr::If 分支对齐: 内嵌 (if …) 而非 (expr …)
+                if else_s.len() == 1 {
+                    match else_s[0] {
+                        SIf(c2, t2, e2) {
+                            out = out + " " + sexp_if_inline(c2, t2, e2)
+                        }
+                        SBlock(bs) {
+                            for st in bs {
+                                out = out + " " + stmt_inline(st)
+                            }
+                        }
+                        _ {
+                            out = out + " " + stmt_inline(else_s[0])
+                        }
+                    }
+                } else {
+                    for st in else_s {
+                        out = out + " " + stmt_inline(st)
+                    }
+                }
+                out = out + ")"
+            }
+            return out
+        }
+        ETry(x) {
+            return "(try " + sexp_expr(x) + ")"
+        }
+        EStruct(ty, fields) {
+            var out = "(struct-lit " + ty
+            for f in fields {
+                out = out + " (field " + f.name + " " + sexp_expr(f.value) + ")"
+            }
+            return out + ")"
+        }
+        EBin(op, l, r) {
+            return "(bin " + op + " " + sexp_expr(l) + " " + sexp_expr(r) + ")"
+        }
+        EUnary(op, x) {
+            return "(unary " + op + " " + sexp_expr(x) + ")"
+        }
+        ECall(f, args) {
+            var out = "(call " + sexp_expr(f)
+            for a in args {
+                out = out + " " + sexp_expr(a)
+            }
+            return out + ")"
+        }
+        EField(b, name) {
+            return "(field " + sexp_expr(b) + " " + name + ")"
+        }
+        EBlock(stmts) {
+            var out = "(block"
+            for s in stmts {
+                out = out + " " + stmt_inline(s)
+            }
+            return out + ")"
+        }
+        EVec(items) {
+            var out = "(vec"
+            for it in items {
+                out = out + " " + sexp_expr(it)
+            }
+            return out + ")"
+        }
+        EMatch(scrut, arms) {
+            var out = "(match " + sexp_expr(scrut)
+            for a in arms {
+                var pp = ""
+                pp = pat_norm(a.pat)
+                out = out + " (arm " + pp + " " + arm_body_inline(a.body) + ")"
+            }
+            return out + ")"
+        }
+    }
+}
+
+fn sexp_if_inline(cond: Expr, then_s: Vec<Stmt>, else_s: Vec<Stmt>) -> String {
+    var out = "(if " + sexp_expr(cond) + " (then"
+    for st in then_s {
+        out = out + " " + stmt_inline(st)
+    }
+    out = out + ")"
+    if else_s.len() > 0 {
+        out = out + " (else"
+        if else_s.len() == 1 {
+            match else_s[0] {
+                SIf(c2, t2, e2) {
+                    out = out + " " + sexp_if_inline(c2, t2, e2)
+                }
+                SBlock(bs) {
+                    for st in bs {
+                        out = out + " " + stmt_inline(st)
+                    }
+                }
+                _ {
+                    out = out + " " + stmt_inline(else_s[0])
+                }
+            }
+        } else {
+            for st in else_s {
+                out = out + " " + stmt_inline(st)
+            }
+        }
+        out = out + ")"
+    }
+    return out
+}

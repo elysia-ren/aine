@@ -1,0 +1,29 @@
+fn make(a: i32) -> i32 {
+    return a * 2
+}
+fn main() {
+    let tab = "col1\tcol2"
+    let nl = "line1\nline2"
+    let q = "quote\"inside\""
+    print(tab.len())
+    print(nl.len())
+    print(q.len())
+    let f1 = f"x={tab}!"
+    print(f1)
+    let nums = [1, 2, 3]
+    let doubled = nums.iter().map(x => x * 2).sum()
+    print(doubled)
+    let m: Map<String, Vec<i32>> = Map.new()
+    m.set("k", [7, 8])
+    let w = m.get("k")
+    print(w)
+    for ch in "中文ab" {
+        print(ch)
+    }
+    let nested = [[1, 2], [3, 4]]
+    print(nested.len())
+    let d = make(21)
+    print(d)
+    let g = (x: i32) => x + 100
+    print(g(1))
+}
