@@ -1,0 +1,172 @@
+// bisect_parse.aine — W48 定位工具:自举解析器对源文件前 N 行的解析行为二分
+// 用法: aine run examples/bisect_parse.aine <file.aine> <N行数>
+// 输出: OK / ERR:<消息>(前 N 行截断 + main 兜底, 只测解析不测语义)
+
+
+
+enum TokKind {
+    TIdent
+    TInt
+    TFloat
+    TStr
+    TOp
+    TSemi
+    TEof
+}
+
+struct Token {
+    kind: TokKind
+    text: String
+    line: i32
+}
+
+enum Expr {
+    EInt(i32)
+    EFloat(f64)
+    EStr(String)
+    EIdent(String)
+    EBin(String, Expr, Expr)
+    EUnary(String, Expr)
+    ECall(Expr, Vec<Expr>)
+    EField(Expr, String)
+    EBlock(Vec<Stmt>)
+    EVec(Vec<Expr>)
+    EUnit
+    EStruct(String, Vec<StructField>)
+    ETry(Expr)
+    ERange(Expr, Expr)
+    EClosure(Vec<Param>, Expr)
+    EIndex(Expr, Expr)
+    EIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    EMatch(Expr, Vec<MatchArm>)
+}
+
+enum Stmt {
+    SLet(String, bool, Option<String>, Expr)
+    SIf(Expr, Vec<Stmt>, Vec<Stmt>)
+    SWhile(Expr, Vec<Stmt>)
+    SFor(String, Expr, Vec<Stmt>)
+    SReturn(Option<Expr>)
+    SExpr(Expr)
+    SBlock(Vec<Stmt>)
+    SAssign(String, String, Expr)
+    SAssignIdx(String, Expr, String, Expr)
+    SDef(String, Vec<Param>, Option<String>, Vec<Stmt>)
+    SStruct(String, Vec<Field>)
+    SEnum(String, Vec<EVariant>)
+    SImpl(String, Vec<Stmt>)
+    SMod(String, Vec<Stmt>)
+    SImport(String)
+    SMatch(Expr, Vec<MatchArm>)
+    SGo(bool, Vec<Stmt>)
+    SUi(Vec<Stmt>)
+    SGlobalVar(String, Option<String>, Expr)
+}
+
+struct MatchArm {
+    pat: String
+    body: Stmt
+}
+
+struct Field {
+    name: String
+    ty: String
+}
+
+struct StructField {
+    name: String
+    value: Expr
+}
+
+struct EVariant {
+    name: String
+    fields: Vec<String>
+}
+
+struct Param {
+    name: String
+    ty: String
+}
+
+struct EPResult {
+    value: Expr
+    next: i32
+}
+
+struct SPResult {
+    stmt: Stmt
+    next: i32
+}
+
+struct BlockResult {
+    stmts: Vec<Stmt>
+    next: i32
+}
+
+struct TyResult {
+    ty: String
+    next: i32
+}
+
+struct FlatResult {
+    out: Vec<Stmt>
+    loaded: Vec<String>
+}
+
+// var name -> type tables
+struct VarInfo {
+    names: Vec<String>
+    types: Vec<String>
+}
+
+// ---------- C 关键字规避 ----------
+// 用户标识符与 C 关键字同名(如字段名 inline)会生成非法 C。
+// 统一在 codegen 前做 AST 级重命名: kw → kw + "_a"，声明与引用同过此关保持一致。
+// 仅覆盖 C 关键字中非 Aine 保留字的子集(true/false/bool 等排除，防误伤字面量)。
+
+
+
+
+
+
+
+module allex;
+module alparse;
+module alstr;
+module alcollect;
+module altype;
+module alee;
+
+fn main() {
+    let path = cli_args[0]
+    let n = cli_args[1].to_i32()
+    let src = read_file(path)
+    let lines = src.split("\n")
+    var head: Vec<String> = []
+    var i = 0
+    while i < n && i < lines.len() {
+        head.push(lines[i])
+        i += 1
+    }
+    head.push("fn main() {")
+    head.push("    print(1)")
+    head.push("}")
+    let text = join(head, "\n")
+    let toks = tokenize(text)
+    if cli_args.len() > 2 {
+        var ti = 0
+        while ti < toks.len() {
+            print(f"[{ti}] {toks[ti].line}: {toks[ti].text} kind={toks[ti].kind}")
+            ti += 1
+        }
+    }
+    let r = parse_program(toks)
+    match r {
+        Ok(_) {
+            print("OK")
+        }
+        Err(msg) {
+            print("ERR:" + msg)
+        }
+    }
+}

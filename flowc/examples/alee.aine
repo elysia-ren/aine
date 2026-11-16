@@ -1399,6 +1399,11 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     }
                     // print 在表达式位(匹配臂值→三元/语句表达式) → 语句表达式形态
                     // (print 是 C 语句 printf, 无表达式形式; 臂值经 c_expr 发射时兜住)
+                    if bname == "bytes_to_string" {
+                        // W48 同批: alinterp 引用的宿主内建 — C 侧发射运行时助手
+                        let ac9 = c_expr(args[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes)
+                        return "al_bytes_to_string(" + ac9 + ")"
+                    }
                     if bname == "print" {
                         let pc2 = c_print_stmt(args, "", user_types, vnames, vowners, fnames, freturns, varnames, vartypes, snames, sfnames, sftypes, fptypes, enames, elists, vfnames, vftypes)
                         return "({ " + pc2 + " 0; })"
@@ -4031,6 +4036,7 @@ fn c_program_flat(program: Vec<Stmt>, user_types: Vec<String>, vnames: Vec<Strin
     out = out + "  memcpy(r + la, b, lb + 1);\n"
     out = out + "  return r;\n"
     out = out + "}\n"
+    out = out + "char* al_bytes_to_string(al_vec bytes) { size_t n = bytes.len; char* r = (char*)malloc(n + 1); for (size_t i = 0; i < n; i++) { r[i] = (char)((long long*)bytes.data)[i]; } r[n] = 0; return r; }" + "\n"
     out = out + "char* al_strdup_lit(char* s) { size_t n = strlen(s) + 1; char* r = (char*)malloc(n); memcpy(r, s, n); return r; }\n"
     out = out + "static int al_vec_eq(al_vec x, al_vec y) { if (x.len != y.len || x.elem_size != y.elem_size) { return 0; } if (x.len == 0) { return 1; } return memcmp(x.data, y.data, x.len * x.elem_size) == 0; }\n"
     out = out + "static int al_eq_i32(int a, int b) { return a == b; }\n"

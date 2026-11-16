@@ -1,0 +1,8 @@
+fn t(bnv: String) {
+    if bnv.starts_with("Some(") && bnv.ends_with(")") {
+        print("x")
+    }
+}
+fn main() {
+    print(t("a)"))
+}

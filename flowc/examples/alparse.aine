@@ -74,7 +74,7 @@ fn parse_postfix(tokens: Vec<Token>, mut base: Expr, mut i: i32) -> Result<EPRes
             while tokens[i].kind == TSemi {
                 i += 1
             }
-            if tokens[i].text == ")" {
+            if tokens[i].kind == TOp && tokens[i].text == ")" {
                 i += 1
                 base = ECall(base, args)
                 continue
@@ -87,19 +87,19 @@ fn parse_postfix(tokens: Vec<Token>, mut base: Expr, mut i: i32) -> Result<EPRes
                     i += 1
                 }
                 let t = tokens[i]
-                if t.text == "," {
+                if t.kind == TOp && t.text == "," {
                     i += 1
                     while tokens[i].kind == TSemi {
                         i += 1
                     }
                     // 尾逗号: f(a, b,) 直接闭合
-                    if tokens[i].text == ")" {
+                    if tokens[i].kind == TOp && tokens[i].text == ")" {
                         i += 1
                         break
                     }
                     continue
                 }
-                if t.text == ")" {
+                if t.kind == TOp && t.text == ")" {
                     i += 1
                     break
                 }
@@ -314,7 +314,7 @@ fn parse_prefix(tokens: Vec<Token>, i: i32) -> Result<EPResult, String> {
             if tokens[k].text == "(" {
                 d += 1
             }
-            if tokens[k].text == ")" {
+            if tokens[k].kind == TOp && tokens[k].text == ")" {
                 d -= 1
                 if d == 0 {
                     if k + 1 < tokens.len() && tokens[k + 1].text == "=>" {
@@ -341,12 +341,12 @@ fn parse_prefix(tokens: Vec<Token>, i: i32) -> Result<EPResult, String> {
             return Ok(EPResult { value: EUnary(tok.text, r.value) next: r.next })
         }
         if tok.text == "(" {
-            if tokens[i + 1].text == ")" {
+            if tokens[i + 1].kind == TOp && tokens[i + 1].text == ")" {
                 // 空元组 ()
                 return Ok(EPResult { value: EUnit next: i + 2 })
             }
             let r = parse_expr(tokens, i + 1, 0)?
-            if tokens[r.next].text != ")" {
+            if !(tokens[r.next].kind == TOp && tokens[r.next].text == ")") {
                 return Err("缺少右括号")
             }
             return parse_postfix(tokens, r.value, r.next + 1)
@@ -373,7 +373,7 @@ fn parse_prefix(tokens: Vec<Token>, i: i32) -> Result<EPResult, String> {
                     had_semi = true
                 }
                 let t = tokens[j]
-                if t.text == "," {
+                if t.kind == TOp && t.text == "," {
                     j += 1
                     while tokens[j].kind == TSemi {
                         j += 1
@@ -518,8 +518,28 @@ fn flatten_stmts(stmts: Vec<Stmt>, dir: String, loaded: Vec<String>) -> Result<F
 }
 
 
+// W48: 解析错误上下文助手 — 错误点附近 token 文本(无行号体系的定位代偿)
+fn tctx(tokens: Vec<Token>, i: i32) -> String {
+    var a = i - 2
+    if a < 0 { a = 0 }
+    var b = i + 2
+    if b > tokens.len() - 1 { b = tokens.len() - 1 }
+    var out = ""
+    var k = a
+    while k <= b {
+        if k == i {
+            out = out + "[" + tokens[k].text + "]"
+        } else {
+            out = out + tokens[k].text
+        }
+        out = out + " "
+        k += 1
+    }
+    return out
+}
+
 fn parse_block(tokens: Vec<Token>, i: i32) -> Result<BlockResult, String> {    if tokens[i].text != "{" {
-        return Err("块需要 {")
+        return Err("块需要 { @" + f"{i}" + " line=" + f"{tokens[i].line}" + " near: " + tctx(tokens, i))
     }
     var j = i + 1
     var stmts: Vec<Stmt> = []
@@ -529,7 +549,7 @@ fn parse_block(tokens: Vec<Token>, i: i32) -> Result<BlockResult, String> {    i
         }
         let t = tokens[j]
         if t.kind == TEof {
-            return Err("块未闭合")
+            return Err("块未闭合 @" + f"{i}" + " near: " + tctx(tokens, i))
         }
         if t.text == "}" {
             return Ok(BlockResult { stmts: stmts next: j + 1 })
@@ -774,7 +794,7 @@ fn parse_fn(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {    let nam
         while tokens[j].kind == TSemi {
             j += 1
         }
-        if tokens[j].text == ")" {
+        if tokens[j].kind == TOp && tokens[j].text == ")" {
             break
         }
         // mut 形参前缀（自解析 parse_let 等时必需）
@@ -1092,7 +1112,7 @@ fn parse_match(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
             break
         }
         if tokens[j].kind == TEof {
-            return Err("match 未闭合")
+            return Err("match 未闭合 @" + f"{i}" + " near: " + tctx(tokens, i))
         }
         // G2.0 ⑤：块式臂 Pat { body }（模式后直接 {，无 =>）；旧 => 形态兼容保留
         var pat = ""

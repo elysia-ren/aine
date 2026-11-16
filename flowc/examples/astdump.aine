@@ -15,6 +15,7 @@ enum TokKind {
 struct Token {
     kind: TokKind
     text: String
+    line: i32
 }
 
 enum Expr {

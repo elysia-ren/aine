@@ -39,10 +39,12 @@ fn tokenize(src: String) -> Vec<Token> {
     var tokens: Vec<Token> = []
     var i = 0
     let len = src.len()
+    var tok_line = 1
     while i < len {
         let c = src[i]
         if c == "\n" {
-            tokens.push(Token { kind: TSemi text: "\n" })
+            tok_line += 1
+            tokens.push(Token { line: tok_line, kind: TSemi text: "\n" })
             i += 1
             continue
         }
@@ -64,7 +66,7 @@ fn tokenize(src: String) -> Vec<Token> {
             if i < len {
                 i += 1
             }
-            tokens.push(Token { kind: TStr text: text })
+            tokens.push(Token { line: tok_line, kind: TStr text: text })
             continue
         }
         if is_ident_start(c) {
@@ -114,10 +116,10 @@ fn tokenize(src: String) -> Vec<Token> {
                 if i < len {
                     i += 1
                 }
-                tokens.push(Token { kind: TStr text: "f\"" + body + "\"" })
+                tokens.push(Token { line: tok_line, kind: TStr text: "f\"" + body + "\"" })
                 continue
             }
-            tokens.push(Token { kind: TIdent text: src[start..i] })
+            tokens.push(Token { line: tok_line, kind: TIdent text: src[start..i] })
             continue
         }
         if is_digit(c) {
@@ -128,7 +130,7 @@ fn tokenize(src: String) -> Vec<Token> {
                 while i < len && (is_digit(src[i]) || (src[i] >= "a" && src[i] <= "f") || (src[i] >= "A" && src[i] <= "F")) {
                     i += 1
                 }
-                tokens.push(Token { kind: TInt text: src[start..i] })
+                tokens.push(Token { line: tok_line, kind: TInt text: src[start..i] })
                 continue
             }
             while i < len && is_digit(src[i]) {
@@ -139,9 +141,16 @@ fn tokenize(src: String) -> Vec<Token> {
                 while i < len && is_digit(src[i]) {
                     i += 1
                 }
-                tokens.push(Token { kind: TFloat text: src[start..i] })
+                tokens.push(Token { line: tok_line, kind: TFloat text: src[start..i] })
+            } else if i < len && (src[i] == "e" || src[i] == "E") {
+                // 科学计数法: 1e15 / 2E+3(W48 定案: alinterp 的 -1e15 曾被切成 1 + e15)
+                i += 1
+                while i < len && is_digit(src[i]) {
+                    i += 1
+                }
+                tokens.push(Token { line: tok_line, kind: TFloat text: src[start..i] })
             } else {
-                tokens.push(Token { kind: TInt text: src[start..i] })
+                tokens.push(Token { line: tok_line, kind: TInt text: src[start..i] })
             }
             continue
         }
@@ -169,23 +178,23 @@ fn tokenize(src: String) -> Vec<Token> {
         }
         if c == "@" {
             // G2.0 ②：@ 装饰器/属性起始（@test/@global/@state）；遇未知 @ 不再截断
-            tokens.push(Token { kind: TOp text: "@" })
+            tokens.push(Token { line: tok_line, kind: TOp text: "@" })
             i += 1
             continue
         }
         if is_op_char(c) {
             let two = if i + 1 < len { src[i..i + 2] } else { "" }
             if two == "==" || two == "!=" || two == "<=" || two == ">=" || two == "&&" || two == "||" || two == ".." || two == "->" || two == "=>" || two == "+=" || two == "-=" || two == "*=" || two == "/=" || two == "%=" {
-                tokens.push(Token { kind: TOp text: two })
+                tokens.push(Token { line: tok_line, kind: TOp text: two })
                 i += 2
                 continue
             }
-            tokens.push(Token { kind: TOp text: c })
+            tokens.push(Token { line: tok_line, kind: TOp text: c })
             i += 1
             continue
         }
         return tokens
     }
-    tokens.push(Token { kind: TEof text: "" })
+    tokens.push(Token { line: tok_line, kind: TEof text: "" })
     return tokens
 }
