@@ -143,6 +143,14 @@ fn main() -> ExitCode {
             let prog_args: Vec<String> = args[2..].to_vec();
             run_interp(&args[1], prog_args)
         }
+        "rust" => {
+            // D16: Rust 后端 — Aine → Rust 源码 → rustc
+            if args.len() < 2 {
+                eprintln!("error: aine rust 需要一个文件路径");
+                return ExitCode::FAILURE;
+            }
+            run_rust_emit(&args[1])
+        }
         "build" => {
             if args.len() < 2 {
                 eprintln!("error: aine build 需要一个文件路径");
@@ -233,6 +241,38 @@ fn run_lex(path: &str) -> ExitCode {
         println!("lex: OK（0 错误）");
         ExitCode::SUCCESS
     }
+}
+
+fn run_rust_emit(path: &str) -> ExitCode {
+    let source = match load_source(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
+    let lexed = Lexer::new(&source).lex();
+    if lexed.diagnostics.has_errors() {
+        for d in &lexed.diagnostics.diagnostics {
+            eprint!("{}", render(d, &source, path));
+        }
+        return ExitCode::FAILURE;
+    }
+    let parsed = Parser::new(&lexed.tokens, path).parse_program();
+    if parsed.diagnostics.has_errors() {
+        for d in &parsed.diagnostics.diagnostics {
+            eprint!("{}", render(d, &source, path));
+        }
+        return ExitCode::FAILURE;
+    }
+    let mut program = parsed.program.unwrap();
+    let mod_dir = std::path::Path::new(path).parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    if let Err(e) = aine::resolve_file_modules(&mut program, &mod_dir) {
+        eprintln!("error: {}", e);
+        return ExitCode::FAILURE;
+    }
+    print!("{}", aine::rust_emit::emit_program(&program));
+    ExitCode::SUCCESS
 }
 
 fn run_ast(path: &str) -> ExitCode {

@@ -5,6 +5,7 @@
 
 pub mod ast;
 pub mod ast_dump;
+pub mod rust_emit;
 pub mod bench;
 #[cfg(test)]
 mod conformance_tests;

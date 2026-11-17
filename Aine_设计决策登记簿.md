@@ -314,3 +314,18 @@ D10 / D11（codegen / 移动端）影响 Phase 6，不阻塞 Phase 0-3
 > **W44(闭包一阶值)**:非捕获闭包值形态已验证(closuretest/w44_probe 双路:fn 槽传参/设计符别名/调用);捕获闭包值形态({fn, env} 统一模型)为 Phase-2 所有权模型(R-03)设计输入。
 > **account_book C 构建**:随 UI 运行时(M7)——组件名在自举解析层为占位(SBlock),登记维持,不入本轮。
 > **alinterp**:名称解析与类型检查已全通(check OK,43461 token;N3001 阻塞关闭),`aine run` 可用(fib 经 Aine 解释器执行);`aine build` 剩自举解析器对扁平大流的定位缺失(无位置报错),登记为解析器诊断改进项。
+
+---
+
+## D16: Rust 代码发射后端为 Aine 主要交付后端(2026-11-17,用户裁决)
+
+**裁决**:Aine 新增 Rust 代码发射后端(Aine → Rust → rustc/LLVM → 机器码),作为主要交付路径;C 后端(alee)**冻结维护**——保留现有能力不再新增特性,现存语料继续双路验证。
+
+**理由**:专项审计 W53 全族(SReturn(Some) 臂 C 类型双向错配、al_opt 手工拆盒、rvalue 取址)的根因 = C 类型系统与 Aine 形状不合——Option/Vec/闭包在 C 里被迫降级为联合体+手工 tag,每一处拆盒都是 bug 温床。Rust 类型系统与 Aine 几乎同构(Vec/Option/Result/?/match 一一对应),发射目标换成 Rust 后,整类 bug 从根上消失。
+
+**附带收益**:① cargo 生态直接 use(serde/tokio/regex 等,无 FFI 包装);② HashMap/Vec 性能(摊还 push/O(1) 查找);③ Rust 编译器成为第三重静态检查;④ 三实现差分(宿主/C/Rust)。
+
+**代价(明示)**:编译道数比 Rust 直接多一道(仅编译期,运行时零差);生成代码须过借用检查;字符串字符语义需辅助层(D15)。
+
+**实施**:宿主侧 `aine rust` 子命令先行为 PoC(前端+类型检查全复用,仅换发射);自举侧发射器随 M6。C 后端冻结期间,现存 28 语料双路验证义务不变。
+
