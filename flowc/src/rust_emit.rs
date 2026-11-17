@@ -126,6 +126,11 @@ fn __file_exists(p: &str) -> bool { std::path::Path::new(p).exists() }
 fn __file_list(p: &str) -> Vec<String> { std::fs::read_dir(p).map(|rd| rd.filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string())).collect()).unwrap_or_default() }
 fn __sleep(ms: i64) { std::thread::sleep(std::time::Duration::from_millis(ms.max(0) as u64)); }
 fn __env(k: &str) -> String { std::env::var(k).unwrap_or_default() }
+fn __vslice<T: Clone>(v: &Vec<T>, a: i64, b: i64) -> Vec<T> {
+    let s = (a.max(0) as usize).min(v.len());
+    let e = (b.max(0) as usize).min(v.len());
+    if s >= e { Vec::new() } else { v[s..e].to_vec() }
+}
 fn __try_opt<T>(o: Option<T>) -> T {
     match o { Some(v) => v, None => { eprintln!("错误: None 传播到顶层"); std::process::exit(101); } }
 }
@@ -190,6 +195,8 @@ pub enum RTy {
     Opt(Box<RTy>),
     Res(Box<RTy>, Box<RTy>),
     Named(String),
+    /// 递归类型的 Rust 侧指针包装(Box<T>) — 宿主语义里它就是 T 本身
+    BoxedT(Box<RTy>),
     Unit,
     Unknown,
 }
@@ -206,12 +213,20 @@ impl RTy {
             RTy::Opt(t) => format!("Option<{}>", t.rust_str()),
             RTy::Res(a, b) => format!("Result<{}, {}>", a.rust_str(), b.rust_str()),
             RTy::Named(n) => n.clone(),
+            RTy::BoxedT(t) => format!("Box<{}>", t.rust_str()),
             RTy::Unit => "()".into(),
             RTy::Unknown => "_".into(),
         }
     }
     fn is_container(&self) -> bool {
         matches!(self, RTy::Vec(_) | RTy::Map(_))
+    }
+    // 剥掉 BoxedT 包装(宿主语义: Boxed 值就是 T 值)
+    fn unboxed(&self) -> RTy {
+        match self {
+            RTy::BoxedT(t) => (**t).clone(),
+            other => other.clone(),
+        }
     }
 }
 
@@ -264,6 +279,8 @@ struct Emitter {
     structs: StdMap<String, Vec<(String, RTy)>>,
     enums: StdMap<String, Vec<(String, usize)>>,
     variant_types: StdMap<String, Vec<RTy>>,
+    /// 递归直边: owner 类型 -> 需 Box 的目标类型名集合
+    boxed_edges: StdMap<String, Vec<String>>,
     loop_depth: usize,
     vars: Vec<(String, RTy)>,
     cur_ret: RTy,
@@ -278,6 +295,7 @@ impl Emitter {
             structs: StdMap::new(),
             enums: StdMap::new(),
             variant_types: StdMap::new(),
+            boxed_edges: StdMap::new(),
             loop_depth: 0,
             vars: Vec::new(),
             cur_ret: RTy::Unit,
@@ -313,6 +331,68 @@ impl Emitter {
                 _ => {}
             }
         }
+        self.detect_recursive();
+    }
+    /// 直边递归检测: Vec/Map 后面的载荷不算边(堆间接); Option 直传算边
+    fn detect_recursive(&mut self) {
+        let mut edges: Vec<(String, String)> = Vec::new();
+        for (sn, fields) in &self.structs {
+            for (_fn2, ft) in fields {
+                if let RTy::Named(n) = ft { edges.push((sn.clone(), n.clone())); }
+            }
+        }
+        for (en, vs) in &self.enums {
+            for (vn, _ar) in vs {
+                if let Some(pts) = self.variant_types.get(vn) {
+                    for pt in pts {
+                        let mut tgt = pt;
+                        while let RTy::Opt(t) = tgt { tgt = t; }
+                        if let RTy::Named(n) = tgt { edges.push((en.clone(), n.clone())); }
+                    }
+                }
+            }
+        }
+        // 可达性(直接边) — 只有自己能回到自己的类型在环上
+        let mut names: Vec<String> = Vec::new();
+        for (sn, _f) in &self.structs { names.push(sn.clone()); }
+        for (en, _v) in &self.enums { names.push(en.clone()); }
+        let reaches = |from: &str, to: &str| -> bool {
+            // BFS
+            let mut seen: Vec<String> = Vec::new();
+            let mut work: Vec<String> = vec![from.to_string()];
+            while let Some(cur) = work.pop() {
+                if cur == to && cur != from { return true; }
+                if seen.contains(&cur) { continue; }
+                seen.push(cur.clone());
+                for (a, b) in &edges {
+                    if *a == cur { work.push(b.clone()); }
+                }
+            }
+            // from == to 的自环检查: 从 from 出发能否回到 from
+            let mut seen2: Vec<String> = Vec::new();
+            let mut work2: Vec<String> = Vec::new();
+            for (a, b) in &edges { if *a == from { work2.push(b.clone()); } }
+            while let Some(cur) = work2.pop() {
+                if *cur == *from { return true; }
+                if seen2.contains(&cur) { continue; }
+                seen2.push(cur.clone());
+                for (a, b) in &edges {
+                    if *a == cur { work2.push(b.clone()); }
+                }
+            }
+            false
+        };
+        let mut boxed: Vec<(String, String)> = Vec::new();
+        // 同环判定: a↔b 双向可达才 box(Stmt->Expr 单向不 box,Expr 的有限性靠自环 box 保证)
+        for (a, b) in &edges {
+            if reaches(a, b) && reaches(b, a) { boxed.push((a.clone(), b.clone())); }
+        }
+        for (a, b) in boxed {
+            self.boxed_edges.entry(a).or_default().push(b);
+        }
+    }
+    fn is_boxed_edge(&self, owner: &str, target: &str) -> bool {
+        self.boxed_edges.get(owner).map(|v| v.iter().any(|x| x == target)).unwrap_or(false)
     }
 
     fn ty_of(&self, t: &Type) -> RTy {
@@ -397,6 +477,7 @@ impl Emitter {
             RTy::Vec(v) => RTy::Vec(Box::new(self.concrete(v))),
             RTy::Opt(v) => RTy::Opt(Box::new(self.concrete(v))),
             RTy::Res(a, b) => RTy::Res(Box::new(self.concrete(a)), Box::new(self.concrete(b))),
+            RTy::BoxedT(v) => RTy::BoxedT(Box::new(self.concrete(v))),
             other => other.clone(),
         }
     }
@@ -407,6 +488,7 @@ impl Emitter {
             RTy::Unknown => true,
             RTy::Vec(v) | RTy::Opt(v) => Emitter::has_inner_unknown(v),
             RTy::Res(a, b) => Emitter::has_inner_unknown(a) || Emitter::has_inner_unknown(b),
+            RTy::BoxedT(v) => Emitter::has_inner_unknown(v),
             _ => false,
         }
     }
@@ -453,7 +535,14 @@ impl Emitter {
             if v.payload.is_empty() {
                 s.push_str(&format!("    {},\n", v.name));
             } else {
-                let parts: Vec<String> = v.payload.iter().map(|t| self.ty_of(t).rust_str()).collect();
+                // 递归直边载荷: Box 间接(W54-a)
+                let parts: Vec<String> = v.payload.iter().map(|t| {
+                    let rt = self.ty_of(t);
+                    match &rt {
+                        RTy::Named(n) if self.is_boxed_edge(&ed.name, n) => format!("Box<{}>", n.clone()),
+                        _ => rt.rust_str(),
+                    }
+                }).collect();
                 s.push_str(&format!("    {}({}),\n", v.name, parts.join(", ")));
             }
         }
@@ -473,7 +562,7 @@ impl Emitter {
             .map(|p| {
                 let t = { let t0 = self.ty_of_opt(&p.ty); if matches!(t0, RTy::Unknown) { RTy::I64 } else { t0 } };
                 self.set_var(&p.name, t.clone());
-                format!("{}: {}", esc_name(&p.name), t.rust_str())
+                format!("mut {}: {}", esc_name(&p.name), t.rust_str())
             })
             .collect();
         let ret = match &f.sig.ret {
@@ -503,14 +592,44 @@ impl Emitter {
     fn block(&mut self, b: &Block, depth: usize, mode: BlockMode) -> String {
         let mut out = String::new();
         let ind = "    ".repeat(depth);
-        for st in &b.stmts {
+        // 尾部 return 语句提升: return X 作为块尾表达式(never)在语句/表达式位都合法
+        let mut lifted_ret: Option<&Stmt> = None;
+        let stmts: &[Stmt] = if b.tail.is_none() {
+            match b.stmts.last() {
+                Some(s @ Stmt::Return(_)) => {
+                    lifted_ret = Some(s);
+                    &b.stmts[..b.stmts.len() - 1]
+                }
+                _ => &b.stmts[..],
+            }
+        } else {
+            &b.stmts[..]
+        };
+        for st in stmts {
             out.push_str(&ind);
             out.push_str(&self.stmt(st, depth));
             out.push('\n');
         }
+        if let Some(Stmt::Return(re)) = lifted_ret {
+            out.push_str(&ind);
+            match re {
+                Some(e) => {
+                    let t = self.infer(e);
+                    out.push_str(&format!("return {}", self.clone_if_container(e, &t)));
+                }
+                None => out.push_str("return"),
+            }
+            out.push('\n');
+        }
         if let Some(t) = &b.tail {
             out.push_str(&ind);
-            let ts = self.expr(t);
+            // Stmt 位块尾的 match = 语句位 match(臂值归 (),防臂型不统一)
+            let ts = match (&**t, mode) {
+                (Expr::Match { scrutinee, arms, .. }, BlockMode::Stmt) => {
+                    self.match_expr(scrutinee, arms, true)
+                }
+                _ => self.expr(t),
+            };
             let semi = match mode {
                 BlockMode::Stmt => true,
                 BlockMode::FnBody => matches!(self.cur_ret, RTy::Unit),
@@ -571,6 +690,13 @@ impl Emitter {
                         )
                     }
                 }
+            }
+            // 表达式语句: match 走语句位(臂值归 (),防臂型不统一)
+            Stmt::Expr(e) => {
+                if let Expr::Match { scrutinee, arms, .. } = &**e {
+                    return format!("{};", self.match_expr(scrutinee, arms, true));
+                }
+                format!("{};", self.expr(e))
             }
             // 表达式语句一律补分号(println! 宏不带分号也合法,带分号更稳)
             Stmt::Expr(e) => format!("{};", self.expr(e)),
@@ -815,7 +941,14 @@ impl Emitter {
                 }
             }
             Expr::Range { .. } => RTy::I64,
-            Expr::Block(b) => b.tail.as_ref().map(|t| self.infer(t)).unwrap_or(RTy::Unit),
+            Expr::Block(b) => {
+                if b.tail.is_none() && matches!(b.stmts.last(), Some(Stmt::Return(_))) {
+                    // 全 return 块 = never 位(非 Unit,防尾分号)
+                    RTy::Unknown
+                } else {
+                    b.tail.as_ref().map(|t| self.infer(t)).unwrap_or(RTy::Unit)
+                }
+            }
             Expr::If(i) => i
                 .else_branch
                 .as_ref()
@@ -845,10 +978,11 @@ impl Emitter {
             Expr::Ident { name, .. } => {
                 let n = self.ident_emit(name);
                 let t = self.var_ty(name);
-                if t.is_container() && !matches!(t, RTy::Str) {
-                    format!("{}.clone()", n)
-                } else {
-                    n
+                match t {
+                    // 递归指针绑定: 宿主读 = T 值拷贝
+                    RTy::BoxedT(_) => format!("(*{}).clone()", n),
+                    t2 if t2.is_container() && !matches!(t2, RTy::Str) => format!("{}.clone()", n),
+                    _ => n,
                 }
             }
             Expr::Path(p) => esc_name(&p.segments.join("::")),
@@ -918,7 +1052,7 @@ impl Emitter {
                 format!("{{ {} }}", inner.trim_end())
             }
             Expr::If(i) => self.if_expr(i),
-            Expr::Match { scrutinee, arms, .. } => self.match_expr(scrutinee, arms),
+            Expr::Match { scrutinee, arms, .. } => self.match_expr(scrutinee, arms, false),
             Expr::Closure { params, body, .. } => {
                 let ps: Vec<String> = params
                     .iter()
@@ -1011,13 +1145,24 @@ impl Emitter {
         let bt = self.infer(base);
         let bs = self.expr_no_clone(base);
         if let Expr::Range { start, end } = index {
-            if matches!(bt, RTy::Str) || matches!(bt, RTy::Unknown) {
-                let s0 = start.as_ref().map(|e| self.expr(e)).unwrap_or("0i64".into());
-                let e0 = match end {
-                    Some(e) => self.expr(e),
-                    None => format!("__len_s(&{})", bs),
-                };
-                return format!("__substr(&{}, {}, {})", bs, s0, e0);
+            let s0 = start.as_ref().map(|e| self.expr(e)).unwrap_or("0i64".into());
+            match &bt {
+                // Vec 切片 = 子向量拷贝
+                RTy::Vec(_) => {
+                    let e0 = match end {
+                        Some(e) => self.expr(e),
+                        None => format!("(({}).len() as i64)", bs),
+                    };
+                    return format!("__vslice(&{}, {}, {})", bs, s0, e0);
+                }
+                RTy::Str | RTy::Unknown => {
+                    let e0 = match end {
+                        Some(e) => self.expr(e),
+                        None => format!("__len_s(&{})", bs),
+                    };
+                    return format!("__substr(&{}, {}, {})", bs, s0, e0);
+                }
+                _ => {}
             }
         }
         let is = self.expr(index);
@@ -1039,8 +1184,18 @@ impl Emitter {
         let callee_s = match callee {
             Expr::Ident { name, .. } => {
                 if let Some((en, ar)) = self.variant_of(name) {
-                    let vs: Vec<String> = args.iter().map(|a| self.expr(&a.expr)).collect();
                     if ar > 0 {
+                        // 递归直边载荷实参 -> Box::new
+                        let pts = self.variant_types.get(name).cloned().unwrap_or_default();
+                        let mut vs: Vec<String> = Vec::new();
+                        for (i, a) in args.iter().enumerate() {
+                            let es = self.expr(&a.expr);
+                            let boxed = pts.get(i).map(|pt| match pt {
+                                RTy::Named(n) => self.is_boxed_edge(&en, n),
+                                _ => false,
+                            }).unwrap_or(false);
+                            if boxed { vs.push(format!("Box::new({})", es)); } else { vs.push(es); }
+                        }
                         return format!("{}::{}({})", en, esc_name(name), vs.join(", "));
                     }
                     return format!("{}::{}", en, esc_name(name));
@@ -1287,20 +1442,20 @@ impl Emitter {
         out
     }
 
-    fn match_expr(&mut self, scrutinee: &Expr, arms: &[MatchArm]) -> String {
-        let st = self.infer(scrutinee);
+    // stmt_mode: match 作语句(值丢弃) — 臂体块走 Stmt 位,裸表达式臂包成分号块
+    fn match_expr(&mut self, scrutinee: &Expr, arms: &[MatchArm], stmt_mode: bool) -> String {
+        let st = self.infer(scrutinee).unboxed();
         let enum_name = match &st {
             RTy::Named(n) => n.clone(),
             _ => String::new(),
         };
         let mut out = format!("match {} {{", self.clone_if_container(scrutinee, &st));
         for arm in arms {
-            // 模式绑定类型注册(Some(c)/Ok(v)/具名变体/结构体解构)
-            self.register_pattern_binds(&arm.pat, &st);
+            // 模式绑定类型注册(Some(c)/Ok(v)/具名变体/结构体解构); BoxedT 剥箱
+            self.register_pattern_binds(&arm.pat, &st.unboxed());
             let pat = self.pattern(&arm.pat, &enum_name);
-            let mut body = self.expr(&arm.value);
-            if let Some(dead_name) = pat.strip_prefix("__DEAD::") {
-                // 假臂: 字段绑定以 Default 注入(永不匹配,但臂体可编译)
+            if let Some(_dead) = pat.strip_prefix("__DEAD::") {
+                // 假臂: 字段绑定以 String 注入(永不匹配,但臂体可编译); 语句位同样适用
                 let bnames = match &arm.pat {
                     crate::ast::Pattern::Variant { fields, .. } => fields.iter().filter_map(|f| match f {
                         crate::ast::Pattern::Ident { name, .. } if name != "_" => Some(name.clone()),
@@ -1308,11 +1463,25 @@ impl Emitter {
                     }).collect::<Vec<String>>(),
                     _ => Vec::new(),
                 };
+                let mut body = self.expr(&arm.value);
                 let lets: Vec<String> = bnames.iter().map(|b| format!("let {}: String = String::new();", esc_name(b))).collect();
                 body = format!("{{ {} {} }}", lets.join(" "), body);
                 out.push_str(&format!(" _ if false => {},", body));
                 continue;
             }
+            if stmt_mode {
+                // 语句位 match: 臂值归 ()(宿主语句位 match 丢弃臂值,臂间可异型)
+                let body = match &arm.value {
+                    Expr::Block(b) => {
+                        let inner = self.block(b, 0, BlockMode::Stmt);
+                        format!("{{ {} }}", inner.trim_end())
+                    }
+                    other => format!("{{ {}; }}", self.expr(other)),
+                };
+                out.push_str(&format!(" {} => {},", pat, body));
+                continue;
+            }
+            let body = self.expr(&arm.value);
             out.push_str(&format!(" {} => {},", pat, body));
         }
         out.push_str(" }");
@@ -1344,10 +1513,15 @@ impl Emitter {
                     if let Some(f0) = fields.first() { self.register_pattern_binds(f0, &elem); }
                     return;
                 }
-                // 具名变体: 载荷类型注册表
+                // 具名变体: 载荷类型注册表; 递归直边载荷 -> BoxedT(Rust 侧绑定是指针)
                 if let Some(pts) = self.variant_types.get(name).cloned() {
+                    let owner = self.variant_of(name).map(|(e2, _)| e2).unwrap_or_default();
                     for (f, t) in fields.iter().zip(pts) {
-                        self.register_pattern_binds(f, &t);
+                        let t2 = match &t {
+                            RTy::Named(n) if self.is_boxed_edge(&owner, n) => RTy::BoxedT(Box::new(t.clone())),
+                            _ => t,
+                        };
+                        self.register_pattern_binds(f, &t2);
                     }
                     return;
                 }

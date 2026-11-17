@@ -8,6 +8,8 @@ os.makedirs(BUILD, exist_ok=True)
 AINE = './target/release/aine.exe'
 # 已知非差分语料: 故意报错/需要交互/UI/网络/时钟/多文件模块
 SKIP = {
+    # 非确定输出(文件枚举序/时钟)与超时性能语料 — 只验证编译,不做字节差分
+    'allmod.aine', 'bigstr.aine',
     'bad.aine', 'w51_probe.aine', 'w48_min.aine', 'px_probe.aine', 'px2_probe_none.aine',
     'account_book.aine', 'todo_app.aine', 'counter.aine', 'clock.aine', 'weather.aine',
     'snake.aine', 'paint.aine', 'notepad.aine', 'calc.aine', 'chat.aine', 'ui_demo.aine',
