@@ -165,7 +165,7 @@ fn expr_value_ct(e: Expr, varnames: Vec<String>, vartypes: Vec<String>, fnames: 
             if ss.len() > 0 {
                 match ss[ss.len() - 1] {
                     SExpr(mbe3) { return expr_value_ct(mbe3, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, user_types) }
-                    SReturn(Some(mx3)) { return expr_value_ct(mx3, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, user_types) }
+                    SReturn(mx3) { return expr_value_ct(mx3, varnames, vartypes, fnames, freturns, snames, sfnames, sftypes, user_types) }
                     _ {}
                 }
             }
@@ -558,6 +558,17 @@ fn is_print_call(e: Expr) -> bool {
 
 
 // print(...) -> printf 语句（格式 %d/%g/%s/%zu 按实参类型）
+// W53: SReturn 扁平化后的哨兵检查 — __return_unit__ 裸 return, 其他正常 c_expr
+fn __ret_unit_check(e: Expr, pad: String, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, cur: String, vfnames: Vec<String>, vftypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, fn_names_all: Vec<String>, fn_var_infos: Vec<VarInfo>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>) -> String {
+    match e {
+        EIdent(n) {
+            if n == "__return_unit__" { return "return;" }
+        }
+        _ {}
+    }
+    return "return " + c_expr(e, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";"
+}
+
 fn c_print_stmt(args: Vec<Expr>, pad: String, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<String>, fnames: Vec<String>, freturns: Vec<String>, varnames: Vec<String>, vartypes: Vec<String>, snames: Vec<String>, sfnames: Vec<String>, sftypes: Vec<String>, fptypes: Vec<String>, enames: Vec<String>, elists: Vec<String>, vfnames: Vec<String>, vftypes: Vec<String>) -> String {
     var parts: Vec<String> = []
     var fmts: Vec<String> = []
@@ -1585,7 +1596,9 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                                         if es == "sizeof(char*)" {
                                             addr = "&(char*){ " + arg_c + " }"
                                         } else {
-                                            addr = "&" + arg_c
+                                            // W53-b: EField-of-stmt-expr(ps[0].name)是右值 → 临时提升外层
+                                            push_pre = "__typeof__(" + arg_c + ") __ep2 = (" + arg_c + "); "
+                                            addr = "&__ep2"
                                         }
                                     }
                                     _ {}
@@ -2340,15 +2353,13 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                     // 臂体: 值语句赋 _mv; return 原样; 其余语句透传
                     var body_stmts = ""
                     match marm.body {
-                        SReturn(Some(mx)) { body_stmts = "return " + c_expr(mx, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";" }
-                        SReturn(None) { body_stmts = "return _mv;" }
+                        SReturn(mx) { body_stmts = "return __ret_unit_check(mx, pad, user_types, vnames, vowners, varnames, vartypes, cur, vfnames, vftypes, snames, sfnames, sftypes, fnames, freturns, fn_names_all, fn_var_infos, fptypes, enames, elists);" }
                         SExpr(mbe) { body_stmts = "_mv = " + c_expr(mbe, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";" }
                         SBlock(mss2) {
                             var parts2: Vec<String> = []
                             for s2 in mss2 {
                                 match s2 {
-                                    SReturn(Some(mx2)) { parts2.push("return " + c_expr(mx2, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";") }
-                                    SReturn(None) { parts2.push("return _mv;") }
+                                    SReturn(mx2) { parts2.push("return __ret_unit_check(mx2, pad, user_types, vnames, vowners, varnames, vartypes, cur, vfnames, vftypes, snames, sfnames, sftypes, fnames, freturns, fn_names_all, fn_var_infos, fptypes, enames, elists);" ) }
                                     SExpr(mbe2) { parts2.push("_mv = " + c_expr(mbe2, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";") }
                                     SLet(ln2, _, lty2, linit2) {
                                         // 块内 let: 推断声明类型并发射(类型同步入表供后续语句)
@@ -2439,13 +2450,13 @@ fn c_expr(e: Expr, user_types: Vec<String>, vnames: Vec<String>, vowners: Vec<St
                 }
                 match marm.body {
                     SExpr(mbe) { mbody = c_expr(mbe, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) }
-                    SReturn(Some(mx)) { mbody = c_expr(mx, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) }
+                    SReturn(mx) { mbody = c_expr(mx, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) }
                     SBlock(mss) {
                         // 花括号臂: 末尾表达式语句作为块值
                         if mss.len() > 0 {
                             match mss[mss.len() - 1] {
                                 SExpr(mbe2) { mbody = c_expr(mbe2, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) }
-                                SReturn(Some(mx2)) { mbody = c_expr(mx2, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) }
+                                SReturn(mx2) { mbody = c_expr(mx2, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) }
                                 _ {}
                             }
                         }
@@ -3132,56 +3143,51 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
             body.push(pad + "  ui_run();")
             return pad + "{\n" + join(body, "\n") + "\n" + pad + "}"
         }
-        SReturn(eo) {
-            match eo {
-                Some(x) {
-                    // main 的 Ok/Err 返回 → 0/1
-                    if cur == "main" {
-                        match x {
-                            ECall(callee_m, args_m) {
-                                match callee_m {
-                                    EIdent(cn_m) {
-                                        if cn_m == "Ok" { return pad + "return 0;" }
-                                        if cn_m == "Err" { return pad + "return 1;" }
-                                    }
-                                    _ {}
-                                }
+        SReturn(x) {
+                        if x == EIdent("__return_unit__") {
+                return pad + "return;"
+            }
+            // main 的 Ok/Err 返回 → 0/1
+            if cur == "main" {
+                match x {
+                    ECall(callee_m, args_m) {
+                        match callee_m {
+                            EIdent(cn_m) {
+                                if cn_m == "Ok" { return pad + "return 0;" }
+                                if cn_m == "Err" { return pad + "return 1;" }
                             }
                             _ {}
                         }
                     }
-                    // Some/Ok 构造：按当前函数返回类型解析载荷成员
-                    match x {
-                        ECall(callee_r, args_r) {
-                            match callee_r {
-                                EIdent(cn_r) {
-                                    if cn_r == "Some" || cn_r == "Ok" {
-                                        let frt = fn_return(cur, fnames, freturns)
-                                        match frt {
-                                            Some(ft) {
-                                                if ft.starts_with("Option<") || ft.starts_with("Result<") {
-                                                    let m_r = payload_member(Some(first_type_arg(ft)), user_types)
-                                                    if args_r.len() == 1 {
-                                                        return pad + "return al_some_" + m_r + "(" + c_expr(args_r[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ");"
-                                                    }
-                                                }
+                    _ {}
+                }
+            }
+            // Some/Ok 构造: 按当前函数返回类型解析载荷成员
+            match x {
+                ECall(callee_r, args_r) {
+                    match callee_r {
+                        EIdent(cn_r) {
+                            if cn_r == "Some" || cn_r == "Ok" {
+                                let frt = fn_return(cur, fnames, freturns)
+                                match frt {
+                                    Some(ft) {
+                                        if ft.starts_with("Option<") || ft.starts_with("Result<") {
+                                            let m_r = payload_member(Some(first_type_arg(ft)), user_types)
+                                            if args_r.len() == 1 {
+                                                return pad + "return al_some_" + m_r + "(" + c_expr(args_r[0], user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ");"
                                             }
-                                            None {}
                                         }
                                     }
+                                    None {}
                                 }
-                                _ {}
                             }
                         }
                         _ {}
                     }
-                    return pad + "return " + c_expr(x, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";"
                 }
-                None {
-                    if cur == "main" { return pad + "return 0;" }
-                    return pad + "return;"
-                }
+                _ {}
             }
+            return pad + "return " + c_expr(x, user_types, vnames, vowners, varnames, vartypes, snames, sfnames, sftypes, fnames, freturns, fptypes, enames, elists, vfnames, vftypes) + ";"
         }
         SExpr(e) {
             match e {

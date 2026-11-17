@@ -1,0 +1,6 @@
+fn t() -> Result<(), String> {
+    return Ok(())
+}
+fn main() {
+    print(t())
+}

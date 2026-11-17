@@ -274,9 +274,8 @@ fn tck_stmt(s: Stmt, cur: String, fnames: Vec<String>, fptypes: Vec<String>, fre
             let sub = tck_expr(init, cur, fnames, fptypes, freturns, params, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
             for d in sub { diags.push(d) }
         }
-        SReturn(eo) {
-            match eo {
-                Some(x) {
+        SReturn(x) {
+            {
                     let sub = tck_expr(x, cur, fnames, fptypes, freturns, params, vnames, vtypes, snames, sfnames, sftypes, enames, elists, varnames2, varowners2)
                     for d in sub { diags.push(d) }
                     // 返回类型检查(保守: 字面量形态 vs 函数返回类型)
@@ -311,8 +310,6 @@ fn tck_stmt(s: Stmt, cur: String, fnames: Vec<String>, fptypes: Vec<String>, fre
                             }
                         }
                     }
-                }
-                None {}
             }
         }
         SAssign(vn, op, rhs) {

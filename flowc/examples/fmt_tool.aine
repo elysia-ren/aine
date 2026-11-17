@@ -285,11 +285,11 @@ fn fmt_stmt(s: Stmt, pad: String) -> String {
             for st in body_s { out = out + "\n" + fmt_stmt(st, pad + "    ") }
             return out + "\n" + pad + "}"
         }
-        SReturn(eo) {
-            match eo {
-                Some(x) { return pad + "return " + fmt_expr(x, 0) }
-                None { return pad + "return" }
+        SReturn(x) {
+            if x == EIdent("__return_unit__") {
+                return pad + "return"
             }
+            return pad + "return " + fmt_expr(x, 0)
         }
         SExpr(e) { return pad + fmt_expr(e, 0) }
         SBlock(stmts) {

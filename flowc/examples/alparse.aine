@@ -270,6 +270,7 @@ fn parse_if_expr(tokens: Vec<Token>, i: i32) -> Result<EPResult, String> {
 }
 
 fn parse_prefix(tokens: Vec<Token>, i: i32) -> Result<EPResult, String> {
+
     let tok = tokens[i]
     if tok.kind == TInt {
         // 字面量也支持后缀（方法链/索引）：5.to_f64()、"a,b".split(..)
@@ -594,17 +595,17 @@ fn parse_stmt(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
             let nxt = skip_semis(tokens, i + 1)
             let after = tokens[nxt]
             if after.text == "}" || after.kind == TEof {
-                return Ok(SPResult { stmt: SReturn(None) next: nxt })
+                return Ok(SPResult { stmt: SReturn(EStr("__return_unit__")) next: nxt })
             }
             // G2.0 ⑥：语句关键字不续读（防吞下一语句为返回值）
             // 例外: match/if 是表达式形态(return match {...} / return if ...) 必须续读
             if after.kind == TIdent {
                 if after.text == "let" || after.text == "var" || after.text == "for" || after.text == "while" || after.text == "return" || after.text == "break" || after.text == "continue" {
-                    return Ok(SPResult { stmt: SReturn(None) next: i + 1 })
+                    return Ok(SPResult { stmt: SReturn(EStr("__return_unit__")) next: i + 1 })
                 }
             }
             let r = parse_expr(tokens, nxt, 0)?
-            return Ok(SPResult { stmt: SReturn(Some(r.value)) next: r.next })
+            return Ok(SPResult { stmt: SReturn(r.value) next: r.next })
         }
         if kw == "fn" {
             return parse_fn(tokens, i + 1)
@@ -1143,7 +1144,7 @@ fn parse_match(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
             j = b.next
         } else if tokens[j].text == "return" {
             let rr = parse_expr(tokens, j + 1, 0)?
-            body = SReturn(Some(rr.value))
+            body = SReturn(rr.value)
             j = rr.next
         } else {
             let r = parse_expr(tokens, j, 0)?
@@ -1226,7 +1227,7 @@ fn parse_match_expr(tokens: Vec<Token>, i: i32) -> Result<EPResult, String> {
             j = b.next
         } else if tokens[j].text == "return" {
             let rr = parse_expr(tokens, j + 1, 0)?
-            body = SReturn(Some(rr.value))
+            body = SReturn(rr.value)
             j = rr.next
         } else {
             let r = parse_expr(tokens, j, 0)?
@@ -1418,9 +1419,9 @@ fn rewrite_lift_calls(s: Stmt, lift_fns: Vec<String>, lift_caps_txt: Vec<String>
             res = SExpr(e2)
             done = true
         }
-        SReturn(Some(e)) {
+        SReturn(e) {
             let e2 = rewrite_lift_expr(e, lift_fns, lift_caps_txt)
-            res = SReturn(Some(e2))
+            res = SReturn(e2)
             done = true
         }
         SLet(n, m, t, init) {
@@ -1582,7 +1583,7 @@ fn desugar_closures(program: Vec<Stmt>) -> Vec<Stmt> {
                                             fret2 = Some(fret)
                                         }
                                         var dbody: Vec<Stmt> = []
-                                        let s_ret = SReturn(Some(bexpr))
+                                        let s_ret = SReturn(bexpr)
                                         dbody.push(s_ret)
                                         // 捕获分析：自由变量 = 外层函数的局部变量/参数
                                         // → 提升为隐藏前缀参数（调用点同步补传）

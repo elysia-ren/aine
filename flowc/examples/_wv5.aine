@@ -1,0 +1,9 @@
+fn t(fname: String) {
+    if fname == "http_request" {
+        print("x")
+        return AInt(0)
+    }
+}
+enum AInt2 {
+    AInt(i32)
+}

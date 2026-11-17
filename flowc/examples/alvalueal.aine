@@ -91,14 +91,9 @@ fn val_stmt_uses(s: Stmt, bound: Vec<String>) -> Vec<String> {
             let sub = val_expr_uses(init, bound)
             for x in sub { out.push(x) }
         }
-        SReturn(eo) {
-            match eo {
-                Some(x) {
-                    let sub = val_expr_uses(x, bound)
-                    for x2 in sub { out.push(x2) }
-                }
-                None {}
-            }
+        SReturn(x) {
+            let sub = val_expr_uses(x, bound)
+            for x2 in sub { out.push(x2) }
         }
         SAssign(vn, op, rhs) {
             let sub = val_expr_uses(rhs, bound)

@@ -45,7 +45,7 @@ enum Stmt {
     SIf(Expr, Vec<Stmt>, Vec<Stmt>)
     SWhile(Expr, Vec<Stmt>)
     SFor(String, Expr, Vec<Stmt>)
-    SReturn(Option<Expr>)
+    SReturn(Expr)
     SExpr(Expr)
     SBlock(Vec<Stmt>)
     SAssign(String, String, Expr)
@@ -2589,38 +2589,36 @@ fn ai_stmt(s: Stmt, env: Map<String, AVal>, program: Index) -> AiFlow {
             let v = ai_expr(e, env, program)
             return AiFlow { ctrl: "ok" value: v env: env }
         }
-        SReturn(eo) {
-            match eo {
-                Some(x) {
-                    let rv2 = ai_expr(x, env, program)
-                    // 内部语句直接 return AiFlow{...}：透传其控制流(错误标记等)
-                    match rv2 {
-                        AStruct(fty, flds) {
-                            if fty == "AiFlow" {
-                                var fctrl = "error"
-                                var fval: AVal = AUnit
-                                for f in flds {
-                                    match f {
-                                        AEntry(k2, v2) {
-                                            if k2 == "ctrl" {
-                                                fctrl = ai_display(v2)
-                                            }
-                                            if k2 == "value" {
-                                                fval = v2
-                                            }
-                                        }
-                                        _ {}
+        SReturn(x) {
+            if x == AStr("__return_unit__") {
+                return AiFlow { ctrl: "return" value: AUnit env: env }
+            }
+            let rv2 = ai_expr(x, env, program)
+            // 内部语句直接 return AiFlow{...}: 透传其控制流(错误标记等)
+            match rv2 {
+                AStruct(fty, flds) {
+                    if fty == "AiFlow" {
+                        var fctrl = "error"
+                        var fval: AVal = AUnit
+                        for f in flds {
+                            match f {
+                                AEntry(k2, v2) {
+                                    if k2 == "ctrl" {
+                                        fctrl = ai_display(v2)
+                                    }
+                                    if k2 == "value" {
+                                        fval = v2
                                     }
                                 }
-                                return AiFlow { ctrl: fctrl value: fval env: env }
+                                _ {}
                             }
                         }
-                        _ {}
+                        return AiFlow { ctrl: fctrl value: fval env: env }
                     }
-                    return AiFlow { ctrl: "return" value: rv2 env: env }
                 }
-                None { return AiFlow { ctrl: "return" value: AUnit env: env } }
+                _ {}
             }
+            return AiFlow { ctrl: "return" value: rv2 env: env }
         }
         SIf(cond, then_s, else_s) {
             let cv = ai_expr(cond, env, program)

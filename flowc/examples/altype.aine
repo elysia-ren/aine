@@ -1217,7 +1217,7 @@ fn block_tail_expr(stmts: Vec<Stmt>) -> Option<Expr> {
     let last = stmts[stmts.len() - 1]
     match last {
         SExpr(e) { return Some(e) }
-        SReturn(Some(e)) { return Some(e) }
+        SReturn(e) { return Some(e) }
         _ { return None }
     }
 }
@@ -1724,12 +1724,7 @@ fn ckw_fix_stmt(s: Stmt) -> Stmt {
         SIf(c, a, b) { return SIf(ckw_fix_expr(c), ckw_fix_stmts(a), ckw_fix_stmts(b)) }
         SWhile(c, b) { return SWhile(ckw_fix_expr(c), ckw_fix_stmts(b)) }
         SFor(v, it, b) { return SFor(ckw_escape(v), ckw_fix_expr(it), ckw_fix_stmts(b)) }
-        SReturn(eo) {
-            match eo {
-                Some(x) { return SReturn(Some(ckw_fix_expr(x))) }
-                None { return s }
-            }
-        }
+        SReturn(x) { return SReturn(ckw_fix_expr(x)) }
         SExpr(e) { return SExpr(ckw_fix_expr(e)) }
         SBlock(ss) { return SBlock(ckw_fix_stmts(ss)) }
         SAssign(n, op, rhs) { return SAssign(ckw_escape(n), op, ckw_fix_expr(rhs)) }
@@ -1753,12 +1748,12 @@ fn ckw_fix_stmt(s: Stmt) -> Stmt {
             for m in ms { nm.push(ckw_fix_stmt(m)) }
             return SImpl(ty, nm)
         }
-        SMatch(s, arms) {
+        SMatch(ms, msarms) {
             var na3: Vec<MatchArm> = []
-            for arm in arms {
+            for arm in msarms {
                 na3.push(MatchArm { pat: arm.pat body: ckw_fix_stmt(arm.body) })
             }
-            return SMatch(ckw_fix_expr(s), na3)
+            return SMatch(ckw_fix_expr(ms), na3)
         }
         SGo(det, ss) { return SGo(det, ckw_fix_stmts(ss)) }
         SUi(ss) { return SUi(ckw_fix_stmts(ss)) }

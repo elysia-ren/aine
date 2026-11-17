@@ -1,0 +1,8 @@
+fn main() -> Result<(), String> {
+    var src_path = "x"
+    if true {
+        src_path = "y"
+    }
+    print(src_path)
+    return Ok(())
+}

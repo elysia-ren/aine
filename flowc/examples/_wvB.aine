@@ -1,0 +1,6 @@
+fn t() {
+    return
+}
+fn main() {
+    t()
+}

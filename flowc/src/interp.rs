@@ -633,7 +633,7 @@ impl Interp {
                 return Ok((cf, v));
             }
         }
-        Err(RtError::msg("match 未匹配任何分支"))
+        Err(RtError::msg(format!("M1 scrut={:?} fn={}", sv, self.current_fn)))
     }
 
     /// Execute an expression as a statement (handles return inside closures).
@@ -731,7 +731,7 @@ impl Interp {
                             return Ok(cf);
                         }
                     }
-                    return Err(RtError::msg("match 未匹配任何分支"));
+                    return Err(RtError::msg("match M2 未匹配任何分支"));
                 }
                 match self.eval(env, e) {
                     Err(RtError::Return(v)) => Ok(ControlFlow::Return(v)),
@@ -1287,7 +1287,7 @@ impl Interp {
                         return r;
                     }
                 }
-                Err(RtError::msg("match 未匹配任何分支"))
+                Err(RtError::msg("match M3 未匹配任何分支"))
             }
             Expr::Closure { params, body, .. } => Ok(Value::Closure {
                 params: params.iter().map(|p| p.name.clone()).collect(),

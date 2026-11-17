@@ -1,0 +1,6 @@
+fn u() -> i32 {
+    return 5
+}
+fn main() {
+    print(u())
+}

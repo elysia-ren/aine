@@ -571,7 +571,7 @@ fn parse_stmt(tokens: Vec<Token>, i: i32) -> Result<SPResult, String> {
             let nxt = skip_semis(tokens, i + 1)
             let after = tokens[nxt]
             if after.text == "}" || after.kind == TEof {
-                return Ok(SPResult { stmt: SReturn(None) next: nxt })
+                return Ok(SPResult { stmt: SReturn(EStr("__return_unit__")) next: nxt })
             }
             let r = parse_expr(tokens, nxt, 0)?
             return Ok(SPResult { stmt: SReturn(Some(r.value)) next: r.next })

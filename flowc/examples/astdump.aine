@@ -390,15 +390,12 @@ fn sexp_stmt(s: Stmt, depth: i32) -> String {
         SExpr(e) {
             return pad(depth) + "(expr " + sexp_expr(e) + ")\n"
         }
-        SReturn(e) {
-            match e {
-                Some(x) {
-                    return pad(depth) + "(return " + sexp_expr(x) + ")\n"
-                }
-                None {
-                    return pad(depth) + "(return)\n"
-                }
+        SReturn(x) {
+            // W53: SReturn 扁平化 — __return_unit__ 哨兵 = 无值 return
+            if x == EIdent("__return_unit__") {
+                return pad(depth) + "(return)\n"
             }
+            return pad(depth) + "(return " + sexp_expr(x) + ")\n"
         }
         SIf(cond, then_s, else_s) {
             var out = pad(depth) + "(if " + sexp_expr(cond) + "\n"

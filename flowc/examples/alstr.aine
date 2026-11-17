@@ -169,11 +169,11 @@ fn stringify_stmt(s: Stmt, pad: String) -> String {
             out = out + "\n" + join(body, "\n") + "\n" + pad + "}"
             return out
         }
-        SReturn(e) {
-            match e {
-                Some(x) { return pad + "return " + stringify(x) }
-                None { return pad + "return" }
+        SReturn(x) {
+            if x == EIdent("__return_unit__") {
+                return pad + "return"
             }
+            return pad + "return " + stringify(x)
         }
         SExpr(e) { return pad + stringify(e) }
         SAssign(name, op, rhs) { return pad + name + " " + op + " " + stringify(rhs) }
