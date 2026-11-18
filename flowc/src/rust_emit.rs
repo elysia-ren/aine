@@ -210,6 +210,8 @@ pub enum RTy {
     Named(String),
     /// 递归类型的 Rust 侧指针包装(Box<T>) — 宿主语义里它就是 T 本身
     BoxedT(Box<RTy>),
+    /// 统一函数型 fn(A,B)->R (fn 指针; fn item 调用位自动强转)
+    FnPtr(Vec<RTy>, Box<RTy>),
     Unit,
     Unknown,
 }
@@ -227,6 +229,7 @@ impl RTy {
             RTy::Res(a, b) => format!("Result<{}, {}>", a.rust_str(), b.rust_str()),
             RTy::Named(n) => n.clone(),
             RTy::BoxedT(t) => format!("Box<{}>", t.rust_str()),
+            RTy::FnPtr(ps, r) => format!("fn({}) -> {}", ps.iter().map(|p| p.rust_str()).collect::<Vec<_>>().join(", "), r.rust_str()),
             RTy::Unit => "()".into(),
             RTy::Unknown => "_".into(),
         }
@@ -446,7 +449,10 @@ impl Emitter {
             Type::Tuple(ts) => {
                 if ts.is_empty() { RTy::Unit } else { self.ty_of(&ts[0]) }
             }
-            Type::Fn { .. } => RTy::Unknown,
+            Type::Fn { params, ret } => RTy::FnPtr(
+                params.iter().map(|t| self.ty_of(t)).collect(),
+                Box::new(ret.as_ref().map(|t| self.ty_of(t)).unwrap_or(RTy::Unit)),
+            ),
             Type::Infer => RTy::Unknown,
         }
     }
@@ -519,6 +525,7 @@ impl Emitter {
             RTy::Vec(v) | RTy::Opt(v) => Emitter::has_inner_unknown(v),
             RTy::Res(a, b) => Emitter::has_inner_unknown(a) || Emitter::has_inner_unknown(b),
             RTy::BoxedT(v) => Emitter::has_inner_unknown(v),
+            RTy::FnPtr(ps, r) => ps.iter().any(|p| Emitter::has_inner_unknown(p)) || Emitter::has_inner_unknown(r),
             _ => false,
         }
     }
@@ -659,12 +666,33 @@ impl Emitter {
         self.cur_is_main = f.sig.name == "main";
         self.cur_ret = f.sig.ret.as_ref().map(|t| self.ty_of(t)).unwrap_or(RTy::Unit);
         self.vars.clear();
+        // W54-e: 被当函数调用的形参 -> Box<dyn Fn>(宿主: 形参注解可为谎言)
+        let pnames: Vec<String> = f.sig.params.iter().map(|p| p.name.clone()).collect();
+        let mut calls: Vec<(String, Vec<Expr>)> = Vec::new();
+        self.scan_called_params_expr(&Expr::Block(Box::new(f.body.clone())), &pnames, &mut calls);
         let params: Vec<String> = f
             .sig
             .params
             .iter()
             .map(|p| {
                 let t = { let t0 = self.ty_of_opt(&p.ty); if matches!(t0, RTy::Unknown) { RTy::I64 } else { t0 } };
+                // 诚实函数型注解直用 fn 指针(fn item 调用位自动强转)
+                if matches!(&t, RTy::FnPtr(_, _)) {
+                    self.set_var(&p.name, t.clone());
+                    return format!("mut {}: {}", esc_name(&p.name), t.rust_str());
+                }
+                if let Some((_n, cargs)) = calls.iter().find(|(cn, _)| *cn == p.name) {
+                    // 首个调用位的实参类型 -> 动态 Fn 签名; 返回值取外层函数返回型
+                    let ats: Vec<String> = cargs.iter().map(|a| {
+                        let t0 = self.infer(a);
+                        let t0 = if matches!(t0, RTy::Unknown) { RTy::I64 } else { t0.unboxed() };
+                        t0.rust_str()
+                    }).collect();
+                    let ret_t = match &self.cur_ret { r if !matches!(r, RTy::Unit) => r.rust_str(), _ => "i64".to_string() };
+                    let fty = format!("Box<dyn Fn({}) -> {}>", ats.join(", "), ret_t);
+                    self.set_var(&p.name, RTy::Named(fty.clone()));
+                    return format!("mut {}: {}", esc_name(&p.name), fty);
+                }
                 self.set_var(&p.name, t.clone());
                 format!("mut {}: {}", esc_name(&p.name), t.rust_str())
             })
@@ -1384,6 +1412,66 @@ impl Emitter {
             })
             .collect();
         format!("{}({})", callee_s, as_.join(", "))
+    }
+
+    // W54-e: 形参作函数值调用 — 扫描体内 Call{callee: Ident(形参)} 收集 (形参名, 实参列表)
+    fn scan_called_params_expr(&self, e: &Expr, pnames: &[String], out: &mut Vec<(String, Vec<Expr>)>) {
+        match e {
+            Expr::Call { callee, args, .. } => {
+                if let Expr::Ident { name, .. } = &**callee {
+                    if pnames.iter().any(|p| p == name) {
+                        out.push((name.clone(), args.iter().map(|a| a.expr.clone()).collect()));
+                    }
+                }
+                self.scan_called_params_expr(callee, pnames, out);
+                for a in args { self.scan_called_params_expr(&a.expr, pnames, out); }
+            }
+            Expr::Array(items) => for x in items { self.scan_called_params_expr(x, pnames, out); },
+            Expr::StructLit { fields, .. } => for (_f2, fe) in fields { self.scan_called_params_expr(fe, pnames, out); },
+            Expr::Unary { expr, .. } => self.scan_called_params_expr(expr, pnames, out),
+            Expr::Binary { lhs, rhs, .. } => { self.scan_called_params_expr(lhs, pnames, out); self.scan_called_params_expr(rhs, pnames, out); }
+            Expr::Assign { target, value, .. } => { self.scan_called_params_expr(target, pnames, out); self.scan_called_params_expr(value, pnames, out); }
+            Expr::Field { base, .. } => self.scan_called_params_expr(base, pnames, out),
+            Expr::Index { base, index } => { self.scan_called_params_expr(base, pnames, out); self.scan_called_params_expr(index, pnames, out); }
+            Expr::Try(x) => self.scan_called_params_expr(x, pnames, out),
+            Expr::Range { start, end } => for x in [start, end].into_iter().flatten() { self.scan_called_params_expr(x, pnames, out); },
+            Expr::Block(b) => self.scan_called_params_block(b, pnames, out),
+            Expr::If(i) => self.scan_called_params_if(i, pnames, out),
+            Expr::Match { scrutinee, arms, .. } => {
+                self.scan_called_params_expr(scrutinee, pnames, out);
+                for arm in arms { self.scan_called_params_expr(&arm.value, pnames, out); }
+            }
+            Expr::Closure { body, .. } => self.scan_called_params_expr(body, pnames, out),
+            Expr::Paren(x) => self.scan_called_params_expr(x, pnames, out),
+            Expr::Tuple(items) => for x in items { self.scan_called_params_expr(x, pnames, out); },
+            _ => {}
+        }
+    }
+
+    fn scan_called_params_block(&self, b: &Block, pnames: &[String], out: &mut Vec<(String, Vec<Expr>)>) {
+        for st in &b.stmts { self.scan_called_params_stmt(st, pnames, out); }
+        if let Some(t) = &b.tail { self.scan_called_params_expr(t, pnames, out); }
+    }
+
+    fn scan_called_params_if(&self, i: &IfExpr, pnames: &[String], out: &mut Vec<(String, Vec<Expr>)>) {
+        self.scan_called_params_expr(&i.cond, pnames, out);
+        self.scan_called_params_block(&i.then_branch, pnames, out);
+        if let Some(el) = &i.else_branch { self.scan_called_params_expr(el, pnames, out); }
+    }
+
+    fn scan_called_params_stmt(&self, st: &Stmt, pnames: &[String], out: &mut Vec<(String, Vec<Expr>)>) {
+        match st {
+            Stmt::Let(l) => if let Some(e) = &l.init { self.scan_called_params_expr(e, pnames, out); },
+            Stmt::Expr(e) => self.scan_called_params_expr(e, pnames, out),
+            Stmt::Return(Some(e)) => self.scan_called_params_expr(e, pnames, out),
+            Stmt::If(i) => self.scan_called_params_if(i, pnames, out),
+            Stmt::While { cond, body, .. } => { self.scan_called_params_expr(cond, pnames, out); self.scan_called_params_block(body, pnames, out); }
+            Stmt::For { iter, body, .. } => { self.scan_called_params_expr(iter, pnames, out); self.scan_called_params_block(body, pnames, out); }
+            Stmt::Defer(e) => self.scan_called_params_expr(e, pnames, out),
+            Stmt::TryCatch(t) => { self.scan_called_params_block(&t.try_block, pnames, out); self.scan_called_params_block(&t.catch_block, pnames, out); }
+            Stmt::Block(b) => self.scan_called_params_block(b, pnames, out),
+            _ => {}
+        }
     }
 
     // 方法调用 base 不做值语义 clone: 变异方法(push/set/insert...)必须作用于绑定本身
