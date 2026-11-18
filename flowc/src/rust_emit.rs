@@ -123,6 +123,19 @@ fn __read_line() -> String { let mut b = String::new(); use std::io::BufRead; st
 fn __write_file(p: &str, c: &str) -> bool { std::fs::write(p, c).is_ok() }
 fn __append_file(p: &str, c: &str) -> bool { use std::io::Write; if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) { f.write_all(c.as_bytes()).is_ok() } else { false } }
 fn __file_exists(p: &str) -> bool { std::path::Path::new(p).exists() }
+impl<V: Clone> Default for __Map<V> {
+    fn default() -> Self { __Map::new() }
+}
+fn __read_bytes(p: &str) -> Vec<i64> {
+    match std::fs::read(p) {
+        Ok(b) => b.iter().map(|x| *x as i64).collect(),
+        Err(e) => { eprintln!("[read_bytes error: {}]", e); Vec::new() }
+    }
+}
+fn __write_bytes(p: &str, data: &Vec<i64>) -> bool {
+    let bytes: Vec<u8> = data.iter().map(|x| *x as u8).collect();
+    std::fs::write(p, bytes).is_ok()
+}
 fn __file_list(p: &str) -> Vec<String> { std::fs::read_dir(p).map(|rd| rd.filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string())).collect()).unwrap_or_default() }
 fn __sleep(ms: i64) { std::thread::sleep(std::time::Duration::from_millis(ms.max(0) as u64)); }
 fn __env(k: &str) -> String { std::env::var(k).unwrap_or_default() }
@@ -281,6 +294,10 @@ struct Emitter {
     variant_types: StdMap<String, Vec<RTy>>,
     /// 递归直边: owner 类型 -> 需 Box 的目标类型名集合
     boxed_edges: StdMap<String, Vec<String>>,
+    /// @global 注册表: 名 -> 具体类型
+    globals: StdMap<String, RTy>,
+    /// @global 定义暂存(两遍: 先全签名,再推全局类型)
+    global_defs: Vec<crate::ast::GlobalStateDef>,
     loop_depth: usize,
     vars: Vec<(String, RTy)>,
     cur_ret: RTy,
@@ -296,6 +313,8 @@ impl Emitter {
             enums: StdMap::new(),
             variant_types: StdMap::new(),
             boxed_edges: StdMap::new(),
+            globals: StdMap::new(),
+            global_defs: Vec::new(),
             loop_depth: 0,
             vars: Vec::new(),
             cur_ret: RTy::Unit,
@@ -327,6 +346,9 @@ impl Emitter {
                         let pts: Vec<RTy> = v.payload.iter().map(|t| self.ty_of(t)).collect();
                         self.variant_types.insert(v.name.clone(), pts);
                     }
+                }
+                Item::GlobalState(g) => {
+                    self.global_defs.push(g.clone());
                 }
                 _ => {}
             }
@@ -444,6 +466,10 @@ impl Emitter {
                 return r.clone();
             }
         }
+        // @global 回退(局部遮蔽全局)
+        if let Some(t) = self.globals.get(name) {
+            return t.clone();
+        }
         RTy::Unknown
     }
 
@@ -464,6 +490,10 @@ impl Emitter {
     // 裸标识符发射: cli_args 全局注入 + 零载荷变体作值
     fn ident_emit(&self, name: &str) -> String {
         if name == "cli_args" { return "__cli_args()".into(); }
+        // @global: 经互斥守卫解引用位(读/写/方法变异/字段统一形态)
+        if self.globals.contains_key(name) {
+            return format!("(*__g_{}())", esc_name(name));
+        }
         if let Some((en, ar)) = self.variant_of(name) {
             if ar == 0 { return format!("{}::{}", en, esc_name(name)); }
         }
@@ -509,9 +539,59 @@ impl Emitter {
         out.push_str("\n// ---- 用户代码 ----\n");
         for item in &p.items {
             match item {
-                Item::Fn(f) => out.push_str(&self.emit_fn(f)),
                 Item::Struct(sd) => out.push_str(&self.emit_struct(sd)),
                 Item::Enum(ed) => out.push_str(&self.emit_enum(ed)),
+                _ => {}
+            }
+        }
+        // @global: 类型推断(签名已齐) -> 注册表 -> 访问器发射(W54-c)
+        let defs = self.global_defs.clone();
+        let mut g_acc = String::new();
+        for g in &defs {
+            let gt = match &g.ty {
+                Some(t) => {
+                    let t0 = self.ty_of(t);
+                    self.concrete(&t0)
+                }
+                None => match &g.init {
+                    Some(e) => {
+                        let t0 = self.infer(e);
+                        self.concrete(&t0)
+                    }
+                    None => RTy::Unit,
+                },
+            };
+            self.globals.insert(g.name.clone(), gt.clone());
+        }
+        for g in &defs {
+            let gt = self.globals.get(&g.name).cloned().unwrap_or(RTy::Unit);
+            let n = esc_name(&g.name);
+            let tstr = gt.rust_str();
+            let init_s = match &g.init {
+                Some(e) => {
+                    let t0 = self.infer(e);
+                    self.clone_if_container(e, &t0)
+                }
+                None => default_value(&gt),
+            };
+            g_acc.push_str("fn __g_");
+            g_acc.push_str(&n);
+            g_acc.push_str("() -> std::sync::MutexGuard<'static, ");
+            g_acc.push_str(&tstr);
+            g_acc.push_str("> {\n    static __S_");
+            g_acc.push_str(&n);
+            g_acc.push_str(": std::sync::OnceLock<std::sync::Mutex<");
+            g_acc.push_str(&tstr);
+            g_acc.push_str(">> = std::sync::OnceLock::new();\n    __S_");
+            g_acc.push_str(&n);
+            g_acc.push_str(".get_or_init(|| std::sync::Mutex::new(");
+            g_acc.push_str(&init_s);
+            g_acc.push_str(")).lock().unwrap()\n}\n\n");
+        }
+        out.push_str(&g_acc);
+        for item in &p.items {
+            match item {
+                Item::Fn(f) => out.push_str(&self.emit_fn(f)),
                 _ => {}
             }
         }
@@ -526,6 +606,13 @@ impl Emitter {
             s.push_str(&format!("    {}: {},\n", f.name, ft.rust_str()));
         }
         s.push_str("}\n\n");
+        // impl Default: ::default() 构造位(alinterp Stmt::default 等)
+        s.push_str(&format!("impl Default for {} {{\n    fn default() -> Self {{ {} {{\n", sd.name, sd.name));
+        for f in &sd.fields {
+            let ft = self.ty_of(&f.ty);
+            s.push_str(&format!("            {}: {},\n", f.name, default_value(&ft)));
+        }
+        s.push_str("        }\n    }\n}\n\n");
         s
     }
 
@@ -547,6 +634,23 @@ impl Emitter {
             }
         }
         s.push_str("}\n\n");
+        // impl Default: 首变体 + 载荷默认值(Box 载荷槽需包装)
+        let dparts: Vec<String> = ed.variants.first().map(|v0| {
+            v0.payload.iter().map(|t| {
+                let rt = self.ty_of(t);
+                match &rt {
+                    RTy::Named(n2) if self.is_boxed_edge(&ed.name, n2) => format!("Box::new({})", default_value(&rt)),
+                    RTy::BoxedT(_) => format!("Box::new({})", default_value(&rt)),
+                    _ => default_value(&rt),
+                }
+            }).collect()
+        }).unwrap_or_default();
+        let dcall = match ed.variants.first() {
+            Some(v0) if v0.payload.is_empty() => format!("{}::{}", ed.name, v0.name),
+            Some(v0) => format!("{}::{}({})", ed.name, v0.name, dparts.join(", ")),
+            None => format!("{}::EUnit", ed.name),
+        };
+        s.push_str(&format!("impl Default for {} {{\n    fn default() -> Self {{ {} }}\n}}\n\n", ed.name, dcall));
         s
     }
 
@@ -866,6 +970,12 @@ impl Emitter {
                 };
                 if let Some(n) = &name {
                     if n == "read_file" || n == "input" { return RTy::Str; }
+                    if n == "read_bytes" { return RTy::Vec(Box::new(RTy::I64)); }
+                    if n == "write_file" || n == "append_file" || n == "write_bytes" || n == "file_exists" { return RTy::Bool; }
+                    if n == "read_line" { return RTy::Str; }
+                    if n == "now" || n == "now_ms" { return RTy::I64; }
+                    if n == "file_list" { return RTy::Vec(Box::new(RTy::Str)); }
+                    if n == "sleep" || n == "print" { return RTy::Unit; }
                 }
                 if let Some(n) = &name {
                     if let Some((en, _)) = self.variant_of(n) {
@@ -1239,6 +1349,15 @@ impl Emitter {
                     "file_exists" => {
                         let p = args.first().map(|a| self.expr(&a.expr)).unwrap_or_default();
                         return format!("__file_exists(&{})", p);
+                    }
+                    "read_bytes" => {
+                        let p = args.first().map(|a| self.expr(&a.expr)).unwrap_or_default();
+                        return format!("__read_bytes(&{})", p);
+                    }
+                    "write_bytes" => {
+                        let p = args.first().map(|a| self.expr(&a.expr)).unwrap_or_default();
+                        let d = args.get(1).map(|a| self.expr(&a.expr)).unwrap_or_default();
+                        return format!("__write_bytes(&{}, &{})", p, d);
                     }
                     "file_list" => {
                         let p = args.first().map(|a| self.expr(&a.expr)).unwrap_or_default();
