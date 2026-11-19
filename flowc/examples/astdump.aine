@@ -44,7 +44,8 @@ enum Stmt {
     SIf(Expr, Vec<Stmt>, Vec<Stmt>)
     SWhile(Expr, Vec<Stmt>)
     SFor(String, Expr, Vec<Stmt>)
-    SReturn(Option<Expr>)
+    // W53 扁平化: 载荷恒为 Expr(哨兵 = EStr(__return_unit__)); SD-10 类型自洽
+    SReturn(Expr)
     SExpr(Expr)
     SBlock(Vec<Stmt>)
     SAssign(String, String, Expr)

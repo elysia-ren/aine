@@ -936,7 +936,14 @@ fn stringify(e: Expr) -> String {
         EIdent(n) { n }
         EUnit { "()" }
         ERange(a, b) { stringify(a) + ".." + stringify(b) }
-        EClosure(params, body) { "|" + join(params, ", ") + "| " + stringify(body) }
+        EClosure(params, body) {
+            // SD-10: join 需要 Vec<String>,先把 Param 载荷取名字
+            var pnames: Vec<String> = []
+            for p in params {
+                pnames.push(p.name)
+            }
+            return "|" + join(pnames, ", ") + "| " + stringify(body)
+        }
         EIndex(b, idx) { stringify(b) + "[" + stringify(idx) + "]" }
         ETry(x) { stringify(x) + "?" }
         EStruct(ty, fields) {

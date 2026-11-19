@@ -45,7 +45,14 @@ fn stringify(e: Expr) -> String {
         EIdent(n) { return n }
         EUnit { return "()" }
         ERange(a, b) { return stringify(a) + ".." + stringify(b) }
-        EClosure(params, body) { return "|" + join(params, ", ") + "| " + stringify(body) }
+        EClosure(params, body) {
+            // SD-10: join 需要 Vec<String>,先把 Param 载荷取名字
+            var pnames: Vec<String> = []
+            for p in params {
+                pnames.push(p.name)
+            }
+            return "|" + join(pnames, ", ") + "| " + stringify(body)
+        }
         EIndex(b, idx) { return stringify(b) + "[" + stringify(idx) + "]" }
         EIf(cond, then_s, else_s) {
             var out = "if " + stringify(cond) + " {"
@@ -170,7 +177,8 @@ fn stringify_stmt(s: Stmt, pad: String) -> String {
             return out
         }
         SReturn(x) {
-            if x == EIdent("__return_unit__") {
+            // W53 哨兵实际是 EStr(alparse:598), EIdent 比对从不命中(休眠 bug 修复)
+            if x == EStr("__return_unit__") {
                 return pad + "return"
             }
             return pad + "return " + stringify(x)

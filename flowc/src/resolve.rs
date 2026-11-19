@@ -282,7 +282,13 @@ impl Resolver {
                     let vsym = self.intern(&v.name, SymbolKind::EnumVariant, v.span, false);
                     self.define_allow_shadow(&v.name, vsym);
                 }
-                HirItem::Enum { name: e.name.clone(), variants, span: e.span, sym }
+                HirItem::Enum {
+                    name: e.name.clone(),
+                    variants,
+                    payloads: e.variants.iter().map(|v| v.payload.clone()).collect(),
+                    span: e.span,
+                    sym,
+                }
             }
             Item::TypeAlias(t) => {
                 let sym = self.lookup(&t.name).unwrap();

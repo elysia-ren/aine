@@ -3144,7 +3144,8 @@ fn c_stmt(s: Stmt, pad: String, user_types: Vec<String>, vnames: Vec<String>, vo
             return pad + "{\n" + join(body, "\n") + "\n" + pad + "}"
         }
         SReturn(x) {
-                        if x == EIdent("__return_unit__") {
+            // W53 哨兵是 EStr(alparse:598); 原 EIdent 比对从不命中(休眠 bug 修复)
+            if x == EStr("__return_unit__") {
                 return pad + "return;"
             }
             // main 的 Ok/Err 返回 → 0/1

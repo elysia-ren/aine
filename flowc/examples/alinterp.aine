@@ -1500,7 +1500,12 @@ fn ai_expr(e: Expr, env: Map<String, AVal>, program: Index) -> AVal {
                     }
                     if fname == "file_list" {
                         if arg_vals.len() > 0 {
-                            return AVec(file_list(ai_as_str(arg_vals[0])))
+                            // SD-10: 显式元素转换(Vec<String> -> Vec<AVal>, 动态上转型不静态自洽)
+                            var fl: Vec<AVal> = []
+                            for f in file_list(ai_as_str(arg_vals[0])) {
+                                fl.push(AStr(f))
+                            }
+                            return AVec(fl)
                         }
                         return AVec([])
                     }
@@ -2590,7 +2595,8 @@ fn ai_stmt(s: Stmt, env: Map<String, AVal>, program: Index) -> AiFlow {
             return AiFlow { ctrl: "ok" value: v env: env }
         }
         SReturn(x) {
-            if x == AStr("__return_unit__") {
+            // W53 哨兵是 EStr(alparse:598); 原 AStr 比对从不命中(休眠 bug 修复)
+            if x == EStr("__return_unit__") {
                 return AiFlow { ctrl: "return" value: AUnit env: env }
             }
             let rv2 = ai_expr(x, env, program)

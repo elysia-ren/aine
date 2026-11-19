@@ -78,6 +78,8 @@ pub enum HirItem {
     Enum {
         name: String,
         variants: Vec<String>,
+        /// 变体载荷类型(与 variants 平行; SD-10 模式绑定类型传导)
+        payloads: Vec<Vec<crate::ast::Type>>,
         span: Span,
         sym: SymbolId,
     },

@@ -123,6 +123,33 @@ fn __read_line() -> String { let mut b = String::new(); use std::io::BufRead; st
 fn __write_file(p: &str, c: &str) -> bool { std::fs::write(p, c).is_ok() }
 fn __append_file(p: &str, c: &str) -> bool { use std::io::Write; if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) { f.write_all(c.as_bytes()).is_ok() } else { false } }
 fn __file_exists(p: &str) -> bool { std::path::Path::new(p).exists() }
+fn __b64_encode_bytes(v: &Vec<i64>) -> String {
+    let bytes: Vec<u8> = v.iter().map(|x| *x as u8).collect();
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        out.push(CHARS[(b[0] >> 2) as usize] as char);
+        out.push(CHARS[(((b[0] & 0x03) << 4) | (b[1] >> 4)) as usize] as char);
+        out.push(if chunk.len() > 1 { CHARS[(((b[1] & 0x0F) << 2) | (b[2] >> 6)) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { CHARS[(b[2] & 0x3F) as usize] as char } else { '=' });
+    }
+    out
+}
+fn __b64_encode_str(s: &str) -> String { let b: Vec<i64> = s.bytes().map(|x| x as i64).collect(); __b64_encode_bytes(&b) }
+fn __b64_decode(s: &str) -> Vec<i64> {
+    let rev = |c: u8| -> Option<u8> { match c { b'A'..=b'Z' => Some(c - b'A'), b'a'..=b'z' => Some(c - b'a' + 26), b'0'..=b'9' => Some(c - b'0' + 52), b'+' => Some(62), b'/' => Some(63), _ => None } };
+    let bytes: Vec<u8> = s.bytes().filter(|c| *c != b'=' && *c != b'\n' && *c != b'\r').collect();
+    let mut out: Vec<i64> = Vec::new();
+    for chunk in bytes.chunks(4) {
+        let b = [rev(chunk[0]).unwrap_or(0), rev(*chunk.get(1).unwrap_or(&b'A')).unwrap_or(0), rev(*chunk.get(2).unwrap_or(&b'A')).unwrap_or(0), rev(*chunk.get(3).unwrap_or(&b'A')).unwrap_or(0)];
+        out.push(((b[0] << 2) | (b[1] >> 4)) as i64);
+        if chunk.len() > 2 { out.push(((b[1] << 4) | (b[2] >> 2)) as i64); }
+        if chunk.len() > 3 { out.push(((b[2] << 6) | b[3]) as i64); }
+    }
+    out
+}
+fn __to_bytes(s: &str) -> Vec<i64> { s.bytes().map(|x| x as i64).collect() }
 impl<V: Clone> Default for __Map<V> {
     fn default() -> Self { __Map::new() }
 }
@@ -283,7 +310,7 @@ fn default_value(t: &RTy) -> String {
         RTy::Vec(_) => "Vec::new()".into(),
         RTy::Map(_) => "__Map::new()".into(),
         RTy::Opt(_) => "None".into(),
-        RTy::Res(_, _) => "Ok(())".into(),
+        RTy::Res(a, _) => format!("Ok({})", default_value(a)),
         RTy::Named(n) => format!("{}::default()", n),
         _ => "()".into(),
     }
@@ -301,6 +328,8 @@ struct Emitter {
     globals: StdMap<String, RTy>,
     /// @global 定义暂存(两遍: 先全签名,再推全局类型)
     global_defs: Vec<crate::ast::GlobalStateDef>,
+    /// 模式解构临时绑定计数
+    tmp_n: usize,
     loop_depth: usize,
     vars: Vec<(String, RTy)>,
     cur_ret: RTy,
@@ -318,6 +347,7 @@ impl Emitter {
             boxed_edges: StdMap::new(),
             globals: StdMap::new(),
             global_defs: Vec::new(),
+            tmp_n: 0,
             loop_depth: 0,
             vars: Vec::new(),
             cur_ret: RTy::Unit,
@@ -472,6 +502,8 @@ impl Emitter {
                 return r.clone();
             }
         }
+        // cli_args 注入全局: Vec<String>
+        if name == "cli_args" { return RTy::Vec(Box::new(RTy::Str)); }
         // @global 回退(局部遮蔽全局)
         if let Some(t) = self.globals.get(name) {
             return t.clone();
@@ -681,7 +713,11 @@ impl Emitter {
                     self.set_var(&p.name, t.clone());
                     return format!("mut {}: {}", esc_name(&p.name), t.rust_str());
                 }
-                if let Some((_n, cargs)) = calls.iter().find(|(cn, _)| *cn == p.name) {
+                // 谎言兜底仅对原始型注解生效(容器/枚举注解诚实, 恒按注解)
+                let primitive_lie = matches!(t, RTy::I64 | RTy::F64 | RTy::Bool | RTy::Str);
+                let call_hit = calls.iter().find(|(cn, _)| *cn == p.name).map(|(_, cargs)| cargs.clone());
+                if primitive_lie && call_hit.is_some() {
+                    let cargs = call_hit.unwrap();
                     // 首个调用位的实参类型 -> 动态 Fn 签名; 返回值取外层函数返回型
                     let ats: Vec<String> = cargs.iter().map(|a| {
                         let t0 = self.infer(a);
@@ -710,12 +746,33 @@ impl Emitter {
             // 宿主 CLI 行为: main 返回值(如 Result)会被打印
             let mut out = format!("fn __aine_main(){} {{\n", ret);
             out.push_str(&self.block(&f.body, 1, BlockMode::FnBody));
+            // 主包装内同样补缺省尾(该分支提前 return, 走不到通用插入点)
+            if f.body.tail.is_none() && !matches!(f.body.stmts.last(), Some(Stmt::Return(_))) {
+                out.push_str("    return ");
+                out.push_str(&default_value(&self.cur_ret));
+                out.push_str(";\n");
+            }
             out.push_str("}\n\n");
-            out.push_str("fn main() {\n    println!(\"{}\", __aine_main().__disp());\n}\n\n");
+            // 宿主 CLI: 仅当 main 有显式非 Unit 返回才打印(裸落空 = Unit 不打印)
+            if self.body_has_nontrivial_return(&f.body) {
+                out.push_str("fn main() {\n    println!(\"{}\", __aine_main().__disp());\n}\n\n");
+            } else {
+                out.push_str("fn main() {\n    __aine_main();\n}\n\n");
+            }
             return out;
         }
         let mut out = format!("fn {}({}){} {{\n", name, params.join(", "), ret);
         out.push_str(&self.block(&f.body, 1, BlockMode::FnBody));
+        // 无尾即补缺省: return 先行的路径永不触达(不可达告警可接受), 落空路径对齐类型要求
+        if !matches!(self.cur_ret, RTy::Unit)
+            && f.body.tail.is_none()
+            && !matches!(f.body.stmts.last(), Some(Stmt::Return(_)))
+        {
+            // 无尾且末句非 return: 补缺省尾(lift-return 形式的块尾已自带返回)
+            out.push_str("    return ");
+            out.push_str(&default_value(&self.cur_ret));
+            out.push_str(";\n");
+        }
         out.push_str("}\n\n");
         out
     }
@@ -726,10 +783,16 @@ impl Emitter {
         let ind = "    ".repeat(depth);
         // 尾部 return 语句提升: return X 作为块尾表达式(never)在语句/表达式位都合法
         let mut lifted_ret: Option<&Stmt> = None;
+        let mut lifted_if: Option<&IfExpr> = None;
         let stmts: &[Stmt] = if b.tail.is_none() {
             match b.stmts.last() {
                 Some(s @ Stmt::Return(_)) => {
                     lifted_ret = Some(s);
+                    &b.stmts[..b.stmts.len() - 1]
+                }
+                Some(Stmt::If(i)) if mode == BlockMode::Expr => {
+                    // 值位块尾的 if: 提升为 if 表达式(臂型统一需要)
+                    lifted_if = Some(i);
                     &b.stmts[..b.stmts.len() - 1]
                 }
                 _ => &b.stmts[..],
@@ -751,6 +814,11 @@ impl Emitter {
                 }
                 None => out.push_str("return"),
             }
+            out.push('\n');
+        }
+        if let Some(i) = lifted_if {
+            out.push_str(&ind);
+            out.push_str(&self.if_expr(i));
             out.push('\n');
         }
         if let Some(t) = &b.tail {
@@ -789,8 +857,18 @@ impl Emitter {
                     Some(e) => {
                         let it0 = self.infer(e);
                         let it = self.concrete(&it0);
-                        self.set_var(&name, it.clone());
-                        let rhs = self.clone_if_container(e, &it);
+                        // 变量表登记: 注解优先(空数组字面量的推断会具体化成错误类型)
+                        if matches!(ann, RTy::Unknown) {
+                            self.set_var(&name, it.clone());
+                        } else {
+                            self.set_var(&name, ann.clone());
+                        }
+                        let rhs = if matches!(&**e, Expr::Closure { .. }) {
+                            self.clone_if_container(e, &it)
+                        } else {
+                            // 值语义: let 初始化 = 拷贝(源绑定保持可用)
+                            format!("{}.clone()", self.clone_if_container(e, &it))
+                        };
                         let tstr = if matches!(ann, RTy::Unknown) {
                             it.rust_str()
                         } else {
@@ -839,7 +917,8 @@ impl Emitter {
                 }
                 None => "return;".into(),
             },
-            Stmt::If(i) => self.emit_if(i, 0),
+            // 语句位 if 恒补分号(块尾无分号 if 会被 Rust 当尾表达式, 与非Unit返回型冲突)
+            Stmt::If(i) => format!("{};", self.emit_if(i, 0)),
             Stmt::While { cond, body, .. } => {
                 self.loop_depth += 1;
                 // while true 在新 rustc 中被拒,发射 loop
@@ -854,6 +933,7 @@ impl Emitter {
                     _ => "_".into(),
                 };
                 let it_ty = self.infer(iter);
+                eprintln!("[dbg] for-var {} it_ty={:?} iter={:?}", name, &it_ty, iter);
                 let saved = self.vars.clone();
                 let it_s = self.expr(iter);
                 let head = match &it_ty {
@@ -964,6 +1044,11 @@ impl Emitter {
                 if let Expr::Field { base, field, .. } = &**callee {
                     match field.as_str() {
                         "iter" | "filter" | "cloned" | "collect" => return self.infer(base),
+                        "to_i32" | "to_i64" | "len" | "codepoint_at" => return RTy::I64,
+                        "to_f64" => return RTy::F64,
+                        "trim" | "replace" => return RTy::Str,
+                        "split" => return RTy::Vec(Box::new(RTy::Str)),
+                        "contains" | "starts_with" | "ends_with" => return RTy::Bool,
                         "keys" => return RTy::Vec(Box::new(RTy::Str)),
                         "values" => return self.infer(base),
                         "map" => {
@@ -998,7 +1083,8 @@ impl Emitter {
                 };
                 if let Some(n) = &name {
                     if n == "read_file" || n == "input" { return RTy::Str; }
-                    if n == "read_bytes" { return RTy::Vec(Box::new(RTy::I64)); }
+                    if n == "read_bytes" || n == "base64_decode" || n == "to_bytes" { return RTy::Vec(Box::new(RTy::I64)); }
+                    if n == "base64_encode" { return RTy::Str; }
                     if n == "write_file" || n == "append_file" || n == "write_bytes" || n == "file_exists" { return RTy::Bool; }
                     if n == "read_line" { return RTy::Str; }
                     if n == "now" || n == "now_ms" { return RTy::I64; }
@@ -1083,21 +1169,36 @@ impl Emitter {
                 if b.tail.is_none() && matches!(b.stmts.last(), Some(Stmt::Return(_))) {
                     // 全 return 块 = never 位(非 Unit,防尾分号)
                     RTy::Unknown
+                } else if b.tail.is_none() {
+                    match b.stmts.last() {
+                        // 尾随 If 提升为值位: 用 If 值型(分歧让位)
+                        Some(Stmt::If(i)) => self.infer(&Expr::If(Box::new((**i).clone()))),
+                        _ => RTy::Unit,
+                    }
                 } else {
                     b.tail.as_ref().map(|t| self.infer(t)).unwrap_or(RTy::Unit)
                 }
             }
-            Expr::If(i) => i
-                .else_branch
-                .as_ref()
-                .map(|e| self.infer(e))
-                .unwrap_or_else(|| {
-                    i.then_branch
-                        .tail
-                        .as_ref()
-                        .map(|t| self.infer(t))
-                        .unwrap_or(RTy::Unit)
-                }),
+            Expr::If(i) => {
+                // 分歧侧让位: else 为全 return 块(never)时取 then 型,反之亦然
+                let tt = i
+                    .then_branch
+                    .tail
+                    .as_ref()
+                    .map(|t| self.infer(t))
+                    .unwrap_or(RTy::Unit);
+                match &i.else_branch {
+                    Some(e) => {
+                        let et = self.infer(e);
+                        match (&tt, &et) {
+                            (_, RTy::Unknown) => tt,
+                            (RTy::Unknown, _) => et,
+                            _ => et,
+                        }
+                    }
+                    None => tt,
+                }
+            }
             Expr::Match { arms, .. } => arms
                 .first()
                 .map(|a| self.infer(&a.value))
@@ -1133,9 +1234,20 @@ impl Emitter {
             }
             Expr::StructLit { name, fields } => {
                 let mut s = format!("{} {{", name.segments.join("::"));
+                let mut provided: Vec<String> = Vec::new();
                 for (fn2, fe) in fields {
                     // 值语义: 字段初始化 = 拷贝(防源绑定被 move)
                     s.push_str(&format!(" {}: {}.clone(),", fn2, self.expr(fe)));
+                    provided.push(fn2.clone());
+                }
+                // 宿主语义: 省略字段 = 缺省值(Nil 对应空默认)
+                let sn = name.segments.join("::");
+                if let Some(declared) = self.structs.get(&sn).cloned() {
+                    for (dfn, dft) in declared {
+                        if !provided.contains(&dfn) {
+                            s.push_str(&format!(" {}: {},", dfn, default_value(&dft)));
+                        }
+                    }
                 }
                 s.push_str(" }");
                 s
@@ -1222,17 +1334,18 @@ impl Emitter {
                 let b = self.expr(rhs);
                 return format!("__strcat(&{}.clone(), &{})", a, b);
             }
-            BinOp::Add | BinOp::Sub | BinOp::Mul => {
-                let op_s = match op { BinOp::Add => "__add", BinOp::Sub => "__sub", _ => "__mul" };
+            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem => {
                 let l_is_f = matches!(lt, RTy::F64);
                 let r_is_f = matches!(self.infer(rhs), RTy::F64);
                 if l_is_f || r_is_f {
-                    return format!("{} {} {}", self.expr(lhs), binop_str(op), self.expr(rhs));
+                    // 混合 int/f64: int 侧 as f64(宿主 f64 吸收) — 含 Div/Rem(f64 除法)
+                    let le = if l_is_f { self.expr(lhs) } else { format!("({}) as f64", self.expr(lhs)) };
+                    let re = if r_is_f { self.expr(rhs) } else { format!("({}) as f64", self.expr(rhs)) };
+                    return format!("{} {} {}", le, binop_str(op), re);
                 }
+                let op_s = match op { BinOp::Add => "__add", BinOp::Sub => "__sub", BinOp::Mul => "__mul", BinOp::Div => "__div", _ => "__rem" };
                 return format!("{}({}, {})", op_s, self.expr(lhs), self.expr(rhs));
             }
-            BinOp::Div => return format!("__div({}, {})", self.expr(lhs), self.expr(rhs)),
-            BinOp::Rem => return format!("__rem({}, {})", self.expr(lhs), self.expr(rhs)),
             BinOp::Shl => return format!("__shl({}, {})", self.expr(lhs), self.expr(rhs)),
             BinOp::Shr => return format!("__shr({}, {})", self.expr(lhs), self.expr(rhs)),
             _ => {}
@@ -1259,8 +1372,11 @@ impl Emitter {
                     let vt = self.infer(value);
                     if vt.is_container() && !matches!(vt, RTy::Str) && matches!(value, Expr::Ident { .. }) {
                         format!("{}.clone()", self.expr(value))
-                    } else {
+                    } else if matches!(value, Expr::Closure { .. }) {
                         self.expr(value)
+                    } else {
+                        // 值语义: 赋值 = 拷贝(源绑定保持可用)
+                        format!("{}.clone()", self.expr(value))
                     }
                 };
                 format!("{} = {}", ts, vs)
@@ -1282,6 +1398,11 @@ impl Emitter {
     fn index_emit(&mut self, base: &Expr, index: &Expr) -> String {
         let bt = self.infer(base);
         let bs = self.expr_no_clone(base);
+        // 括号下标 p[(0..4)] 解包(否则 Range 臂接不住)
+        let index = match index {
+            Expr::Paren(x) => x,
+            _ => index,
+        };
         if let Expr::Range { start, end } = index {
             let s0 = start.as_ref().map(|e| self.expr(e)).unwrap_or("0i64".into());
             match &bt {
@@ -1323,11 +1444,16 @@ impl Emitter {
             Expr::Ident { name, .. } => {
                 if let Some((en, ar)) = self.variant_of(name) {
                     if ar > 0 {
-                        // 递归直边载荷实参 -> Box::new
+                        // 递归直边载荷实参 -> Box::new; 其余实参值语义拷贝
                         let pts = self.variant_types.get(name).cloned().unwrap_or_default();
                         let mut vs: Vec<String> = Vec::new();
                         for (i, a) in args.iter().enumerate() {
-                            let es = self.expr(&a.expr);
+                            let es0 = self.expr(&a.expr);
+                            let es = if matches!(&a.expr, Expr::Closure { .. } | Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Str(_) | Expr::FmtStr(_)) || es0.ends_with(".clone()") {
+                                es0
+                            } else {
+                                format!("{}.clone()", es0)
+                            };
                             let boxed = pts.get(i).map(|pt| match pt {
                                 RTy::Named(n) => self.is_boxed_edge(&en, n),
                                 _ => false,
@@ -1356,6 +1482,26 @@ impl Emitter {
                         line.push_str(&ps.join(", "));
                         line.push(')');
                         return line;
+                    }
+                    "base64_encode" => {
+                        let a0 = args.first().map(|a| self.expr(&a.expr)).unwrap_or_default();
+                        let at = args.first().map(|a| self.infer(&a.expr)).unwrap_or(RTy::Unknown);
+                        if matches!(at, RTy::Vec(_)) {
+                            return format!("__b64_encode_bytes(&{})", a0);
+                        }
+                        return format!("__b64_encode_str(&{})", a0);
+                    }
+                    "base64_decode" => {
+                        let a0 = args.first().map(|a| self.expr(&a.expr)).unwrap_or_default();
+                        return format!("__b64_decode(&{})", a0);
+                    }
+                    "to_bytes" => {
+                        let a0 = args.first().map(|a| self.expr(&a.expr)).unwrap_or_default();
+                        return format!("__to_bytes(&{})", a0);
+                    }
+                    "bytes_to_string" => {
+                        let b = args.first().map(|a| self.expr(&a.expr)).unwrap_or_default();
+                        return format!("__bytes_to_string(&{})", b);
                     }
                     "read_file" => {
                         let p = args.first().map(|a| self.expr(&a.expr)).unwrap_or_default();
@@ -1408,10 +1554,104 @@ impl Emitter {
         let as_: Vec<String> = args.iter()
             .map(|a| {
                 let t = self.infer(&a.expr);
-                self.clone_if_container(&a.expr, &t)
+                let base = self.clone_if_container(&a.expr, &t);
+                // 值语义: 实参恒拷贝(闭包传指针, 字面量已自持)
+                if matches!(&a.expr, Expr::Closure { .. } | Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Str(_) | Expr::FmtStr(_)) {
+                    base
+                } else if base.ends_with(".clone()") {
+                    base
+                } else {
+                    format!("{}.clone()", base)
+                }
             })
             .collect();
         format!("{}({})", callee_s, as_.join(", "))
+    }
+
+    // 主函数显式返回检测(宿主 CLI: main 有非 Unit 返回值才打印; 裸 return 不算)
+    fn body_has_nontrivial_return(&self, b: &Block) -> bool {
+        for st in &b.stmts {
+            if self.stmt_has_nontrivial_return(st) { return true; }
+        }
+        if let Some(t) = &b.tail {
+            return self.expr_has_nontrivial_return(t);
+        }
+        false
+    }
+
+    fn body_has_any_return(&self, b: &Block) -> bool {
+        for st in &b.stmts {
+            let hit = match st {
+                Stmt::Return(_) => true,
+                Stmt::If(i) => self.expr_has_any_return(&i.cond) || self.body_has_any_return(&i.then_branch) || i.else_branch.as_ref().map(|e| self.expr_has_any_return(e)).unwrap_or(false),
+                Stmt::While { cond, body, .. } => self.expr_has_any_return(cond) || self.body_has_any_return(body),
+                Stmt::For { iter, body, .. } => self.expr_has_any_return(iter) || self.body_has_any_return(body),
+                Stmt::Expr(e) | Stmt::Defer(e) => self.expr_has_any_return(e),
+                Stmt::TryCatch(t) => self.body_has_any_return(&t.try_block) || self.body_has_any_return(&t.catch_block),
+                Stmt::Block(b2) => self.body_has_any_return(b2),
+                _ => false,
+            };
+            if hit { return true; }
+        }
+        if let Some(t) = &b.tail { return self.expr_has_any_return(t); }
+        false
+    }
+
+    fn expr_has_any_return(&self, e: &Expr) -> bool {
+        match e {
+            Expr::Block(b) => self.body_has_any_return(b),
+            Expr::If(i) => self.expr_has_any_return(&i.cond) || self.body_has_any_return(&i.then_branch) || i.else_branch.as_ref().map(|el| self.expr_has_any_return(el)).unwrap_or(false),
+            Expr::Match { scrutinee, arms, .. } => self.expr_has_any_return(scrutinee) || arms.iter().any(|a| self.expr_has_any_return(&a.value)),
+            Expr::Binary { lhs, rhs, .. } => self.expr_has_any_return(lhs) || self.expr_has_any_return(rhs),
+            Expr::Assign { target, value, .. } => self.expr_has_any_return(target) || self.expr_has_any_return(value),
+            Expr::Call { callee, args, .. } => self.expr_has_any_return(callee) || args.iter().any(|a| self.expr_has_any_return(&a.expr)),
+            Expr::Field { base, .. } | Expr::Index { base, .. } | Expr::Unary { expr: base, .. } | Expr::Try(base) | Expr::Paren(base) => self.expr_has_any_return(base),
+            Expr::Closure { body, .. } => self.expr_has_any_return(body),
+            _ => false,
+        }
+    }
+
+    fn stmt_has_nontrivial_return(&self, st: &Stmt) -> bool {
+        match st {
+            // Return(Some) 本身即显式值返回(嵌套表达式扫描无意义)
+            Stmt::Return(Some(_)) => true,
+            Stmt::Return(None) => false,
+            Stmt::If(i) => {
+                if self.expr_has_nontrivial_return(&i.cond) { return true; }
+                if self.body_has_nontrivial_return(&i.then_branch) { return true; }
+                if let Some(el) = &i.else_branch { return self.expr_has_nontrivial_return(el); }
+                false
+            }
+            Stmt::While { cond, body, .. } => self.expr_has_nontrivial_return(cond) || self.body_has_nontrivial_return(body),
+            Stmt::For { iter, body, .. } => self.expr_has_nontrivial_return(iter) || self.body_has_nontrivial_return(body),
+            Stmt::Expr(e) => self.expr_has_nontrivial_return(e),
+            Stmt::TryCatch(t) => self.body_has_nontrivial_return(&t.try_block) || self.body_has_nontrivial_return(&t.catch_block),
+            Stmt::Block(b) => self.body_has_nontrivial_return(b),
+            _ => false,
+        }
+    }
+
+    fn expr_has_nontrivial_return(&self, e: &Expr) -> bool {
+        match e {
+            Expr::Block(b) => self.body_has_nontrivial_return(b),
+            Expr::If(i) => {
+                if self.expr_has_nontrivial_return(&i.cond) { return true; }
+                if self.body_has_nontrivial_return(&i.then_branch) { return true; }
+                if let Some(el) = &i.else_branch { return self.expr_has_nontrivial_return(el); }
+                false
+            }
+            Expr::Match { scrutinee, arms, .. } => {
+                if self.expr_has_nontrivial_return(scrutinee) { return true; }
+                arms.iter().any(|a| self.expr_has_nontrivial_return(&a.value))
+            }
+            Expr::Binary { lhs, rhs, .. } => self.expr_has_nontrivial_return(lhs) || self.expr_has_nontrivial_return(rhs),
+            Expr::Assign { target, value, .. } => self.expr_has_nontrivial_return(target) || self.expr_has_nontrivial_return(value),
+            Expr::Call { callee, args, .. } => self.expr_has_nontrivial_return(callee) || args.iter().any(|a| self.expr_has_nontrivial_return(&a.expr)),
+            Expr::Field { base, .. } | Expr::Index { base, .. } | Expr::Unary { expr: base, .. } | Expr::Try(base) | Expr::Paren(base) => self.expr_has_nontrivial_return(base),
+            Expr::Array(items) | Expr::Tuple(items) => items.iter().any(|x| self.expr_has_nontrivial_return(x)),
+            Expr::Closure { body, .. } => self.expr_has_nontrivial_return(body),
+            _ => false,
+        }
     }
 
     // W54-e: 形参作函数值调用 — 扫描体内 Call{callee: Ident(形参)} 收集 (形参名, 实参列表)
@@ -1501,21 +1741,22 @@ impl Emitter {
                 _ => format!("({}).sum::<i64>()", bs),
             },
             (RTy::Vec(_), "get") => format!("{}.get(({}) as usize).cloned()", bs, a0.unwrap_or_default()),
-            (RTy::Vec(_), "push") => format!("__push(&mut {}, {})", bs, a0.unwrap_or_default()),
+            // 实参先求值再借用(显式 &mut 无 two-phase)
+            (RTy::Vec(_), "push") => format!("{{ let __pv = ({}).clone(); __push(&mut {}, __pv) }}", a0.unwrap_or_default(), bs),
             (RTy::Vec(_), "pop") => format!("__pop(&mut {})", bs),
             (RTy::Vec(_), "set") => {
                 let i_s = self.expr(&args[0].expr);
                 let v_s = args.get(1).map(|a| self.expr(&a.expr)).unwrap_or_default();
-                format!("__vset(&mut {}, {}, {})", bs, i_s, v_s)
+                format!("{{ let __si = ({}).clone(); let __sv = ({}).clone(); __vset(&mut {}, __si, __sv) }}", i_s, v_s, bs)
             }
             (RTy::Vec(_), "insert") => {
                 let i_s = self.expr(&args[0].expr);
                 let v_s = args.get(1).map(|a| self.expr(&a.expr)).unwrap_or_default();
-                format!("__vinsert(&mut {}, {}, {})", bs, i_s, v_s)
+                format!("{{ let __ii = ({}).clone(); let __iv = ({}).clone(); __vinsert(&mut {}, __ii, __iv) }}", i_s, v_s, bs)
             }
             (RTy::Vec(_), "remove") => {
                 let i_s = self.expr(&args[0].expr);
-                format!("__vremove(&mut {}, {})", bs, i_s)
+                format!("{{ let __ri = ({}).clone(); __vremove(&mut {}, __ri) }}", i_s, bs)
             }
             (RTy::Vec(_), "contains") => format!("{}.contains(&{})", bs, a0.unwrap_or_default()),
             (RTy::Vec(_), "concat") => format!("__vconcat(&{}, &{})", bs, a0.unwrap_or_default()),
@@ -1528,7 +1769,7 @@ impl Emitter {
             (RTy::Map(_), "set") => {
                 let k = a0.unwrap_or_default();
                 let v = args.get(1).map(|a| self.expr(&a.expr)).unwrap_or_default();
-                format!("{}.insert({}, {})", bs, k, v)
+                format!("{}.insert({}.clone(), ({}).clone())", bs, k, v)
             }
             (RTy::Map(_), "get") => format!("{}.get(&{}).cloned()", bs, a0.unwrap_or_default()),
             (RTy::Map(_), "contains") => format!("{}.contains(&{})", bs, a0.unwrap_or_default()),
@@ -1553,6 +1794,11 @@ impl Emitter {
             (RTy::Str, "to_i32") | (RTy::Str, "to_i64") => {
                 format!("{}.trim().parse::<i64>().unwrap_or(0)", bs)
             }
+            (RTy::I64, "to_f64") => format!("(({}) as f64)", bs),
+            (RTy::I64, "to_i32") | (RTy::I64, "to_i64") => format!("({})", bs),
+            (RTy::F64, "to_i32") | (RTy::F64, "to_i64") => format!("(({}) as i64)", bs),
+            (RTy::F64, "to_f64") => format!("{}", bs),
+            (RTy::F64, "len") => format!("(({}).to_string().len() as i64)", bs),
             (RTy::Str, "to_f64") => format!("{}.trim().parse::<f64>().unwrap_or(0.0)", bs),
             (RTy::Str, "codepoint_at") => format!(
                 "{}.chars().nth(({}) as usize).map(|c| c as i64).unwrap_or(0)",
@@ -1649,6 +1895,18 @@ impl Emitter {
         out
     }
 
+    // match 检察体发射: 容器/枚举/结构体一律拷贝(值语义), 其他裸发
+    fn match_scrutinee(&mut self, scrutinee: &Expr, st: &RTy) -> String {
+        let base = self.clone_if_container(scrutinee, st);
+        if base.ends_with(".clone()") {
+            base
+        } else if matches!(st, RTy::Vec(_) | RTy::Map(_) | RTy::Named(_) | RTy::Str | RTy::Opt(_) | RTy::Res(_, _)) {
+            format!("({}).clone()", base)
+        } else {
+            base
+        }
+    }
+
     // stmt_mode: match 作语句(值丢弃) — 臂体块走 Stmt 位,裸表达式臂包成分号块
     fn match_expr(&mut self, scrutinee: &Expr, arms: &[MatchArm], stmt_mode: bool) -> String {
         let st = self.infer(scrutinee).unboxed();
@@ -1656,11 +1914,12 @@ impl Emitter {
             RTy::Named(n) => n.clone(),
             _ => String::new(),
         };
-        let mut out = format!("match {} {{", self.clone_if_container(scrutinee, &st));
+        // 宿主语义: match 检察体 = 值拷贝(枚举臂内解构 move 不影响源)
+        let mut out = format!("match {} {{", self.match_scrutinee(scrutinee, &st));
         for arm in arms {
             // 模式绑定类型注册(Some(c)/Ok(v)/具名变体/结构体解构); BoxedT 剥箱
             self.register_pattern_binds(&arm.pat, &st.unboxed());
-            let pat = self.pattern(&arm.pat, &enum_name);
+            let (pat, pat_lets) = self.pattern2(&arm.pat, &enum_name);
             if let Some(_dead) = pat.strip_prefix("__DEAD::") {
                 // 假臂: 字段绑定以 String 注入(永不匹配,但臂体可编译); 语句位同样适用
                 let bnames = match &arm.pat {
@@ -1672,7 +1931,7 @@ impl Emitter {
                 };
                 let mut body = self.expr(&arm.value);
                 let lets: Vec<String> = bnames.iter().map(|b| format!("let {}: String = String::new();", esc_name(b))).collect();
-                body = format!("{{ {} {} }}", lets.join(" "), body);
+                body = format!("{{ {} {} {} }}", pat_lets.join(" "), lets.join(" "), body);
                 out.push_str(&format!(" _ if false => {},", body));
                 continue;
             }
@@ -1681,16 +1940,41 @@ impl Emitter {
                 let body = match &arm.value {
                     Expr::Block(b) => {
                         let inner = self.block(b, 0, BlockMode::Stmt);
-                        format!("{{ {} }}", inner.trim_end())
+                        format!("{{ {} {} }}", pat_lets.join(" "), inner.trim_end())
                     }
-                    other => format!("{{ {}; }}", self.expr(other)),
+                    other => format!("{{ {} {}; }}", pat_lets.join(" "), self.expr(other)),
                 };
                 out.push_str(&format!(" {} => {},", pat, body));
                 continue;
             }
             let body = self.expr(&arm.value);
-            out.push_str(&format!(" {} => {},", pat, body));
+            if pat_lets.is_empty() {
+                out.push_str(&format!(" {} => {},", pat, body));
+            } else {
+                out.push_str(&format!(" {} => {{ {} {} }},", pat, pat_lets.join(" "), body));
+            }
         }
+            // W34 缺臂语义对齐: 用户枚举无通配且未覆盖全部变体 -> 补 panic 臂(宿主/C 路同款运行时 panic)
+            if let RTy::Named(en2) = &st {
+                if let Some(variants) = self.enums.get(en2).cloned() {
+                    let mut has_wild = false;
+                    let mut covered: Vec<String> = Vec::new();
+                    for arm in arms {
+                        match &arm.pat {
+                            crate::ast::Pattern::Wildcard => has_wild = true,
+                            crate::ast::Pattern::Ident { name, .. } => { if name == "_" { has_wild = true; } else { covered.push(name.clone()); } }
+                            crate::ast::Pattern::Variant { name, .. } => covered.push(name.clone()),
+                            _ => {}
+                        }
+                    }
+                    if !has_wild {
+                        let missing: Vec<String> = variants.iter().filter(|(v, _)| !covered.contains(v)).map(|(v, _)| v.clone()).collect();
+                        if !missing.is_empty() {
+                            out.push_str(&format!(" _ => {{ eprintln!(\"match \u{7f3a}\u{81c2}: {}::{}\"); std::process::exit(101); }}, ", en2, missing.join(",")));
+                        }
+                    }
+                }
+            }
         out.push_str(" }");
         out
     }
@@ -1744,18 +2028,26 @@ impl Emitter {
     }
 
     fn pattern(&mut self, p: &Pattern, enum_name: &str) -> String {
+        let (s, lets) = self.pattern2(p, enum_name);
+        debug_assert!(lets.is_empty(), "顶层 pattern() 不应产生解构链");
+        s
+    }
+
+    // 模式发射 v2: 返回 (模式串, 前置 let-else 解构语句)。
+    // Box 载荷槽上的复杂子模式(Box 无法在模式位解引用) -> 绑定 __bxN + (*x).clone() let-else 链(W54-a)
+    fn pattern2(&mut self, p: &Pattern, enum_name: &str) -> (String, Vec<String>) {
         match p {
-            Pattern::Wildcard => "_".into(),
+            Pattern::Wildcard => ("_".into(), Vec::new()),
             Pattern::Ident { name, .. } => {
                 if name == "_" {
-                    "_".into()
+                    ("_".into(), Vec::new())
                 } else if enum_name.is_empty() {
                     match self.variant_of(name) {
-                        Some((en, _)) => format!("{}::{}", en, esc_name(name)),
-                        None => esc_name(name),
+                        Some((en, _)) => (format!("{}::{}", en, esc_name(name)), Vec::new()),
+                        None => (esc_name(name), Vec::new()),
                     }
                 } else {
-                    format!("{}::{}", enum_name, esc_name(name))
+                    (format!("{}::{}", enum_name, esc_name(name)), Vec::new())
                 }
             }
             Pattern::Variant { name, fields } => {
@@ -1764,44 +2056,97 @@ impl Emitter {
                     let fnames: Vec<String> = self.structs[name].iter().map(|(n, _)| n.clone()).collect();
                     if fnames.len() == fields.len() {
                         let ps: Vec<String> = fields.iter().zip(fnames)
-                            .map(|(f, n)| format!("{}: {}", n, self.pattern(f, ""))).collect();
-                        return format!("{} {{ {} }}", esc_name(name), ps.join(", "));
+                            .map(|(f, n)| format!("{}: {}", n, self.pattern2(f, "").0)).collect();
+                        return (format!("{} {{ {} }}", esc_name(name), ps.join(", ")), Vec::new());
                     }
                 }
                 // std 容器变体模式直通(绑定字段必须保留)
                 if matches!(name.as_str(), "Some" | "None" | "Ok" | "Err") {
                     if name == "None" || fields.is_empty() {
-                        return esc_name(name);
+                        return (esc_name(name), Vec::new());
                     }
-                    let ps: Vec<String> = fields.iter().map(|f| self.pattern(f, "")).collect();
-                    return format!("{}({})", esc_name(name), ps.join(", "));
+                    // String 载荷槽的字符串字面量模式 -> 绑定+臂级守卫(Rust 无 String 字面量模式)
+                    let mut ps: Vec<String> = Vec::new();
+                    let mut guards: Vec<String> = Vec::new();
+                    for f in fields {
+                        if let Pattern::Lit(Expr::Str(sv)) = f {
+                            let bind = format!("__sl{}", self.tmp_n);
+                            self.tmp_n += 1;
+                            ps.push(bind.clone());
+                            guards.push(format!("{} == {}", bind, rust_str_lit(sv)));
+                        } else {
+                            ps.push(self.pattern2(f, "").0);
+                        }
+                    }
+                    let pat_s = format!("{}({})", esc_name(name), ps.join(", "));
+                    if guards.is_empty() {
+                        return (pat_s, Vec::new());
+                    }
+                    return (format!("{} if {}", pat_s, guards.join(" && ")), Vec::new());
                 }
                 let known = match self.variant_of(name) {
                     Some((e2, _)) => format!("{}::", e2),
                     None => if enum_name.is_empty() { String::new() } else { format!("{}::", enum_name) },
                 };
                 if known.is_empty() {
-                    // 未知变体名(如 AResult/AOption): 宿主永不匹配,发射守卫假臂;
-                    // 臂体引用的字段绑定用 Default 兜底,由 match_expr 包装
-                    return format!("__DEAD::{}", name);
+                    return (format!("__DEAD::{}", name), Vec::new());
                 }
                 if fields.is_empty() {
-                    format!("{}{}", known, esc_name(name))
+                    (format!("{}{}", known, esc_name(name)), Vec::new())
                 } else {
-                    let ps: Vec<String> = fields.iter().map(|f| self.pattern(f, "")).collect();
-                    format!("{}{}({})", known, esc_name(name), ps.join(", "))
+                    // 载荷类型(BoxedT = 递归直边槽)
+                    let pts = self.variant_types.get(name).cloned().unwrap_or_default();
+                    let owner = self.variant_of(name).map(|(e2, _)| e2).unwrap_or_default();
+                    let mut parts: Vec<String> = Vec::new();
+                    let mut lets: Vec<String> = Vec::new();
+                    let mut guards: Vec<String> = Vec::new();
+                    for (i, (f, pt)) in fields.iter().zip(pts.iter()).enumerate() {
+                        // String 载荷槽的字符串字面量模式 -> 绑定+臂级守卫
+                        if let Pattern::Lit(Expr::Str(sv)) = f {
+                            let bind = format!("__sl{}", self.tmp_n);
+                            self.tmp_n += 1;
+                            parts.push(bind.clone());
+                            guards.push(format!("{} == {}", bind, rust_str_lit(sv)));
+                            continue;
+                        }
+                        let boxed = match pt {
+                            RTy::Named(n2) => self.is_boxed_edge(&owner, n2),
+                            _ => false,
+                        };
+                        let complex = !matches!(f, Pattern::Ident { .. } | Pattern::Wildcard);
+                        if boxed && complex {
+                            // Box 槽位复杂子模式: 绑定 + let-else 解构(值语义 clone)
+                            let bind = format!("__bx{}", self.tmp_n);
+                            self.tmp_n += 1;
+                            parts.push(bind.clone());
+                            let sub_en = match pt { RTy::Named(n2) => n2.clone(), _ => String::new() };
+                            let (sub_pat, sub_lets) = self.pattern2(f, &sub_en);
+                            lets.push(format!("let {} = (*{}).clone() else {{ unreachable!() }};", sub_pat, bind));
+                            lets.extend(sub_lets);
+                        } else {
+                            let (s, l) = self.pattern2(f, "");
+                            parts.push(s);
+                            lets.extend(l);
+                        }
+                    }
+                    let pat_s = format!("{}{}({})", known, esc_name(name), parts.join(", "));
+                    if guards.is_empty() {
+                        (pat_s, lets)
+                    } else {
+                        (format!("{} if {}", pat_s, guards.join(" && ")), lets)
+                    }
                 }
             }
             Pattern::Lit(e) => {
                 match e {
                     // 字符串模式位必须裸字面量(.to_string() 是表达式)
-                    Expr::Str(s2) => rust_str_lit(s2),
-                    Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) => self.expr(e),
+                    Expr::Str(s2) => (rust_str_lit(s2), Vec::new()),
+                    Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) => (self.expr(e), Vec::new()),
                     // 复杂模式(宿主运行时求值) -> 绑定+相等守卫
-                    _ => format!("__pl if __pl == {}", self.expr(e)),
+                    _ => (format!("__pl if __pl == {}", self.expr(e)), Vec::new()),
                 }
             }
-            Pattern::Path(p) => format!("{}::{}", enum_name, p.segments.join("::")),
+            Pattern::Path(p) => (format!("{}::{}", enum_name, p.segments.join("::")), Vec::new()),
         }
     }
 }

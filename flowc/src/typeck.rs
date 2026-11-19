@@ -178,6 +178,8 @@ pub struct TypeChecker<'a> {
     structs: HashMap<String, Vec<(String, Ty)>>,
     /// enum name -> variants
     enums: HashMap<String, Vec<String>>,
+    /// 变体名 -> 载荷类型(SD-10 模式绑定传导)
+    variant_payloads: HashMap<String, Vec<Ty>>,
     /// variant name -> enum type name
     enum_variants: HashMap<String, String>,
     /// interface name -> implementing types (from `implement I for T`)
@@ -207,6 +209,7 @@ impl<'a> TypeChecker<'a> {
             resolution,
             structs: HashMap::new(),
             enums: HashMap::new(),
+            variant_payloads: HashMap::new(),
             fns: HashMap::new(),
             env: Vec::new(),
             cur_ret: None,
@@ -281,10 +284,12 @@ impl<'a> TypeChecker<'a> {
                         self.not_send.insert(name.clone());
                     }
                 }
-                HirItem::Enum { name, variants, .. } => {
+                HirItem::Enum { name, variants, payloads, .. } => {
                     self.enums.insert(name.clone(), variants.clone());
-                    for v in variants {
+                    for (v, pts) in variants.iter().zip(payloads.iter()) {
                         self.enum_variants.insert(v.clone(), name.clone());
+                        let tys: Vec<Ty> = pts.iter().map(|t| self.type_of_type(t)).collect();
+                        self.variant_payloads.insert(v.clone(), tys);
                     }
                 }
                 HirItem::Fn(f) => {
@@ -502,6 +507,47 @@ impl<'a> TypeChecker<'a> {
     }
 
     /// infer an expression again (type map only, no side effects)
+    /// 模式绑定类型传导: 沿模式树按被扫者类型给绑定赋真型(SD-10)
+    fn bind_pat(&mut self, pat: &Pattern, ty: &Ty) {
+        match pat {
+            Pattern::Ident { span, .. } => {
+                if let Some(sym) = self.resolution.bindings.get(span) {
+                    self.set_env(*sym, ty.clone());
+                }
+            }
+            Pattern::Wildcard | Pattern::Lit(_) | Pattern::Path(_) => {}
+            Pattern::Variant { name, fields } => {
+                // std 容器变体: Some/Ok/Err 单载荷直取
+                if fields.len() == 1 {
+                    match (name.as_str(), ty) {
+                        ("Some", Ty::OptionT(inner)) | ("Ok", Ty::ResultT(inner, _)) => {
+                            self.bind_pat(&fields[0], inner);
+                            return;
+                        }
+                        ("Err", Ty::ResultT(_, e)) => {
+                            self.bind_pat(&fields[0], e);
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
+                // 具名变体: 载荷类型表
+                if let Some(pts) = self.variant_payloads.get(name).cloned() {
+                    for (f, pt) in fields.iter().zip(pts.iter()) {
+                        self.bind_pat(f, pt);
+                    }
+                    return;
+                }
+                // 结构体位置解构(AEntry(k, v) 形态)
+                if let Some(fs) = self.structs.get(name).cloned() {
+                    for (f, (_fn2, ft)) in fields.iter().zip(fs.iter()) {
+                        self.bind_pat(f, ft);
+                    }
+                }
+            }
+        }
+    }
+
     fn infer_expr_preserve(&mut self, expr: &Expr) -> Ty {
         self.infer_expr(expr)
     }
@@ -791,11 +837,8 @@ impl<'a> TypeChecker<'a> {
                 let mut result = Ty::Unknown;
                 for arm in arms {
                     self.push_scope();
-                    for (_, span) in arm.pat.bindings() {
-                        if let Some(sym) = self.resolution.bindings.get(&span) {
-                            self.set_env(*sym, Ty::Unknown);
-                        }
-                    }
+                    // SD-10: 模式绑定载荷类型传导(此前一律 Unknown, 放过实参型错配)
+                    self.bind_pat(&arm.pat, &st);
                     let t = self.infer_expr(&arm.value);
                     // arms that diverge (block ending in return) never produce
                     // a value — they must not poison the match result type

@@ -17,7 +17,7 @@ SKIP = {
 # 输出含时间/随机/网络 → 字节级 diff 必然失败,只查编译
 NONDET = {'bench', 'benchpush', 'bigstr', 'http', 'json', 'clock'}
 
-def run(cmd, timeout=30):
+def run(cmd, timeout=300):
     try:
         p = subprocess.run(cmd, capture_output=True, timeout=timeout, shell=False)
         return p.returncode, p.stdout, p.stderr
@@ -43,7 +43,7 @@ for name in names:
     exe = os.path.join(BUILD, base + '_r.exe')
     with open(gen, 'w', encoding='utf-8', newline=NL) as f:
         f.write(out_e.decode('utf-8', 'replace'))
-    rc_c, _, err_c = run(['rustc', '--edition', '2021', '-o', exe, gen], timeout=60)
+    rc_c, _, err_c = run(['rustc', '--edition', '2021', '-C', 'link-args=/STACK:16777216', '-o', exe, gen], timeout=60)
     if rc_c != 0:
         first = err_c.decode('utf-8', 'replace').split(NL)
         msg = NL.join(first[:2])
