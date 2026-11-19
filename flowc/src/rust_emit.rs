@@ -1044,6 +1044,27 @@ impl Emitter {
                 if let Expr::Field { base, field, .. } = &**callee {
                     match field.as_str() {
                         "iter" | "filter" | "cloned" | "collect" => return self.infer(base),
+                        // Map 取值族: 按接收者载荷类型回填(get -> Opt(elem), 模式绑定下游类型自洽)
+                        "get" => {
+                            return match self.infer(base) {
+                                RTy::Map(v) => RTy::Opt(Box::new((*v).clone())),
+                                RTy::Vec(e) => RTy::Opt(Box::new((*e).clone())),
+                                _ => RTy::Unknown,
+                            };
+                        }
+                        "set" | "insert" => {
+                            return match self.infer(base) {
+                                RTy::Map(v) => *v,
+                                _ => RTy::Unknown,
+                            };
+                        }
+                        "remove" | "pop" => {
+                            return match self.infer(base) {
+                                RTy::Map(v) => RTy::Opt(Box::new((*v).clone())),
+                                RTy::Vec(e) => RTy::Opt(Box::new((*e).clone())),
+                                _ => RTy::Unknown,
+                            };
+                        }
                         "to_i32" | "to_i64" | "len" | "codepoint_at" => return RTy::I64,
                         "to_f64" => return RTy::F64,
                         "trim" | "replace" => return RTy::Str,

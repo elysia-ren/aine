@@ -271,6 +271,23 @@ fn run_rust_emit(path: &str) -> ExitCode {
         eprintln!("error: {}", e);
         return ExitCode::FAILURE;
     }
+    // W54-h: rust 发射与 run 同门禁 — resolve + typeck 错误程序拒绝发射
+    let resolver = Resolver::new(&lexed.tokens);
+    let resolved = resolver.resolve(&program);
+    if resolved.diagnostics.has_errors() {
+        for d in &resolved.diagnostics.diagnostics {
+            eprint!("{}", render(d, &source, path));
+        }
+        return ExitCode::FAILURE;
+    }
+    let checker = TypeChecker::new(&resolved.program, &resolved.resolution, &lexed.tokens);
+    let typeck = checker.check();
+    if typeck.diagnostics.has_errors() {
+        for d in &typeck.diagnostics.diagnostics {
+            eprint!("{}", render(d, &source, path));
+        }
+        return ExitCode::FAILURE;
+    }
     print!("{}", aine::rust_emit::emit_program(&program));
     ExitCode::SUCCESS
 }
