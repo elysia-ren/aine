@@ -908,6 +908,44 @@ impl Emitter {
             }
             // 表达式语句: match 走语句位(臂值归 (),防臂型不统一)
             Stmt::Expr(e) => {
+                // 语句位容器方法 = 原生变异(push 系不再 v.clone() 整容器, O(n) -> O(1))
+                if let Expr::Call { callee, args, .. } = &**e {
+                    if let Expr::Field { base, field, .. } = &**callee {
+                        let bs = self.expr_no_clone(base);
+                        let a0 = args.first().map(|a| self.expr(&a.expr));
+                        match field.as_str() {
+                            "push" if matches!(self.infer(base), RTy::Vec(_)) => {
+                                // 值语义: 元素拷贝(循环内 push 后源绑定仍可用)
+                                let pv = a0.unwrap_or_default();
+                                let pv = if self.is_fresh_expr(&args[0].expr) { pv } else { format!("{}.clone()", pv) };
+                                return format!("{}.push({});", bs, pv);
+                            }
+                            "pop" if matches!(self.infer(base), RTy::Vec(_)) => {
+                                return format!("{}.pop();", bs);
+                            }
+                            "clear" if matches!(self.infer(base), RTy::Vec(_) | RTy::Map(_)) => {
+                                return format!("{}.clear();", bs);
+                            }
+                            "set" if matches!(self.infer(base), RTy::Vec(_)) && args.len() == 2 => {
+                                let i_s = self.expr(&args[0].expr);
+                                let vs = self.expr(&args[1].expr);
+                                let vs = if self.is_fresh_expr(&args[1].expr) { vs } else { format!("{}.clone()", vs) };
+                                return format!("{}[({}) as usize] = {};", bs, i_s, vs);
+                            }
+                            "insert" if matches!(self.infer(base), RTy::Vec(_)) && args.len() == 2 => {
+                                let i_s = self.expr(&args[0].expr);
+                                let vs = self.expr(&args[1].expr);
+                                let vs = if self.is_fresh_expr(&args[1].expr) { vs } else { format!("{}.clone()", vs) };
+                                return format!("{}.insert(({}) as usize, {});", bs, i_s, vs);
+                            }
+                            "remove" if matches!(self.infer(base), RTy::Vec(_)) && args.len() == 1 => {
+                                let i_s = self.expr(&args[0].expr);
+                                return format!("{}.remove(({}) as usize);", bs, i_s);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 if let Expr::Match { scrutinee, arms, .. } = &**e {
                     return format!("{};", self.match_expr(scrutinee, arms, true));
                 }
@@ -938,7 +976,6 @@ impl Emitter {
                     _ => "_".into(),
                 };
                 let it_ty = self.infer(iter);
-                eprintln!("[dbg] for-var {} it_ty={:?} iter={:?}", name, &it_ty, iter);
                 let saved = self.vars.clone();
                 let it_s = self.expr(iter);
                 let head = match &it_ty {
@@ -1384,6 +1421,15 @@ impl Emitter {
         let ts = self.expr_no_clone(target);
         match op {
             AssignOp::Assign => {
+                // 拼接 peephole: x = x + y -> x.push_str(&y)(immutable 拼接 O(n) -> O(y), 语句位等价)
+                if let Expr::Binary { op: BinOp::Add, lhs, rhs } = value {
+                    if let (Expr::Ident { name: xn, .. }, Expr::Ident { name: ln, .. }) = (&*target, &**lhs) {
+                        if xn == ln && matches!(self.infer(lhs), RTy::Str) {
+                            let l_raw = self.expr_no_clone(target);
+                            return format!("{}.push_str(&{});", l_raw, self.expr(rhs));
+                        }
+                    }
+                }
                 // Map 索引赋值: m[k] = v -> insert
                 if let Expr::Index { base, index } = target {
                     if matches!(self.infer(base), RTy::Map(_)) {
