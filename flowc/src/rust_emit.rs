@@ -810,7 +810,12 @@ impl Emitter {
             match re {
                 Some(e) => {
                     let t = self.infer(e);
-                    out.push_str(&format!("return {}", self.clone_if_container(e, &t)));
+                    let rs = if self.is_fresh_expr(e) {
+                        self.clone_if_container(e, &t)
+                    } else {
+                        format!("{}.clone()", self.clone_if_container(e, &t))
+                    };
+                    out.push_str(&format!("return {}", rs));
                 }
                 None => out.push_str("return"),
             }
@@ -863,10 +868,10 @@ impl Emitter {
                         } else {
                             self.set_var(&name, ann.clone());
                         }
-                        let rhs = if matches!(&**e, Expr::Closure { .. }) {
+                        let rhs = if matches!(&**e, Expr::Closure { .. }) || self.is_fresh_expr(e) {
                             self.clone_if_container(e, &it)
                         } else {
-                            // 值语义: let 初始化 = 拷贝(源绑定保持可用)
+                            // 值语义: let 初始化 = 拷贝(仅别名可能时; 新造临时免拷)
                             format!("{}.clone()", self.clone_if_container(e, &it))
                         };
                         let tstr = if matches!(ann, RTy::Unknown) {
@@ -1353,7 +1358,7 @@ impl Emitter {
             BinOp::Add if matches!(lt, RTy::Str) => {
                 let a = self.expr(lhs);
                 let b = self.expr(rhs);
-                return format!("__strcat(&{}.clone(), &{})", a, b);
+                return format!("__strcat(&{}, &{})", a, b);
             }
             BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem => {
                 let l_is_f = matches!(lt, RTy::F64);
@@ -1393,10 +1398,10 @@ impl Emitter {
                     let vt = self.infer(value);
                     if vt.is_container() && !matches!(vt, RTy::Str) && matches!(value, Expr::Ident { .. }) {
                         format!("{}.clone()", self.expr(value))
-                    } else if matches!(value, Expr::Closure { .. }) {
+                    } else if matches!(value, Expr::Closure { .. }) || self.is_fresh_expr(value) {
                         self.expr(value)
                     } else {
-                        // 值语义: 赋值 = 拷贝(源绑定保持可用)
+                        // 值语义: 赋值 = 拷贝(仅别名可能时; 新造临时免拷)
                         format!("{}.clone()", self.expr(value))
                     }
                 };
@@ -1470,7 +1475,7 @@ impl Emitter {
                         let mut vs: Vec<String> = Vec::new();
                         for (i, a) in args.iter().enumerate() {
                             let es0 = self.expr(&a.expr);
-                            let es = if matches!(&a.expr, Expr::Closure { .. } | Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Str(_) | Expr::FmtStr(_)) || es0.ends_with(".clone()") {
+                            let es = if self.is_fresh_expr(&a.expr) || es0.ends_with(".clone()") {
                                 es0
                             } else {
                                 format!("{}.clone()", es0)
@@ -1577,7 +1582,7 @@ impl Emitter {
                 let t = self.infer(&a.expr);
                 let base = self.clone_if_container(&a.expr, &t);
                 // 值语义: 实参恒拷贝(闭包传指针, 字面量已自持)
-                if matches!(&a.expr, Expr::Closure { .. } | Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Str(_) | Expr::FmtStr(_)) {
+                if self.is_fresh_expr(&a.expr) {
                     base
                 } else if base.ends_with(".clone()") {
                     base
@@ -1914,6 +1919,17 @@ impl Emitter {
             }
         }
         out
+    }
+
+    // 新造临时判定: Call/Binary/字面量/构造等结果无别名, 拷贝纯属浪费(性能)
+    fn is_fresh_expr(&self, e: &Expr) -> bool {
+        match e {
+            Expr::Call { .. } | Expr::Binary { .. } | Expr::Unary { .. } | Expr::StructLit { .. }
+            | Expr::FmtStr(_) | Expr::Str(_) | Expr::Int(_) | Expr::Float(_) | Expr::Bool(_)
+            | Expr::Array(_) | Expr::Tuple(_) | Expr::Closure { .. } | Expr::Range { .. } => true,
+            Expr::Paren(x) => self.is_fresh_expr(x),
+            _ => false,
+        }
     }
 
     // match 检察体发射: 容器/枚举/结构体一律拷贝(值语义), 其他裸发
